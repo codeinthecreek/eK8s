@@ -99,6 +99,10 @@ repo/
                           # graceful shutdown. Never touched by mutation.
   internal/hashcore/     # fixed core. Never in mutation scope.
   internal/wrapper/      # evolvable: concurrency/backpressure/timeouts.
+  internal/classifier/   # shared three-bucket response classifier (sec 8)
+                          # + the shared hang-timeout/latency ceiling
+                          # constant. Imported read-only by wrapper, gate,
+                          # and orchestrator. Never in mutation scope.
   gate/                  # correctness gate, five ordered stages.
   deploy/                # kind cluster config, k8s manifests, stress-ng.
   driver/                # mutation driver wrapping claude -p.
@@ -111,6 +115,15 @@ repo/
 what allows the mutation driver's `--add-dir` scope to include only
 `internal/wrapper/` without losing the ability to evolve anything that
 matters.
+
+internal/classifier/ exists because sections 8 and 9 require gate Stage 5
+and the fitness function to share one definition of success/graceful_shed
+/failed and one hang-timeout ceiling constant -- neither can live inside
+internal/wrapper/ (evolvable, so untrustworthy as a source of a stable
+threshold) or internal/hashcore/ (unrelated). internal/wrapper/ imports it
+read-only, to enforce the same ceiling in its own request-timeout
+behavior; it is never inside --add-dir and the mutation driver never sees
+or edits it.
 
 ## 6. Fixed-core parameters
 
@@ -217,7 +230,8 @@ noise (see section 9).
 ## 8. Shared three-bucket response classifier
 
 One function, used by both Stage 5 (boolean: any `failed`?) and the
-fitness function (graded: what fraction in each bucket?).
+fitness function (graded: what fraction in each bucket?), implemented in
+internal/classifier/ (section 5).
 
 - **`success`** -- 2xx status, arriving within the hang-timeout ceiling
   (same constant as the fitness function's latency-normalization ceiling,
@@ -240,6 +254,10 @@ risk: without ground-truth checking, a mutant could shed queue pressure
 under contention by short-circuiting verification to always return
 success, which would show up as *high* success_rate in exactly the
 stress-active half where the fitness signal is most trusted.)
+
+internal/wrapper/'s own request-timeout enforcement imports the same
+constant from internal/classifier/, so wrapper-side timeout behavior and
+gate/fitness classification can never drift apart.
 
 ## 9. Fitness function
 
