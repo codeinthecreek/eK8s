@@ -2,13 +2,29 @@
 
 Operational notes for working in this repo. Full design/rationale: `DESIGN.md`.
 
-## Session workflow (standing rule)
+## Working agreement
 
-Before every commit in this repo, show the exact diff (or full file
-contents for new files) and the proposed commit message, and wait for
-explicit approval before running `git commit`. Never push without a
-separate explicit approval after that. This rule applies to this session
-and all future sessions in this repo.
+Applies to every session in this repo.
+
+- Before every commit: show the full diff (full contents for new files)
+  and the commit message; wait for explicit approval. Push only after a
+  separate explicit approval.
+- Ask before: adding dependencies, changing schemas/data formats,
+  exposing network services, security-relevant changes, anything hard to
+  reverse, or departing from existing patterns. Anything the task prompt
+  explicitly specifies counts as already approved.
+- `DESIGN.md` holds settled architecture; `docs/decisions.md` logs
+  implementation-level decisions. A decision that changes architecture
+  needs a `DESIGN.md` edit (with approval) plus a `docs/decisions.md`
+  entry pointing to it.
+- Log each non-trivial decision in `docs/decisions.md`: date, PR,
+  decision, rejected alternative, reason, how to reverse. Max 5 lines per
+  entry.
+- End every task with: (a) what changed, (b) assumptions made but not
+  verified, (c) files I must understand vs boilerplate, (d) exact
+  commands to verify it works, (e) a brief explanation of any Go idiom or
+  concurrency pattern used that a non-Go-specialist wouldn't know.
+- One logical change per commit; the message explains why, not what.
 
 ## Repo layout
 
@@ -31,6 +47,7 @@ deploy/             kind cluster config, k8s manifests, stress-ng.
 driver/             mutation driver wrapping `claude -p`.
 orchestrator/       population manager, selection, scoring loop.
 lineage/            SQLite (structured) + JSONL (raw claude -p transcripts).
+docs/               decisions.md: implementation-level decision log.
 ```
 
 ## Build / test
