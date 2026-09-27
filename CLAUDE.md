@@ -20,8 +20,11 @@ internal/hashcore/  fixed core (Argon2id hash/verify). Never in mutation
                     scope. Implementation must never be present in the
                     directory tree a mutation session can read or edit.
 internal/wrapper/   evolvable: concurrency/backpressure/timeouts. The only
-                    directory the mutation driver's --add-dir may point at.
+                    source the mutation driver copies into its sandbox.
+                    hasher.go (fixed core's calling interface) is pinned.
 gate/               correctness gate, five ordered stages (DESIGN.md sec 7).
+loadgen/            open-loop load generator: per-variant sustained streams +
+                    Stage 5 burst mode. Imports internal/classifier.
 deploy/             kind cluster config, k8s manifests, stress-ng.
 driver/             mutation driver wrapping `claude -p`.
 orchestrator/       population manager, selection, scoring loop.
@@ -50,26 +53,24 @@ These hold every session, regardless of what else changes:
    fixed core's calling interface (signatures + doc comments), checked into
    the accessible tree as its own file. See DESIGN.md sec 4.
 
-2. **Cost-parameter floor is a floor, never lowered.** Argon2id:
-   `t >= 2` (iterations), `m >= 19456` KiB / 19 MiB (memory), `p >= 1`
+2. **Cost parameters are fixed at the floor, exactly.** Argon2id:
+   `t = 2` (iterations), `m = 19456` KiB / 19 MiB (memory), `p = 1`
    (parallelism) -- OWASP Password Storage Cheat Sheet minimum, verified
-   current as of 2026. A mutation may legally increase cost, never decrease
-   it below this floor. Enforced by gate Stage 3. See DESIGN.md sec 6.
+   current as of 2026. Never `argon2id.DefaultParams` (its `t` is 1).
+   Verify rejects any hash whose encoded params are not exactly these.
+   Enforced by gate Stage 3 as exact equality. See DESIGN.md sec 6.
 
 3. **Mutation driver invocation -- use `--tools`, not
    `--allowedTools`/`--disallowedTools`.** The latter only govern what runs
    without a permission prompt; they are additive on top of Claude Code's
    default tool set and do not restrict availability. `--tools` is what
    actually restricts which built-in tools exist for the session (e.g.
-   `--tools "Read,Edit"`). Always pair with `--restricted` (strips
-   command/code-execution tools and WebFetch unless named individually) and
-   `--add-dir` scoped to `internal/wrapper/` only:
+   `--tools "Read,Edit"`). Always pair with `--restricted`, which is not
+   an OS sandbox. The mutation driver runs `claude -p` inside a bubblewrap
+   sandbox, from a scratch dir holding only wrapper files, with an
+   allowlisted environment. See DESIGN.md sec 12.
 
-```
-   claude -p --tools "Read,Edit" --restricted --add-dir internal/wrapper \
-     --model <pinned-model> --permission-prompts none --max-turns <N> \
-     --output-format json "<constructed prompt>"
-```
-
-   See DESIGN.md sec 12 for the full rationale and per-call context this
-   invocation depends on.
+4. **`internal/wrapper/hasher.go` is pinned; never change its
+   signatures.** `internal/wrapper` must not import `internal/hashcore` or
+   any Argon2/crypto implementation package. Both enforced by gate Stage 1.
+   See DESIGN.md sec 4, sec 7.
