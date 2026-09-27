@@ -1,2 +1,13 @@
 .claude/
 
+# lineage data (DESIGN.md sec 14)
+lineage/*.db
+lineage/*.db-*
+lineage/*.sqlite
+lineage/*.sqlite3
+lineage/*.jsonl
+lineage/**/*.jsonl
+
+# local mutation-driver run directories (DESIGN.md sec 12)
+driver/runs/
+runs/
