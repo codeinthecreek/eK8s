@@ -119,3 +119,23 @@
 - Rejected: leaving the limit unchecked by the gate.
 - Reason: the contract says a mutant that breaks it fails Stage 2, so every stated 400 case must be tested (DESIGN.md sec 7, sec 8).
 - Reverse: drop the Stage 2 case and the "either endpoint" wording.
+
+## 2026-09-27 · PR #6 · cmd/service listens on fixed :8080
+- Rejected: a flag or env var for the port.
+- Reason: cmd/service takes only downward-API facts, never config (DESIGN.md sec 5); the port is set once in the manifests, and a fixed value keeps Stage 1's boot check trivial.
+- Reverse: edit the constant and every manifest/probe that names 8080.
+
+## 2026-09-27 · PR #6 · /healthz = process alive, owned by cmd/service, not the wrapper
+- Rejected: delegating liveness to the wrapper, or tying it to load.
+- Reason: a mutant that could fail liveness under load would get its pods restarted (restartCount fails Stage 5) instead of shedding; readiness (/readyz) is the wrapper's load-aware signal.
+- Reverse: route /healthz through a wrapper method (changes the fixed API).
+
+## 2026-09-27 · PR #6 · X-EK8s-Variant writer exposes Unwrap(); unwrapping can bypass the header
+- Rejected: no Unwrap (breaks http.ResponseController Flush/deadlines for mutants); forcing the header into the underlying writer up front (a handler could still delete it).
+- Reason: the header is a sanity check, not load-bearing (DESIGN.md sec 5); a mutant writing through Unwrap to hide it gains nothing scored.
+- Reverse: drop Unwrap from variantWriter in cmd/service/main.go.
+
+## 2026-09-27 · PR #6 · Shutdown: 5s readiness-503 drain, then http.Server.Shutdown with a 20s deadline
+- Rejected: Shutdown immediately on SIGTERM (requests still routed during endpoint removal get refused).
+- Reason: endpoint removal propagates asynchronously; 5s + 20s = 25s stays under the default 30s terminationGracePeriodSeconds. Shutdown timeout -> Close and exit 1.
+- Reverse: change drainDelay/shutdownTimeout in cmd/service/main.go (keep their sum under the pod's grace period).
