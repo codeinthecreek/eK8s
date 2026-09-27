@@ -13,9 +13,11 @@ and all future sessions in this repo.
 ## Repo layout
 
 ```
-cmd/service/       entrypoint: thin main.go (config/flags, wires hashcore +
-                    wrapper, HTTP routes, healthz/readyz, graceful shutdown).
-                    Never touched by mutation.
+cmd/service/       entrypoint: thin main.go (wires hashcore + wrapper, HTTP
+                    routes, healthz/readyz, graceful shutdown). No tunable
+                    flags: env from the downward API only; tunables live in
+                    the wrapper source. Fixed at generation 0. Never touched
+                    by mutation.
 internal/hashcore/  fixed core (Argon2id hash/verify). Never in mutation
                     scope. Implementation must never be present in the
                     directory tree a mutation session can read or edit.
@@ -41,7 +43,8 @@ lineage/            SQLite (structured) + JSONL (raw claude -p transcripts).
 - `kind load docker-image <image> --name <cluster>` -- load a locally built
   image straight into the cluster; no registry in this project.
 - Stage 5 (degradation under contention) only runs against the live kind
-  cluster in a scratch namespace -- see `gate/` and DESIGN.md sec 7.
+  cluster, in the candidate's own `ek8s-v<id>` namespace -- see `gate/`
+  and DESIGN.md sec 7, sec 11.
 
 ## Non-negotiable constraints
 

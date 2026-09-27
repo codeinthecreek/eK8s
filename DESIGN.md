@@ -145,8 +145,8 @@ and the fitness function to share one definition of success/graceful_shed
 internal/wrapper/ (evolvable, so untrustworthy as a source of a stable
 threshold) or internal/hashcore/ (unrelated). internal/wrapper/ imports it
 read-only, to enforce the same ceiling in its own request-timeout
-behavior; it is never inside --add-dir and the mutation driver never sees
-or edits it.
+behavior; it is never copied into the mutation driver's sandbox (section
+12), and the mutation driver never sees or edits it.
 
 internal/classifier/ also holds the shared test-vector pool (sections 7
 and 10), as precomputed testdata generated once by a small tool that uses
@@ -268,7 +268,7 @@ separate `-race`-instrumented binary for this stage only -- race-detector
 overhead would distort Stage 5's timing behavior, so it is never the
 image that gets deployed.
 
-### Stage 5 -- Degradation under contention (kind, scratch namespace)
+### Stage 5 -- Degradation under contention (kind, candidate namespace)
 
 The one stage that must run on the cluster: it tests behavior under
 resource scarcity *enforced by the kubelet* (cgroup limits), which a local
@@ -276,18 +276,19 @@ process cannot faithfully simulate without re-implementing what k8s
 already provides.
 
 Procedure:
-- Deploy the candidate into an ephemeral scratch namespace with the same
-  resource requests/limits it would get in production, but **not** yet
-  carrying the `role: hasher` label -- it must not join the shared Service
-  or receive live traffic before passing.
-- Wait for the scratch Deployment to report Ready before sending a single
-  request (prevents a startup race from being misclassified as a gate
-  failure).
+- Deploy the candidate into its own namespace, `ek8s-v<id>` (section 11),
+  with the same resource requests/limits every variant gets (the
+  per-namespace LimitRange). Its Service is **not** yet on the load
+  generator's target list -- it must not receive live traffic before
+  passing.
+- Wait for the candidate's Deployment to report Ready before sending a
+  single request (prevents a startup race from being misclassified as a
+  gate failure).
 - Point a short, bounded load-generator burst (tens of seconds, not the
   multi-minute observation-window duration -- Stage 5 only needs a
-  boolean pass/fail, not statistical confidence) directly at the scratch
-  Service, bypassing the shared Service so this traffic never mixes with
-  anything currently live.
+  boolean pass/fail, not statistical confidence) directly at the
+  candidate's own Service. No live stream targets it, so this traffic
+  never mixes with anything currently live.
 - The existing stress-ng Deployment provides contention (kind is
   single-node, so contention is a global resource -- no second stress-ng
   instance needed).
@@ -311,7 +312,7 @@ the single kind node with whatever else is running. A Stage 5 probe (and a
 gate build's CPU spike) transiently affects cluster-wide resource
 availability. The orchestrator must exclude telemetry from the affected
 window from live-population scoring rather than let it become unexplained
-noise (see section 9).
+noise (see section 11).
 
 ## 8. Shared three-bucket response classifier
 
@@ -508,8 +509,9 @@ below). HPA `maxReplicas` per variant: 2-3.
 
 ### Generational process (steady-state, single active mutation at a time)
 
-1. **Select parent** via tournament selection (k=2, section 11) from the
-   full genome archive (not only the current live 3 -- see below).
+1. **Select parent** via tournament selection (k=2, see Selection below)
+   from the full genome archive (not only the current live 3 -- see
+   below).
 2. **Mutate**: invoke the driver (section 12) on the parent's wrapper
    source.
 3. **Build**: `go build` -> `docker build` -> `kind load docker-image`.
