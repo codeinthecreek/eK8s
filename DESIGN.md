@@ -42,10 +42,12 @@ stress-ng, metrics-server, and the live variant population.
 - **Mutation operator:** `claude -p` (Claude Code CLI), driven by a Claude
   Pro subscription (not metered API billing).
 - **Selection:** hybrid. An explicit correctness gate kills non-viable
-  mutants before they reach a live Deployment. Kubernetes' own mechanisms
-  (readiness probes, HPA-style scaling, kube-proxy endpoint splitting)
-  provide continuous, fitness-proportional selection among viable variants
-  already live.
+  mutants before they reach a live Deployment. kube-proxy does not split
+  traffic across variants. Kubernetes' own mechanisms (readiness probes,
+  HPA-style scaling) still act natively, but *within* a variant, across
+  its own replicas. Ranking *between* viable variants comes only from
+  explicit fitness scoring (section 9) on per-variant load streams
+  (sections 10, 11).
 - **Fitness signal:** real cluster telemetry (latency/CPU/memory via
   metrics-server), not a synthetic benchmark.
 - **Resilience angle:** a `stress-ng` noisy-neighbour pod creates resource
@@ -68,9 +70,9 @@ A password/credential hashing endpoint (Argon2id).
 
 ## 4. Fixed-core isolation -- enforcement mechanism
 
-Two independent layers, not one:
+Three independent layers, not one:
 
-1. **Tool-availability restriction on the mutation driver** (see section 9)
+1. **Tool-availability restriction on the mutation driver** (see section 12)
    -- necessary but not sufficient; a permission-prompt mechanism is not a
    filesystem boundary.
 2. **Structural isolation (the real boundary):** the fixed-core package's
@@ -81,29 +83,50 @@ Two independent layers, not one:
    nothing that reveals or allows editing the implementation. The
    correctness gate's build step assembles fixed-core-impl + evolved-wrapper
    before compiling. Even a tool-permission bug cannot expose the
-   implementation, because the bytes are not in the accessible tree.
+   implementation, because the bytes are not in the accessible tree. The
+   driver also runs `claude -p` from a per-run scratch directory outside
+   the repo, holding copies of the wrapper's files only (section 12) --
+   the repo checkout is never the session's working tree.
+3. **OS sandbox:** the `claude -p` process runs inside bubblewrap (section
+   12), so what it can reach -- filesystem, environment, namespaces -- is
+   bounded by the kernel, not by Claude Code's own tool logic.
+   `--restricted` is explicitly *not* an OS sandbox.
 
-**Backstop, not primary defense:** Stage 2 of the correctness gate (section
-7) would almost certainly catch a mutant that tried to bypass the fixed
-core entirely (e.g. reimplementing hashing from scratch) -- a from-scratch
-implementation would not interoperate with the real reference library. This
-is a safety net for something the design is meant to prevent outright, not
-the mechanism relied on to prevent it.
+**Hiding the bytes does not prevent imports.** Go's `internal/` rule lets
+`internal/wrapper` import `internal/hashcore` directly, and
+`golang.org/x/crypto/argon2` is already in `go.sum` via
+`alexedwards/argon2id` (section 6). A faithful reimplementation at the
+same parameters would produce interoperable hashes and pass Stage 2
+cleanly -- Stage 2 only catches an *unfaithful* one.
+
+**Backstop, not primary defense:** the Stage 1 import allowlist (section
+7), not Stage 2, rejects a wrapper that imports the fixed core or any
+Argon2/crypto implementation package, before anything is built. This is a
+safety net for something the design is meant to prevent outright, not the
+mechanism relied on to prevent it.
 
 ## 5. Repo layout
 
 ```
 repo/
-  cmd/service/           # entrypoint: thin main.go -- config/flags, wires
-                          # fixed core + wrapper, HTTP routes, healthz/readyz,
-                          # graceful shutdown. Never touched by mutation.
+  cmd/service/           # entrypoint: thin main.go -- wires fixed core +
+                          # wrapper, HTTP routes, healthz/readyz, graceful
+                          # shutdown. Fixed at generation 0 (see below).
+                          # Never touched by mutation.
   internal/hashcore/     # fixed core. Never in mutation scope.
   internal/wrapper/      # evolvable: concurrency/backpressure/timeouts.
+                          # hasher.go (fixed core's calling interface) is
+                          # pinned -- see below.
   internal/classifier/   # shared three-bucket response classifier (sec 8)
                           # + the shared hang-timeout/latency ceiling
-                          # constant. Imported read-only by wrapper, gate,
-                          # and orchestrator. Never in mutation scope.
+                          # constant + the shared test-vector pool
+                          # (precomputed testdata). Imported read-only by
+                          # wrapper, gate, loadgen, and orchestrator. Never
+                          # in mutation scope.
   gate/                  # correctness gate, five ordered stages.
+  loadgen/               # open-loop load generator (sec 10): per-variant
+                          # sustained streams + Stage 5 burst mode.
+                          # Imports internal/classifier.
   deploy/                # kind cluster config, k8s manifests, stress-ng.
   driver/                # mutation driver wrapping claude -p.
   orchestrator/          # population manager, selection, scoring loop.
@@ -125,13 +148,60 @@ read-only, to enforce the same ceiling in its own request-timeout
 behavior; it is never inside --add-dir and the mutation driver never sees
 or edits it.
 
+internal/classifier/ also holds the shared test-vector pool (sections 7
+and 10), as precomputed testdata generated once by a small tool that uses
+internal/hashcore/. internal/classifier/ itself never imports
+internal/hashcore/.
+
+**The fixed core's calling interface is `internal/wrapper/hasher.go`**
+(the "real Go file" of section 4):
+
+```go
+type Hasher interface {
+	Hash(password string) (string, error)
+	Verify(password, encoded string) (bool, error)
+}
+```
+
+It is pinned: gate Stage 1 requires it byte-identical to the canonical
+version (section 7), so a mutation may read it but any edit to it fails
+the gate.
+
+**`cmd/service/` responsibilities -- all fixed at generation 0**, because
+`cmd/service/` can never change later:
+- Wires `hashcore.New()` into `wrapper.New(hasher, env)`, where `env`
+  carries only environmental facts: the pod's CPU and memory limits, read
+  from the downward API. All evolvable tunables live as literals in the
+  wrapper source (the genome), not as flags.
+- Mounts the wrapper's `HashHandler`, `VerifyHandler`, and `ReadyHandler`.
+  `/readyz` returns 503 once SIGTERM is received, regardless of the
+  wrapper.
+- Sets `GOMEMLIMIT` from the downward-API memory limit (~90%). CPU needs
+  nothing: Go >= 1.25 sets `GOMAXPROCS` from the cgroup CPU limit.
+- Sets an `X-EK8s-Variant` response header from the variant label (via
+  the downward API), in middleware that wraps the `ResponseWriter` so the
+  handler cannot overwrite it. A sanity check only, not load-bearing.
+
 ## 6. Fixed-core parameters
 
 Argon2id, OWASP Password Storage Cheat Sheet floor (verified current as of
 2026): **t=2 (iterations), m=19456 KiB / 19 MiB (memory), p=1
-(parallelism)**. This is the cost-parameter floor the gate's Stage 3
-enforces as a minimum, not a fixed value -- a mutation could legally
-increase cost, never decrease it below the floor.
+(parallelism)**.
+
+internal/hashcore/ uses `alexedwards/argon2id` with explicit parameters:
+
+```go
+argon2id.Params{Memory: 19456, Iterations: 2, Parallelism: 1,
+	SaltLength: 16, KeyLength: 32}
+```
+
+Never `argon2id.DefaultParams` -- its `Iterations` is 1, below the floor.
+
+**Verify accepts only hashes whose encoded parameters exactly equal
+these; anything else is rejected.** The library takes parameters from the
+hash string itself, so this blocks both downgrade (weak hashes accepted as
+valid) and memory exhaustion (a hash claiming a huge `m`). Stage 3
+correspondingly asserts exact equality, not `>=` floor.
 
 ## 7. Correctness gate
 
@@ -143,7 +213,18 @@ counts as graceful degradation" cannot silently diverge between the two.
 
 ### Stage 1 -- Build / boot (local)
 
-Two sub-checks, kept distinct in the lineage log because they fail for
+Pre-build checks first, zero-tolerance, each logged distinctly from the
+build/boot sub-checks below:
+1. `internal/wrapper/hasher.go` is byte-identical to the canonical
+   version (section 5).
+2. Import allowlist for `internal/wrapper`, checked via `go list`: a
+   stdlib subset plus `internal/classifier`. Explicitly forbidden:
+   `internal/hashcore`, `golang.org/x/crypto/...`,
+   `github.com/alexedwards/argon2id`, `crypto/subtle`. `runtime/debug` is
+   allowed (legitimate tuning). This is the backstop described in section
+   4. The exact allowlist is finalized when gate/ is implemented.
+
+Then two sub-checks, kept distinct in the lineage log because they fail for
 different reasons:
 1. `go build` succeeds, then the compiled binary boots as a bare local
    process and its health endpoint responds.
@@ -172,11 +253,12 @@ share one definition of "correct"):
    library, verify via mutant wrapper, wrong password: must correctly
    reject.
 
-### Stage 3 -- Cost-parameter floor (local)
+### Stage 3 -- Cost parameters (local)
 
-Parse the encoded Argon2 string from Stage 2's calls and assert
-`m >= 19456, t >= 2, p >= 1`. Pure assertion against data already
-produced by Stage 2 -- no separate HTTP round trip needed.
+Parse the encoded Argon2 string from Stage 2's calls and assert exact
+equality: `m == 19456, t == 2, p == 1` (section 6) -- not `>=` floor.
+Pure assertion against data already produced by Stage 2 -- no separate
+HTTP round trip needed.
 
 ### Stage 4 -- Concurrency safety (local)
 
@@ -215,10 +297,14 @@ Procedure:
    `OOMKilled`, `CrashLoopBackOff`, or `Error`.
 2. Every observed response classifies as `success` or `graceful_shed` via
    the shared three-bucket classifier (section 8) -- never `failed`.
+   Every hash response in the burst is fully verified (section 8), not
+   sampled.
 
-Pass iff both hold. On pass, **relabel the scratch Deployment in place**
-to join the shared Service's selector -- no redeploy, the image is already
-loaded and the pod already warm.
+Pass iff both hold. On pass, there is no shared Service to relabel into:
+**the variant stays in the namespace Stage 5 created** and becomes live
+when the orchestrator adds its Service to the load generator's target
+list. Still no redeploy -- the image is already loaded and the pod already
+warm. (Full namespace lifecycle in section 11.)
 
 **Known adjacent gap, deliberately not solved in v1:** live variants share
 the single kind node with whatever else is running. A Stage 5 probe (and a
@@ -255,13 +341,24 @@ under contention by short-circuiting verification to always return
 success, which would show up as *high* success_rate in exactly the
 stress-active half where the fitness signal is most trusted.)
 
+`hash` calls get the same anti-gaming treatment. A hash response is
+`success` only if all of the following hold: 2xx within the hang-timeout
+ceiling; a well-formed PHC string; exactly the section 6 parameters; a
+salt not repeated within the run; and it verifies against the password
+sent. Structural checks (format, parameters, salt reuse) apply to every
+response. Full verification is mandatory for every Stage 5 response; in
+the sustained observation window it is applied to a sample, since a full
+verify costs one Argon2 run on the same node.
+
 internal/wrapper/'s own request-timeout enforcement imports the same
 constant from internal/classifier/, so wrapper-side timeout behavior and
 gate/fitness classification can never drift apart.
 
 ## 9. Fitness function
 
-Computed per half-window (baseline / stress-active):
+Computed per variant, from that variant's own dedicated load stream
+(section 10). Within that, computed per half-window (baseline /
+stress-active):
 
 - `success_rate` -- fraction of requests classifying as `success` (via
   section 8's classifier).
@@ -290,9 +387,13 @@ requirement (comparability across time):
    different live population composition. Population-relative
    normalization would make "1.0" mean different things at different
    points in the run, silently.
-2. Tournament selection (section 10) draws parents from an archive that
+2. Tournament selection (section 11) draws parents from an archive that
    spans the whole run's history, not just the current live set -- the
    same cross-time comparability requirement applies.
+
+A served-share term (a variant's fraction of total traffic served) was
+considered and rejected: it is population-relative by construction, which
+violates this fixed-absolute normalization requirement.
 
 Bounds: a latency floor near the theoretical minimum single-hash time
 under the Stage-3 cost floor, and a ceiling past which a response is
@@ -338,7 +439,8 @@ classifier (section 8) needs to inspect the `Retry-After` header on 503s
 per-request, which off-the-shelf summary-output tools are not guaranteed
 to retain. (Vegeta's Go library is a real alternative worth checking
 directly against its current source if wanted, since its `Result` struct
-may discard headers by default to keep memory bounded.)
+may discard headers by default to keep memory bounded.) Lives in
+`loadgen/` (section 5).
 
 **Request mix -- must include deliberate mismatches, not only valid
 credentials.** A shared test-vector pool (also used by gate Stage 2,
@@ -351,8 +453,13 @@ load, and is the specification-gaming gap described in section 8.
 request, not a fixed repeated test vector.
 
 **Two operating modes, one generator component:**
-- Sustained fixed-rate open-loop generation for the multi-minute
-  observation window (baseline + stress-active halves).
+- Sustained mode, for the multi-minute observation window (baseline +
+  stress-active halves): one fixed-rate open-loop stream per live
+  variant, each against that variant's own Service, at the same rate `r`
+  for every variant ever scored -- keeps scores comparable across time
+  (section 9). Total offered load therefore scales with live population
+  (up to 4 streams during probation, section 11); `r` must be sized for
+  that plus stress-ng.
 - A short, bounded-count burst for the Stage 5 gate probe.
 Same request-mix logic and classifier in both; only duration and target
 rate differ.
@@ -361,16 +468,39 @@ rate differ.
 
 ### Population topology
 
-Several viable variants run concurrently as sibling Deployments, each its
-own Service, sharing a common label (`role: hasher`) so one front-facing
-Service's endpoint list pools pods from every live variant. kube-proxy
-splits traffic across whichever variants are currently Ready; a variant
-with more ready replicas (scaled up by its own HPA) gets a proportionally
-larger traffic share. This is the literal "fitness-proportional by native
-mechanism" piece. Note: k8s mechanisms (readiness probes, HPA) cull the
-obviously broken and provide elastic capacity -- they do not rank viable
-variants against each other. Explicit fitness scoring (section 9) is what
-does the ranking.
+Each variant is its own Deployment, HPA, and Service in its own
+namespace, `ek8s-v<id>`. There is no pooled front-facing Service: each
+live variant receives its own dedicated load stream (section 10).
+Readiness probes and HPA still act natively, but within a variant, across
+its own replicas -- they cull the obviously broken and provide elastic
+capacity, they do not rank viable variants against each other. Explicit
+fitness scoring (section 9) is what does the ranking.
+
+**Namespace lifecycle:**
+- **Created** by gate Stage 5, when the candidate is deployed for its
+  gate probe.
+- **Stage 5 fail:** the namespace is deleted (cascading everything in
+  it).
+- **Stage 5 pass:** nothing changes in the cluster. The orchestrator marks
+  the variant live and adds `<svc>.ek8s-v<id>.svc.cluster.local` to the
+  load generator's target list. The pod is still warm; no redeploy.
+- **Culled after scoring:** the namespace is deleted.
+
+**Why the original relabel-in-place design was dropped:** it could never
+have worked. A Service only selects pods in its own namespace, so a
+shared front-facing Service could never have picked up pods in a separate
+scratch namespace; and changing a Deployment's pod-template labels
+triggers a rollout, which would have lost the warm pod anyway.
+
+A per-namespace LimitRange enforces identical resource limits on every
+variant. `role: hasher` remains as an inventory label only; it no longer
+selects anything. Telemetry is attributed by namespace.
+
+**Readiness dodging punishes itself.** A variant that pulls all its pods
+from rotation empties its own Service, and its own traffic fails. Within
+a variant, one replica going unready shifts load to its sibling replicas
+-- a legitimate strategy, scored fairly, because the variant bears all of
+its consequences.
 
 **Live population cap: 3.** A resource/deployment constraint given the
 8-core/16GB workstation, not a statement about genome-pool size (see
@@ -386,8 +516,9 @@ below). HPA `maxReplicas` per variant: 2-3.
 4. **Gate** (section 7): fail at any stage -> log which stage, discard,
    return to step 1 (cap consecutive failures before flagging the lineage
    stalled -- do not halt the whole run on one bad mutation).
-5. **Provisional promotion**: pass -> relabel into the shared Service.
-   Population is briefly 4, not 3 (see Probation below).
+5. **Provisional promotion**: pass -> mark live and add the variant's
+   Service to the load generator's target list (see Namespace lifecycle
+   above). Population is briefly 4, not 3 (see Probation below).
 6. **Observe**: one full observation window (baseline + stress-active
    halves), same shape as any live variant's.
 7. **Score & cull**: score all currently-live variants together on that
@@ -463,11 +594,57 @@ threshold (section 13) is "how many escalated attempts before conceding."
 
 ### Invocation
 
+Sandboxed: `claude -p` runs inside bubblewrap, from a per-run scratch
+directory outside the repo, never from the repo checkout (section 4).
+
+**Per-run directories:**
+- `$RUN/work` -- the session's cwd. Real copies (no symlinks) of the
+  wrapper's existing `.go` files only.
+- `$RUN/home` -- `HOME`, outside the file tools' reach. A fresh `HOME`
+  also means no user-level `CLAUDE.md` is loaded.
+
+**bubblewrap:** `--unshare-all --share-net --die-with-parent
+--new-session --cap-drop ALL --clearenv`. Bind only:
+- `$RUN/work` and `$RUN/home` (rw);
+- the resolved, versioned `claude` binary (ro) -- which also pins the
+  Claude Code version;
+- system libs, certs, `resolv.conf` (ro).
+
+Never bind `/home`, `/run` (docker.sock), or `/var`. bwrap sets
+`no_new_privs`, so setuid binaries cannot escalate.
+
+**Environment:** built empty, then allowlisted back: `HOME`, `TMPDIR`,
+`PATH`, `LANG`, `CLAUDE_CODE_OAUTH_TOKEN` (a dedicated token from
+`claude setup-token`, revocable independently), `CLAUDE_CODE_RESTRICTED=1`,
+plus the autoupdate and nonessential-traffic disables. Must never be
+present:
+- `ANTHROPIC_API_KEY` -- in `-p` mode it is always used when present,
+  which means metered billing, breaking the Pro-subscription premise
+  (section 3);
+- `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`;
+- `KUBECONFIG`, `DOCKER_HOST`, `SSH_AUTH_SOCK`, `GH_TOKEN`,
+  `GITHUB_TOKEN`.
+
+**Launch:** the orchestrator launches via exec with an explicit argv,
+never through a shell -- the prompt contains prior generations'
+LLM-written rationale (see Per-call context below) and is treated as
+untrusted text. The process group is killed on a wall-clock timeout, as a
+backstop beyond `--max-turns`. Inside the sandbox, cwd `$RUN/work`:
+
 ```
-claude -p --tools "Read,Edit" --restricted --add-dir <wrapper-dir-only> \
+claude -p --tools "Read,Edit" --restricted \
   --model <pinned-model> --permission-prompts none --max-turns <N> \
   --output-format json "<constructed prompt>"
 ```
+
+**Copy-back:** only the pre-existing `.go` filenames are copied back from
+`$RUN/work`; symlinks and anything else are rejected. Consequence of
+`--tools "Read,Edit"`: the mutant cannot create files, so structural
+rewrites must fit in the existing files.
+
+**To verify at driver implementation time:** exact env var names for
+disabling autoupdate / nonessential traffic; bwrap flags against the
+installed bubblewrap version.
 
 **Correction from earlier assumption:** `--allowedTools`/`--disallowedTools`
 only govern what runs *without a permission prompt* -- they are additive
@@ -477,9 +654,9 @@ session (`--tools "Read,Edit"`; empty string disables all). `--restricted`
 is purpose-built for this kind of harness use ("an evaluation harness
 drives claude on a shared machine"): it strips command/code-execution
 tools and WebFetch unless named individually in `--tools`, and confines
-file tools to the declared working directories. Use both together, plus
-`--add-dir` scoped to the wrapper directory only (see section 4 for why
-this is necessary but not the primary defense).
+file tools to the declared working directories. Use both together,
+inside the sandbox above (see section 4 for why this is necessary but not
+the primary defense).
 
 `--permission-prompts none` and `--max-turns` bound an unattended run so it
 cannot hang waiting on a prompt nobody will answer. `--output-format json`
@@ -507,6 +684,8 @@ model:
 - **The fixed core's calling interface as a real, readable file**
   (signatures + doc comments only) rather than described only in prompt
   text.
+- **The hang-timeout ceiling value, stated explicitly** -- the mutant
+  cannot see internal/classifier/, where the constant lives.
 - **Rationale requested back in the response text** -- comes free in the
   `result` field already being parsed for cost/usage, and becomes next
   generation's "recent attempts" input. The lineage narrative is then
@@ -584,6 +763,7 @@ independent of whether the stagnation logic is itself working correctly.
   deliberate traffic-mix experiment motivates it (section 9).
 - Exact numeric starting points (fitness component weights, normalization
   bounds, stress-ng dosing, per-pod resource limits, FIFO archive cap,
-  stagnation soft/hard thresholds, usage ceiling) are all explicitly
+  stagnation soft/hard thresholds, usage ceiling, per-variant stream rate
+  `r`, sustained-mode hash verification sample rate) are all explicitly
   starting guesses pending real telemetry, not derived values -- expect to
   tune all of them once the loop is running.
