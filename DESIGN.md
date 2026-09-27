@@ -276,7 +276,8 @@ never 2xx:
    otherwise pass them, Stage 3, Stage 5 and fitness.
 3. `/verify` with an empty hash; `/hash` and `/verify` with an empty or
    missing password.
-4. Invalid JSON, wrong JSON types, and trailing data after the object.
+4. `/hash` and `/verify` with a password over 1024 bytes.
+5. Invalid JSON, wrong JSON types, and trailing data after the object.
 
 Excluded: 405 (owned by the fixed `cmd/service` mux, not the wrapper) and
 the Hash 500 path (a randomness failure, not inducible black-box).
@@ -388,8 +389,9 @@ implements it, and a mutant that breaks it fails Stage 2.
 - `POST /hash`, JSON `{"password": string}` -> 200 `{"hash": string}`.
 - `POST /verify`, JSON `{"password": string, "hash": string}` -> 200
   `{"match": bool}`.
-- Malformed input, an empty or >1024-byte password, or a hash whose
-  parameters hashcore rejects -> 400.
+- Malformed input, an empty or >1024-byte password on either endpoint
+  (`/hash` or `/verify`), or a hash whose parameters hashcore rejects
+  -> 400.
 - Deliberate load shedding -> 503 with a `Retry-After` header (the
   `graceful_shed` contract above).
 - `GET /healthz` -> 200 while the process is up; `GET /readyz` -> 200

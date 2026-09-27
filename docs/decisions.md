@@ -114,3 +114,8 @@
 - Rejected: checking the full dependency closure (`go list -deps`).
 - Reason: net/http transitively imports crypto/* and std's vendored x/crypto, so a -deps check would reject every HTTP-serving wrapper. Direct-only is sound only if the allowlist excludes unsafe (the compiler allows `//go:linkname` only in files that import unsafe), cgo ("C"), os/exec, syscall and plugin.
 - Reverse: n/a until gate/ exists; amend DESIGN.md sec 7 when it is built.
+
+## 2026-09-27 · PR #6 · Contract password limit (1-1024 bytes) applies to both endpoints and is checked by Stage 2
+- Rejected: leaving the limit unchecked by the gate.
+- Reason: the contract says a mutant that breaks it fails Stage 2, so every stated 400 case must be tested (DESIGN.md sec 7, sec 8).
+- Reverse: drop the Stage 2 case and the "either endpoint" wording.
