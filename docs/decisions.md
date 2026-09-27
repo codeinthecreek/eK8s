@@ -54,3 +54,8 @@
 - Rejected: ignoring all of lineage/ (would drop lineage/README.md).
 - Reason: data files (SQLite incl. WAL/SHM `*.db-*`, JSONL) must never be committed; the run-dir names are a guess, since `$RUN` is meant to live outside the repo.
 - Reverse: edit .gitignore once the driver fixes its real run-dir location.
+
+## 2026-09-27 · PR #6 · .gitignore: drop `driver/runs/`, `runs/`; lineage data ignored at any depth under lineage/ only
+- Rejected: keeping the run-dir entries as a safety net; repo-wide `*.jsonl`; top-level-only db/sqlite patterns.
+- Reason: `$RUN` lives outside the repo (DESIGN.md sec 12) and unanchored `runs/` hides any `runs/` dir anywhere; recursive `lineage/**/` variants keep data files out at any depth without hiding JSONL elsewhere in the repo.
+- Reverse: re-add the run-dir entries; drop the `lineage/**/` db/sqlite variants.
