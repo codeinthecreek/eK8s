@@ -69,3 +69,13 @@
 - Rejected: interop-only Stage 2.
 - Reason: interop never sends a hash hashcore rejects, so a mutant that fails open (Verify error -> 200 match:true) passes Stages 2, 3, 5 and fitness: a total auth bypass.
 - Reverse: DESIGN.md sec 7 edit to drop the group (reopens the bypass).
+
+## 2026-09-27 · PR #6 · hashcore Verify: accept only the canonical encoding (exact param segments, re-encoded salt/key)
+- Rejected: trusting argon2id.DecodeHash's parse (Params struct equality, decoded salt/key as-is).
+- Reason: its Sscanf ignores trailing input and accepts non-canonical numbers (`m=019456`, `p=1,junk`, `v=19x`), and base64 decoding ignores CR/LF even in Strict mode; so segments 1-3 are compared as exact strings and salt/key must re-encode to their segments. Wrong variant/version -> ErrUnsupportedParams (downgrade); syntax or non-canonical salt/key -> ErrMalformedHash.
+- Reverse: drop the segment and re-encode comparisons in checkParams, relying on DecodeHash + struct equality.
+
+## 2026-09-27 · PR #6 · golang.org/x/crypto pinned at v0.55.0, not argon2id's v0.14.0 minimum or latest
+- Rejected: v0.14.0 (2023, known advisories in other subpackages); v0.56.0+ (requires go 1.26, would bump the go directive).
+- Reason: newest x/crypto compatible with the go 1.25.0 directive (PR #4 entry).
+- Reverse: `go get golang.org/x/crypto@<version>`; moving past v0.55.0 needs the go directive raised first.
