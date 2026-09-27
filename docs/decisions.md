@@ -79,3 +79,8 @@
 - Rejected: v0.14.0 (2023, known advisories in other subpackages); v0.56.0+ (requires go 1.26, would bump the go directive).
 - Reason: newest x/crypto compatible with the go 1.25.0 directive (PR #4 entry).
 - Reverse: `go get golang.org/x/crypto@<version>`; moving past v0.55.0 needs the go directive raised first.
+
+## 2026-09-27 · PR #6 · go directive 1.26.0, golang.org/x/crypto v0.57.0 (supersedes "golang.org/x/crypto pinned at v0.55.0, not argon2id's v0.14.0 minimum or latest")
+- Rejected: staying on go 1.25.0 with x/crypto pinned at v0.55.0.
+- Reason: 1.25 is out of security support since Go 1.27 (2026-08-19), and the pin blocks x/crypto fixes (v0.56.0+ needs go 1.26); the PR #4 "go directive 1.25.0" GOMAXPROCS rationale still holds (>= 1.25).
+- Reverse: lower the directive to 1.25.0 and `go get golang.org/x/crypto@v0.55.0`.
