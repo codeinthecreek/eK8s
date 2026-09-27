@@ -59,3 +59,13 @@
 - Rejected: keeping the run-dir entries as a safety net; repo-wide `*.jsonl`; top-level-only db/sqlite patterns.
 - Reason: `$RUN` lives outside the repo (DESIGN.md sec 12) and unanchored `runs/` hides any `runs/` dir anywhere; recursive `lineage/**/` variants keep data files out at any depth without hiding JSONL elsewhere in the repo.
 - Reverse: re-add the run-dir entries; drop the `lineage/**/` db/sqlite variants.
+
+## 2026-09-27 · PR #6 · HTTP contract fixed in DESIGN.md sec 8, not left to the wrapper
+- Rejected: letting the gen-0 wrapper's behavior define the contract implicitly.
+- Reason: the wrapper is evolvable; gate, loadgen and classifier need a stable contract, and a mutant that breaks it must fail Stage 2.
+- Reverse: architectural -- DESIGN.md sec 8 edit, plus matching gate/loadgen changes.
+
+## 2026-09-27 · PR #6 · Gate Stage 2 gains HTTP error-path contract assertions (DESIGN.md sec 7)
+- Rejected: interop-only Stage 2.
+- Reason: interop never sends a hash hashcore rejects, so a mutant that fails open (Verify error -> 200 match:true) passes Stages 2, 3, 5 and fitness: a total auth bypass.
+- Reverse: DESIGN.md sec 7 edit to drop the group (reopens the bypass).
