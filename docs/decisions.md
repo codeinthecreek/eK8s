@@ -84,3 +84,33 @@
 - Rejected: staying on go 1.25.0 with x/crypto pinned at v0.55.0.
 - Reason: 1.25 is out of security support since Go 1.27 (2026-08-19), and the pin blocks x/crypto fixes (v0.56.0+ needs go 1.26); the PR #4 "go directive 1.25.0" GOMAXPROCS rationale still holds (>= 1.25).
 - Reverse: lower the directive to 1.25.0 and `go get golang.org/x/crypto@v0.55.0`.
+
+## 2026-09-27 · PR #6 · wrapper: HashHandler/VerifyHandler/ReadyHandler are methods returning http.Handler
+- Rejected: methods that are themselves http.HandlerFunc.
+- Reason: a returned http.Handler lets a mutant wrap its handlers in its own middleware without changing the fixed signatures cmd/service calls.
+- Reverse: change the three methods and cmd/service's calls together (cmd/service is fixed at gen 0, so this is architectural).
+
+## 2026-09-27 · PR #6 · wrapper.Env: 0 in a field means unconstrained/unknown
+- Rejected: a separate "known" flag per field, or a non-zero default.
+- Reason: a bare local run (gate Stage 1 boot) has no downward API; cmd/service passes 0 for absent limits and exits on present-but-invalid ones, so 0 is never a real limit.
+- Reverse: add explicit known flags to Env and cmd/service (changes the fixed API).
+
+## 2026-09-27 · PR #6 · wrapper gen 0: validate the request body before waiting for a hashing slot
+- Rejected: acquiring the semaphore first.
+- Reason: bad input must never queue or consume a slot, and a 400 is then independent of load.
+- Reverse: move acquire above decode in the handlers (a mutant may do so; the contract still holds).
+
+## 2026-09-27 · PR #6 · Error responses: JSON {"error": "<short fixed message>"}
+- Rejected: plain-text bodies; empty bodies.
+- Reason: the DESIGN.md sec 8 contract is silent on error bodies; JSON matches the success bodies, and fixed messages never echo passwords or hashes. Clients must rely on the status code, not the message.
+- Reverse: change writeError in the wrapper (evolvable; not part of the contract).
+
+## 2026-09-27 · PR #6 · OPEN: gen-0 wrapper tests are copied into the mutation sandbox
+- Question: DESIGN.md sec 12 copies "the wrapper's existing .go files", which includes _test.go, so mutants can edit gen-0 tests, and gen-0-specific tests would fail legitimate mutants if Stage 1 ran them.
+- Options: exclude _test.go from the copy and from gate runs, or keep them as mutant-editable, non-gating tests.
+- To be settled when the driver and gate are built; recorded here so it is not lost.
+
+## 2026-09-27 · PR #6 · Stage 1 import allowlist checks direct imports only (DESIGN.md sec 7 edit pending)
+- Rejected: checking the full dependency closure (`go list -deps`).
+- Reason: net/http transitively imports crypto/* and std's vendored x/crypto, so a -deps check would reject every HTTP-serving wrapper. Direct-only is sound only if the allowlist excludes unsafe (the compiler allows `//go:linkname` only in files that import unsafe), cgo ("C"), os/exec, syscall and plugin.
+- Reverse: n/a until gate/ exists; amend DESIGN.md sec 7 when it is built.
