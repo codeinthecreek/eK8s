@@ -54,3 +54,88 @@
 - Rejected: ignoring all of lineage/ (would drop lineage/README.md).
 - Reason: data files (SQLite incl. WAL/SHM `*.db-*`, JSONL) must never be committed; the run-dir names are a guess, since `$RUN` is meant to live outside the repo.
 - Reverse: edit .gitignore once the driver fixes its real run-dir location.
+
+## 2026-09-27 · PR #6 · .gitignore: drop `driver/runs/`, `runs/`; lineage data ignored at any depth under lineage/ only
+- Rejected: keeping the run-dir entries as a safety net; repo-wide `*.jsonl`; top-level-only db/sqlite patterns.
+- Reason: `$RUN` lives outside the repo (DESIGN.md sec 12) and unanchored `runs/` hides any `runs/` dir anywhere; recursive `lineage/**/` variants keep data files out at any depth without hiding JSONL elsewhere in the repo.
+- Reverse: re-add the run-dir entries; drop the `lineage/**/` db/sqlite variants.
+
+## 2026-09-27 · PR #6 · HTTP contract fixed in DESIGN.md sec 8, not left to the wrapper
+- Rejected: letting the gen-0 wrapper's behavior define the contract implicitly.
+- Reason: the wrapper is evolvable; gate, loadgen and classifier need a stable contract, and a mutant that breaks it must fail Stage 2.
+- Reverse: architectural -- DESIGN.md sec 8 edit, plus matching gate/loadgen changes.
+
+## 2026-09-27 · PR #6 · Gate Stage 2 gains HTTP error-path contract assertions (DESIGN.md sec 7)
+- Rejected: interop-only Stage 2.
+- Reason: interop never sends a hash hashcore rejects, so a mutant that fails open (Verify error -> 200 match:true) passes Stages 2, 3, 5 and fitness: a total auth bypass.
+- Reverse: DESIGN.md sec 7 edit to drop the group (reopens the bypass).
+
+## 2026-09-27 · PR #6 · hashcore Verify: accept only the canonical encoding (exact param segments, re-encoded salt/key)
+- Rejected: trusting argon2id.DecodeHash's parse (Params struct equality, decoded salt/key as-is).
+- Reason: its Sscanf ignores trailing input and accepts non-canonical numbers (`m=019456`, `p=1,junk`, `v=19x`), and base64 decoding ignores CR/LF even in Strict mode; so segments 1-3 are compared as exact strings and salt/key must re-encode to their segments. Wrong variant/version -> ErrUnsupportedParams (downgrade); syntax or non-canonical salt/key -> ErrMalformedHash.
+- Reverse: drop the segment and re-encode comparisons in checkParams, relying on DecodeHash + struct equality.
+
+## 2026-09-27 · PR #6 · golang.org/x/crypto pinned at v0.55.0, not argon2id's v0.14.0 minimum or latest
+- Rejected: v0.14.0 (2023, known advisories in other subpackages); v0.56.0+ (requires go 1.26, would bump the go directive).
+- Reason: newest x/crypto compatible with the go 1.25.0 directive (PR #4 entry).
+- Reverse: `go get golang.org/x/crypto@<version>`; moving past v0.55.0 needs the go directive raised first.
+
+## 2026-09-27 · PR #6 · go directive 1.26.0, golang.org/x/crypto v0.57.0 (supersedes "golang.org/x/crypto pinned at v0.55.0, not argon2id's v0.14.0 minimum or latest")
+- Rejected: staying on go 1.25.0 with x/crypto pinned at v0.55.0.
+- Reason: 1.25 is out of security support since Go 1.27 (2026-08-19), and the pin blocks x/crypto fixes (v0.56.0+ needs go 1.26); the PR #4 "go directive 1.25.0" GOMAXPROCS rationale still holds (>= 1.25).
+- Reverse: lower the directive to 1.25.0 and `go get golang.org/x/crypto@v0.55.0`.
+
+## 2026-09-27 · PR #6 · wrapper: HashHandler/VerifyHandler/ReadyHandler are methods returning http.Handler
+- Rejected: methods that are themselves http.HandlerFunc.
+- Reason: a returned http.Handler lets a mutant wrap its handlers in its own middleware without changing the fixed signatures cmd/service calls.
+- Reverse: change the three methods and cmd/service's calls together (cmd/service is fixed at gen 0, so this is architectural).
+
+## 2026-09-27 · PR #6 · wrapper.Env: 0 in a field means unconstrained/unknown
+- Rejected: a separate "known" flag per field, or a non-zero default.
+- Reason: a bare local run (gate Stage 1 boot) has no downward API; cmd/service passes 0 for absent limits and exits on present-but-invalid ones, so 0 is never a real limit.
+- Reverse: add explicit known flags to Env and cmd/service (changes the fixed API).
+
+## 2026-09-27 · PR #6 · wrapper gen 0: validate the request body before waiting for a hashing slot
+- Rejected: acquiring the semaphore first.
+- Reason: bad input must never queue or consume a slot, and a 400 is then independent of load.
+- Reverse: move acquire above decode in the handlers (a mutant may do so; the contract still holds).
+
+## 2026-09-27 · PR #6 · Error responses: JSON {"error": "<short fixed message>"}
+- Rejected: plain-text bodies; empty bodies.
+- Reason: the DESIGN.md sec 8 contract is silent on error bodies; JSON matches the success bodies, and fixed messages never echo passwords or hashes. Clients must rely on the status code, not the message.
+- Reverse: change writeError in the wrapper (evolvable; not part of the contract).
+
+## 2026-09-27 · PR #6 · OPEN: gen-0 wrapper tests are copied into the mutation sandbox
+- Question: DESIGN.md sec 12 copies "the wrapper's existing .go files", which includes _test.go, so mutants can edit gen-0 tests, and gen-0-specific tests would fail legitimate mutants if Stage 1 ran them.
+- Options: exclude _test.go from the copy and from gate runs, or keep them as mutant-editable, non-gating tests.
+- To be settled when the driver and gate are built; recorded here so it is not lost.
+
+## 2026-09-27 · PR #6 · Stage 1 import allowlist checks direct imports only (DESIGN.md sec 7 edit pending)
+- Rejected: checking the full dependency closure (`go list -deps`).
+- Reason: net/http transitively imports crypto/* and std's vendored x/crypto, so a -deps check would reject every HTTP-serving wrapper. Direct-only is sound only if the allowlist excludes unsafe (the compiler allows `//go:linkname` only in files that import unsafe), cgo ("C"), os/exec, syscall and plugin.
+- Reverse: n/a until gate/ exists; amend DESIGN.md sec 7 when it is built.
+
+## 2026-09-27 · PR #6 · Contract password limit (1-1024 bytes) applies to both endpoints and is checked by Stage 2
+- Rejected: leaving the limit unchecked by the gate.
+- Reason: the contract says a mutant that breaks it fails Stage 2, so every stated 400 case must be tested (DESIGN.md sec 7, sec 8).
+- Reverse: drop the Stage 2 case and the "either endpoint" wording.
+
+## 2026-09-27 · PR #6 · cmd/service listens on fixed :8080
+- Rejected: a flag or env var for the port.
+- Reason: cmd/service takes only downward-API facts, never config (DESIGN.md sec 5); the port is set once in the manifests, and a fixed value keeps Stage 1's boot check trivial.
+- Reverse: edit the constant and every manifest/probe that names 8080.
+
+## 2026-09-27 · PR #6 · /healthz = process alive, owned by cmd/service, not the wrapper
+- Rejected: delegating liveness to the wrapper, or tying it to load.
+- Reason: a mutant that could fail liveness under load would get its pods restarted (restartCount fails Stage 5) instead of shedding; readiness (/readyz) is the wrapper's load-aware signal.
+- Reverse: route /healthz through a wrapper method (changes the fixed API).
+
+## 2026-09-27 · PR #6 · X-EK8s-Variant writer exposes Unwrap(); unwrapping can bypass the header
+- Rejected: no Unwrap (breaks http.ResponseController Flush/deadlines for mutants); forcing the header into the underlying writer up front (a handler could still delete it).
+- Reason: the header is a sanity check, not load-bearing (DESIGN.md sec 5); a mutant writing through Unwrap to hide it gains nothing scored.
+- Reverse: drop Unwrap from variantWriter in cmd/service/main.go.
+
+## 2026-09-27 · PR #6 · Shutdown: 5s readiness-503 drain, then http.Server.Shutdown with a 20s deadline
+- Rejected: Shutdown immediately on SIGTERM (requests still routed during endpoint removal get refused).
+- Reason: endpoint removal propagates asynchronously; 5s + 20s = 25s stays under the default 30s terminationGracePeriodSeconds. Shutdown timeout -> Close and exit 1.
+- Reverse: change drainDelay/shutdownTimeout in cmd/service/main.go (keep their sum under the pod's grace period).

@@ -151,7 +151,16 @@ behavior; it is never copied into the mutation driver's sandbox (section
 internal/classifier/ also holds the shared test-vector pool (sections 7
 and 10), as precomputed testdata generated once by a small tool that uses
 internal/hashcore/. internal/classifier/ itself never imports
-internal/hashcore/.
+internal/hashcore/. The pool also holds a small gate-only negative set,
+not used by loadgen: well-formed PHC strings at non-exact parameters
+(section 7, Stage 2 contract conformance), generated with the reference
+library -- except very-large-`m` entries, which are hand-constructed,
+since computing one would allocate that memory. A hand-constructed entry
+differs from a valid hash only in the parameter under test: the
+`$argon2id$v=19$` prefix, the other parameters at their exact values, a
+16-byte salt and a 32-byte key, both in the library's own encoding
+(unpadded standard base64). Otherwise a rejection could come from the
+syntax check rather than the parameter check.
 
 **The fixed core's calling interface is `internal/wrapper/hasher.go`**
 (the "real Go file" of section 4):
@@ -237,10 +246,13 @@ No kind involved.
 
 Tests that the mutated wrapper has not corrupted data in flight between
 its concurrency/request-handling layer and the (unchanged) fixed core --
-not re-validating the hashing algorithm itself. Four assertions, all
-zero-tolerance, using a shared password/hash test-vector pool (also used
-by the load generator, section 10, so gate-time and run-time correctness
-share one definition of "correct"):
+not re-validating the hashing algorithm itself -- and that it implements
+the error paths of the section 8 HTTP contract. Two groups of assertions,
+all zero-tolerance.
+
+**Interoperability**: four assertions using a shared password/hash
+test-vector pool (also used by the load generator, section 10, so
+gate-time and run-time correctness share one definition of "correct"):
 
 1. `TestInterop_MutantHash_RealVerify_Match` -- hash via mutant wrapper,
    verify via real reference library, matching password: must succeed.
@@ -252,6 +264,23 @@ share one definition of "correct"):
 4. `TestInterop_RealHash_MutantVerify_NoMatch` -- hash via real reference
    library, verify via mutant wrapper, wrong password: must correctly
    reject.
+
+**Contract conformance** (section 8): each case must return exactly 400,
+never 2xx:
+1. `/verify` with a malformed hash string.
+2. `/verify` with a well-formed hash at non-exact parameters -- at least
+   one with `t=1` and one with a very large `m`, from the pool's gate-only
+   negative set (section 5). This is the fail-open case: all four interop
+   assertions use correct-params hashes, so hashcore's Verify never errors
+   there, and a wrapper that turns a Verify error into a match would
+   otherwise pass them, Stage 3, Stage 5 and fitness.
+3. `/verify` with an empty hash; `/hash` and `/verify` with an empty or
+   missing password.
+4. `/hash` and `/verify` with a password over 1024 bytes.
+5. Invalid JSON, wrong JSON types, and trailing data after the object.
+
+Excluded: 405 (owned by the fixed `cmd/service` mux, not the wrapper) and
+the Hash 500 path (a randomness failure, not inducible black-box).
 
 ### Stage 3 -- Cost parameters (local)
 
@@ -354,6 +383,19 @@ verify costs one Argon2 run on the same node.
 internal/wrapper/'s own request-timeout enforcement imports the same
 constant from internal/classifier/, so wrapper-side timeout behavior and
 gate/fitness classification can never drift apart.
+
+**HTTP contract.** Fixed by the design, not by the wrapper: the wrapper
+implements it, and a mutant that breaks it fails Stage 2.
+- `POST /hash`, JSON `{"password": string}` -> 200 `{"hash": string}`.
+- `POST /verify`, JSON `{"password": string, "hash": string}` -> 200
+  `{"match": bool}`.
+- Malformed input, an empty or >1024-byte password on either endpoint
+  (`/hash` or `/verify`), or a hash whose parameters hashcore rejects
+  -> 400.
+- Deliberate load shedding -> 503 with a `Retry-After` header (the
+  `graceful_shed` contract above).
+- `GET /healthz` -> 200 while the process is up; `GET /readyz` -> 200
+  when ready, 503 otherwise.
 
 ## 9. Fitness function
 

@@ -6,8 +6,8 @@ lineage/*.db-*
 lineage/*.sqlite
 lineage/*.sqlite3
 lineage/*.jsonl
+lineage/**/*.db
+lineage/**/*.db-*
+lineage/**/*.sqlite
+lineage/**/*.sqlite3
 lineage/**/*.jsonl
-
-# local mutation-driver run directories (DESIGN.md sec 12)
-driver/runs/
-runs/
