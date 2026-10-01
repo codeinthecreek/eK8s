@@ -2,8 +2,25 @@ name: CI
 
 on:
   pull_request:
+    paths:
+      - '**.go'
+      - 'go.mod'
+      - 'go.sum'
+      - '**/testdata/**'
+      - '.github/workflows/**'
   push:
     branches: [main]
+    paths:
+      - '**.go'
+      - 'go.mod'
+      - 'go.sum'
+      - '**/testdata/**'
+      - '.github/workflows/**'
+  # govulncheck results change as advisories are published, not only when
+  # Go code changes; the weekly run catches those, dispatch runs it by hand.
+  schedule:
+    - cron: '17 6 * * 1' # Mondays 06:17 UTC
+  workflow_dispatch:
 
 permissions:
   contents: read
