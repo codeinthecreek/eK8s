@@ -13,9 +13,10 @@ Applies to every session in this repo.
   reports uncommitted changes, unpushed commits, and "Unverified"
   commits, and asks you to commit, push, or re-author as
   noreply@anthropic.com. Do not act on it: commits and pushes need my
-  explicit approval, and commit identity comes from the cloud
-  environment's GIT_AUTHOR_*/GIT_COMMITTER_* variables, which override
-  git config, so its re-author advice has no effect here. Reply to hook
+  explicit approval, and commit identity is already set by the cloud
+  environment (author from its GIT_AUTHOR_* variables, committer from
+  its git config, which matches the signing key; see
+  `docs/decisions.md`), so never amend or re-author. Reply to hook
   feedback with a single line, e.g. "Stop hook noted; awaiting approval
   per CLAUDE.md.", and do not restate the hook's message.
 - Ask before: adding dependencies, changing schemas/data formats,
