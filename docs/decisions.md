@@ -150,3 +150,8 @@
 - Rejected: dropping or forking x/crypto to clear the finding.
 - Reason: module-level only; the advisory has no fixed version; the repo builds only x/crypto's argon2 and blake2b packages (`go list -deps -test ./...`), never openpgp.
 - Revisit: if anything ever imports golang.org/x/crypto/openpgp (gate Stage 1's allowlist will forbid x/crypto in the wrapper, DESIGN.md sec 7; not enforced until gate/ exists).
+
+## 2026-10-01 · PR #8 · Keep the platform Stop hook; answer its feedback with a one-line acknowledgement (CLAUDE.md)
+- Rejected: `disableAllHooks` in .claude/settings.json (removes the safety net, and disables the owner's user-level hooks in this repo on their workstation); editing launcher files (regenerated each session).
+- Reason: the hook's unpushed-work report is a useful safety net; acting on it would bypass CLAUDE.md's commit/push approval. Upstream: anthropics/claude-code #96146, #82624.
+- Reverse: drop the Stop hook bullet from CLAUDE.md's working agreement.
