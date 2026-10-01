@@ -4,10 +4,10 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 *(inferred)* are guesses, not read from the repo; correct them.
 
 ## Now
-- `claude/status-file-housekeeping-00qv57` (PR #10 *(inferred number)*): add this file, the STATUS.md working-agreement bullet, and its decisions entry.
+- `claude/status-file-housekeeping-00qv57` (PR #10): add this file, the STATUS.md working-agreement bullet, and its decisions entry.
 
 ## Next
-- *(inferred)* "Build gate/ Stages 1-4 (DESIGN.md sec 7): Stage 1 import allowlist (direct imports only) and pinned hasher.go check, Stage 2 interop and HTTP contract cases, Stage 3 exact Argon2 params, Stage 4 -race build; settle the OPEN _test.go question in docs/decisions.md."
+- "Build internal/classifier (DESIGN.md sec 5, sec 8): the three-bucket classifier function (success/graceful_shed/failed, with verify ground-truth checking) and the shared test-vector pool, generated once as testdata by a small tool using internal/hashcore, including the gate-only negative set (non-exact params; very-large-m entries hand-constructed)."
 
 ## Parked
 - None.
