@@ -149,4 +149,4 @@
 ## 2026-10-01 · PR #7 · Accepted govulncheck finding: GO-2026-5932 (x/crypto/openpgp)
 - Rejected: dropping or forking x/crypto to clear the finding.
 - Reason: module-level only; the advisory has no fixed version; the repo builds only x/crypto's argon2 and blake2b packages (`go list -deps -test ./...`), never openpgp.
-- Revisit: if anything ever imports golang.org/x/crypto/openpgp (the wrapper can't; gate Stage 1's allowlist forbids x/crypto there).
+- Revisit: if anything ever imports golang.org/x/crypto/openpgp (gate Stage 1's allowlist will forbid x/crypto in the wrapper, DESIGN.md sec 7; not enforced until gate/ exists).
