@@ -139,3 +139,14 @@
 - Rejected: Shutdown immediately on SIGTERM (requests still routed during endpoint removal get refused).
 - Reason: endpoint removal propagates asynchronously; 5s + 20s = 25s stays under the default 30s terminationGracePeriodSeconds. Shutdown timeout -> Close and exit 1.
 - Reverse: change drainDelay/shutdownTimeout in cmd/service/main.go (keep their sum under the pod's grace period).
+
+## 2026-10-01 · PR #7 · CI on GitHub Actions: vet, test, -race, govulncheck on Go 1.26.x (latest patch)
+- Rejected: `go-version-file: go.mod` (gives exactly 1.26.0); a third-party govulncheck action.
+- Reason: 1.26.0's fixed stdlib vulns would make govulncheck noisy; `go run golang.org/x/vuln/cmd/govulncheck@v1.8.0` keeps dependencies minimal. Runners reach vuln.go.dev, which cloud sessions can't.
+- Note: Raise setup-go's go-version whenever the go directive is raised: setup-go sets GOTOOLCHAIN=local, so CI fails with 'go.mod requires go >= ...' until it is (local sessions with GOTOOLCHAIN=auto would instead download the directive's exact, possibly old, patch).
+- Reverse: delete .github/workflows/ci.yml.
+
+## 2026-10-01 · PR #7 · Accepted govulncheck finding: GO-2026-5932 (x/crypto/openpgp)
+- Rejected: dropping or forking x/crypto to clear the finding.
+- Reason: module-level only; the advisory has no fixed version; the repo builds only x/crypto's argon2 and blake2b packages (`go list -deps -test ./...`), never openpgp.
+- Revisit: if anything ever imports golang.org/x/crypto/openpgp (gate Stage 1's allowlist will forbid x/crypto in the wrapper, DESIGN.md sec 7; not enforced until gate/ exists).
