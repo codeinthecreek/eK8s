@@ -158,5 +158,5 @@
 
 ## 2026-10-01 · PR #9 · Cloud environment: drop GIT_COMMITTER_*, keep GIT_AUTHOR_* (owner authors, Claude commits)
 - Rejected: keeping both (the platform's SSH key signs commits whose committer is the owner, so GitHub shows them Unverified); re-authoring in-session (env vars override git config).
-- Reason: GitHub validates a signature against the committer; with GIT_COMMITTER_* gone, git falls back to the environment's git config (Claude <noreply@anthropic.com>), which matches the signing key. Authorship and contribution credit stay with the owner. Unverified until a cloud commit shows Verified.
+- Reason: GitHub validates a signature against the committer; with GIT_COMMITTER_* gone, git falls back to the environment's git config (Claude <noreply@anthropic.com>), which matches the signing key. Authorship and contribution credit stay with the owner. Confirmed: f55adbf shows Verified on GitHub.
 - Reverse: re-add GIT_COMMITTER_NAME/GIT_COMMITTER_EMAIL in the cloud environment's settings.
