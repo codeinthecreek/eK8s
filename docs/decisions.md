@@ -170,3 +170,9 @@
 - Rejected: pasting session transcripts or command logs into the planning/review chat.
 - Reason: Code implements; the chat plans, reviews and approves but cannot read the repo, so it needs evidence (quoted lines, diffs, check results), not transcripts. Packets are produced only on request.
 - Reverse: delete docs/handoff.md and the handoff bullet in CLAUDE.md's working agreement.
+
+## 2026-10-01 · PR #12 *(inferred)* · CI runs only on Go/module/testdata/workflow changes, plus weekly (Mon 06:17 UTC) and by hand
+- Rejected: `paths-ignore` (new non-Go files would trigger runs by default); no schedule (govulncheck would miss advisories published while Go code is unchanged).
+- Reason: docs-only PRs need no vet/test/govulncheck. main has no branch protection or required checks (checked 2026-10-01; rulesets unavailable on this plan), so skipped runs leave nothing Pending.
+- Revisit: if a required status check is ever added, path-filtered skips would block merges; drop the filter or add an always-run job.
+- Reverse: remove the `paths:`, `schedule:` and `workflow_dispatch:` keys from .github/workflows/ci.yml.
