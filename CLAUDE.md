@@ -62,6 +62,8 @@ docs/               decisions.md: implementation-level decision log.
 - Stage 5 (degradation under contention) only runs against the live kind
   cluster, in the candidate's own `ek8s-v<id>` namespace -- see `gate/`
   and DESIGN.md sec 7, sec 11.
+- CI (`.github/workflows/ci.yml`) runs `go vet`, `go test`, `go test -race`
+  and `govulncheck` on every PR and on pushes to main.
 
 ## Non-negotiable constraints
 
