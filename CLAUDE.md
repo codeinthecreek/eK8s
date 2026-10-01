@@ -33,8 +33,12 @@ Applies to every session in this repo.
 - End every task with: (a) what changed, (b) assumptions made but not
   verified, (c) files I must understand vs boilerplate, (d) exact
   commands to verify it works, (e) a brief explanation of any Go idiom or
-  concurrency pattern used that a non-Go-specialist wouldn't know.
+  concurrency pattern used that a non-Go-specialist wouldn't know,
+  (f) uncommitted/unpushed state, (g) confirmation that
+  `docs/STATUS.md` was updated in this PR.
 - One logical change per commit; the message explains why, not what.
+- Every PR updates `docs/STATUS.md` (Now/Next/Parked/Recent) in the
+  same PR.
 
 ## Repo layout
 
