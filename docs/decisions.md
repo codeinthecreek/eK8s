@@ -143,5 +143,5 @@
 ## 2026-10-01 · PR #7 · CI on GitHub Actions: vet, test, -race, govulncheck on Go 1.26.x (latest patch)
 - Rejected: `go-version-file: go.mod` (gives exactly 1.26.0); a third-party govulncheck action.
 - Reason: 1.26.0's fixed stdlib vulns would make govulncheck noisy; `go run golang.org/x/vuln/cmd/govulncheck@v1.8.0` keeps dependencies minimal. Runners reach vuln.go.dev, which cloud sessions can't.
-- Note: raise ci.yml's setup-go `go-version` whenever the go directive is raised; otherwise GOTOOLCHAIN auto-switches to the directive's exact, old patch.
+- Note: Raise setup-go's go-version whenever the go directive is raised: setup-go sets GOTOOLCHAIN=local, so CI fails with 'go.mod requires go >= ...' until it is (local sessions with GOTOOLCHAIN=auto would instead download the directive's exact, possibly old, patch).
 - Reverse: delete .github/workflows/ci.yml.
