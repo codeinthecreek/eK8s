@@ -39,6 +39,9 @@ Applies to every session in this repo.
 - One logical change per commit; the message explains why, not what.
 - Every PR updates `docs/STATUS.md` (Now/Next/Parked/Recent) in the
   same PR.
+- Material for my planning/review chat goes in the packet formats in
+  `docs/handoff.md`, and only when I ask for a packet; the end-of-task
+  report rule (a)-(g) is unchanged.
 
 ## Repo layout
 

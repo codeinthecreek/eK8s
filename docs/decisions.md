@@ -165,3 +165,8 @@
 - Rejected: planning chat reconstructing state from session transcripts.
 - Reason: transcripts are long and scattered; a short Now/Next/Parked/Recent file updated in every PR is cheap to read after a long gap.
 - Reverse: delete docs/STATUS.md and the STATUS.md bullet in CLAUDE.md's working agreement.
+
+## 2026-10-01 · PR #11 · Chat and Code keep separate roles; docs/handoff.md defines what crosses between them
+- Rejected: pasting session transcripts or command logs into the planning/review chat.
+- Reason: Code implements; the chat plans, reviews and approves but cannot read the repo, so it needs evidence (quoted lines, diffs, check results), not transcripts. Packets are produced only on request.
+- Reverse: delete docs/handoff.md and the handoff bullet in CLAUDE.md's working agreement.
