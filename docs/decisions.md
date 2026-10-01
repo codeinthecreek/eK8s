@@ -160,3 +160,8 @@
 - Rejected: keeping both (the platform's SSH key signs commits whose committer is the owner, so GitHub shows them Unverified); re-authoring in-session (env vars override git config).
 - Reason: GitHub validates a signature against the committer; with GIT_COMMITTER_* gone, git falls back to the environment's git config (Claude <noreply@anthropic.com>), which matches the signing key. Authorship and contribution credit stay with the owner. Confirmed: f55adbf shows Verified on GitHub.
 - Reverse: re-add GIT_COMMITTER_NAME/GIT_COMMITTER_EMAIL in the cloud environment's settings.
+
+## 2026-10-01 · PR #10 · docs/STATUS.md is the resume point, maintained by Code sessions; planning chat reads it, not transcripts
+- Rejected: planning chat reconstructing state from session transcripts.
+- Reason: transcripts are long and scattered; a short Now/Next/Parked/Recent file updated in every PR is cheap to read after a long gap.
+- Reverse: delete docs/STATUS.md and the STATUS.md bullet in CLAUDE.md's working agreement.
