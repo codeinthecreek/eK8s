@@ -39,6 +39,11 @@ Applies to every session in this repo.
 - One logical change per commit; the message explains why, not what.
 - Every PR updates `docs/STATUS.md` (Now/Next/Parked/Recent) in the
   same PR.
+- At the start of every PR, reconcile `docs/STATUS.md` and
+  `docs/decisions.md` with `git log origin/main`: move merged items from
+  Now to Recent with their real PR numbers, and replace "(inferred)" PR
+  numbers that git log now confirms. Do it in the same PR as the task,
+  not a separate one.
 - Material for my planning/review chat goes in the packet formats in
   `docs/handoff.md`, and only when I ask for a packet; the end-of-task
   report rule (a)-(g) is unchanged.
