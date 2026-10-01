@@ -155,3 +155,8 @@
 - Rejected: `disableAllHooks` in .claude/settings.json (removes the safety net, and disables the owner's user-level hooks in this repo on their workstation); editing launcher files (regenerated each session).
 - Reason: the hook's unpushed-work report is a useful safety net; acting on it would bypass CLAUDE.md's commit/push approval. Upstream: anthropics/claude-code #96146, #82624.
 - Reverse: drop the Stop hook bullet from CLAUDE.md's working agreement.
+
+## 2026-10-01 · PR #9 · Cloud environment: drop GIT_COMMITTER_*, keep GIT_AUTHOR_* (owner authors, Claude commits)
+- Rejected: keeping both (the platform's SSH key signs commits whose committer is the owner, so GitHub shows them Unverified); re-authoring in-session (env vars override git config).
+- Reason: GitHub validates a signature against the committer; with GIT_COMMITTER_* gone, git falls back to the environment's git config (Claude <noreply@anthropic.com>), which matches the signing key. Authorship and contribution credit stay with the owner. Confirmed: f55adbf shows Verified on GitHub.
+- Reverse: re-add GIT_COMMITTER_NAME/GIT_COMMITTER_EMAIL in the cloud environment's settings.
