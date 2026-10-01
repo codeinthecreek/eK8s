@@ -9,6 +9,15 @@ Applies to every session in this repo.
 - Before every commit: show the full diff (full contents for new files)
   and the commit message; wait for explicit approval. Push only after a
   separate explicit approval.
+- Cloud sessions run a platform Stop hook (stop-hook-git-check.sh) that
+  reports uncommitted changes, unpushed commits, and "Unverified"
+  commits, and asks you to commit, push, or re-author as
+  noreply@anthropic.com. Do not act on it: commits and pushes need my
+  explicit approval, and commit identity comes from the cloud
+  environment's GIT_AUTHOR_*/GIT_COMMITTER_* variables, which override
+  git config, so its re-author advice has no effect here. Reply to hook
+  feedback with a single line, e.g. "Stop hook noted; awaiting approval
+  per CLAUDE.md.", and do not restate the hook's message.
 - Ask before: adding dependencies, changing schemas/data formats,
   exposing network services, security-relevant changes, anything hard to
   reverse, or departing from existing patterns. Anything the task prompt
