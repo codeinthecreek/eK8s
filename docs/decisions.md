@@ -186,3 +186,34 @@
 - Rejected: -W on all Go files and the STATUS.md diff always included, with a ~1500-line threshold.
 - Reason: whole test functions and STATUS.md churn crowd out the code under review; ~600 lines keeps a packet to one paste. STATUS.md still shows in --stat and under Omitted:, so the chat can ask for it.
 - Reverse: restore the two-part full diff and the 1500-line threshold in docs/handoff.md.
+
+## 2026-10-02 · PR #15 *(inferred)* · classifier: full hash verification is an injected Verifier; the package stays stdlib-only
+- Rejected: splitting the ceiling into its own package (B); importing argon2id in classifier with a direct-imports-only Stage 1 check (C); exporting a check from hashcore (D).
+- Reason: internal/wrapper imports classifier, so any Argon2/crypto import there would undercut the Stage 1 backstop; injection keeps DESIGN.md sec 5's "never imports hashcore" literal with no package split.
+- Reverse: give classifier its own Verify (option B or C), with a DESIGN.md sec 5/sec 7 edit.
+
+## 2026-10-02 · PR #15 *(inferred)* · classifier reimplements hashcore's canonical-PHC check
+- Rejected: exporting checkParams (or a parse-only variant) from hashcore.
+- Reason: keeps hashcore's API unchanged; drift is caught by PR B's hashcore-vs-classifier agreement test, and Stage 5 always runs hashcore Verify on every hash response.
+- Reverse: export a check from hashcore and inject it alongside the Verifier.
+
+## 2026-10-02 · PR #15 *(inferred)* · HangTimeout bounds every bucket, graceful_shed included
+- Rejected: accepting a 503 + Retry-After at any latency.
+- Reason: a shed that arrives after the ceiling has still hung the client; otherwise a mutant could hold queued requests indefinitely and still score as shedding gracefully.
+- Reverse: DESIGN.md sec 8 edit (graceful_shed and failed bullets); move the latency check after the 503 branch in Classify.
+
+## 2026-10-02 · PR #15 *(inferred)* · graceful_shed needs exactly one Retry-After that parses (delay-seconds or HTTP-date)
+- Rejected: presence alone (DESIGN.md sec 8's earlier wording); the first of several values.
+- Reason: an empty or garbage value is no usable retry hint; a repeated Retry-After header is rejected, since RFC 9110 defines it as a single-value field. Both fail closed. Gen 0 sends "1".
+- Reverse: DESIGN.md sec 8 edit (graceful_shed bullet, HTTP contract); replace the parse check in Classify with a presence check.
+
+## 2026-10-02 · PR #15 *(inferred)* · Strict 2xx bodies: one JSON object, exactly the contract key (case-sensitive), non-null right type, no trailing data
+- Rejected: encoding/json struct decoding (matches keys case-insensitively, accepts null as absent); ignoring unknown fields.
+- Reason: the HTTP contract (DESIGN.md sec 8) is fixed, so extra or misspelled fields mean a broken mutant. Duplicate keys are not detected (last wins); the wrapper's encoder never emits them.
+- Reverse: DESIGN.md sec 8 edit (HTTP contract 200-body bullet); let decodeField ignore keys other than the contract one.
+- Follow-up: gate Stage 2 must assert the 200-body contract when gate/ is built (DESIGN.md sec 8 says a mutant that breaks it fails Stage 2).
+
+## 2026-10-02 · PR #15 *(inferred)* · Salt-reuse scope: one classifier Run per variant live lifetime (promotion to cull); late 2xx hash salts recorded too
+- Rejected: a Run per observation window; ignoring salts from responses over HangTimeout.
+- Reason: per-window Runs let a mutant cache hash strings from an earlier window and replay them later, skipping Argon2, caught only by sampled FullVerify; a late hash not recorded could be replayed once on time. Stage 5's burst uses its own Run.
+- Reverse: DESIGN.md sec 8 edit (hash success conditions); drop the late-salt recording in Classify.
