@@ -177,7 +177,12 @@
 - Revisit: if a required status check is ever added, path-filtered skips would block merges; drop the filter or add an always-run job.
 - Reverse: remove the `paths:`, `schedule:` and `workflow_dispatch:` keys from .github/workflows/ci.yml.
 
-## 2026-10-01 · PR #13 *(inferred)* · Each PR starts by reconciling STATUS.md and decisions.md with git log origin/main
+## 2026-10-01 · PR #13 · Each PR starts by reconciling STATUS.md and decisions.md with git log origin/main
 - Rejected: a separate housekeeping PR after each merge.
 - Reason: entries are written before a PR is opened, so its number starts as "(inferred)"; fixing them in the next task's PR keeps the record accurate without extra PRs.
 - Reverse: drop the reconcile bullet from CLAUDE.md's working agreement.
+
+## 2026-10-02 · PR #14 *(inferred)* · Review packet full diff: -U10 for Go tests, docs/STATUS.md omitted unless asked, ~600-line threshold
+- Rejected: -W on all Go files and the STATUS.md diff always included, with a ~1500-line threshold.
+- Reason: whole test functions and STATUS.md churn crowd out the code under review; ~600 lines keeps a packet to one paste. STATUS.md still shows in --stat and under Omitted:, so the chat can ask for it.
+- Reverse: restore the two-part full diff and the 1500-line threshold in docs/handoff.md.
