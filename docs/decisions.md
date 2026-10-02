@@ -237,3 +237,8 @@
 - Rejected: relying on the planning chat alone to review.
 - Reason: the chat cannot read the repo, so each finding it makes costs a relay round trip, and most were checkable in-repo. One run per packet on the final tree, not per edit, to keep usage down; docs-only changes skip it.
 - Reverse: delete .claude/agents/reviewer.md, the self-review bullet in CLAUDE.md's working agreement, and the Self-review: section in docs/handoff.md; restore `.claude/` in .gitignore.
+
+## 2026-10-02 · PR #17 *(inferred)* · Measure the reviewer by tagging chat Feedback lines [missed] / [repo-unseeable] / [dup]
+- Rejected: seeded-defect runs on a scratch branch as the routine measure (kept for an occasional check once gate/ exists).
+- Reason: zero extra reviewer runs; after a few Go PRs the [missed] count shows whether the reviewer earns its cost, and each [missed] item is a concrete checklist edit. Self-review `declined:` lines give its false positives.
+- Reverse: drop the tagging bullet from docs/handoff.md's rules for every packet.

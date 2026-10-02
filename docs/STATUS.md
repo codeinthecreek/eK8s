@@ -4,7 +4,7 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 *(inferred)* are guesses, not read from the repo; correct them.
 
 ## Now
-- `claude/pre-packet-self-review-8oxgvr` (PR #17 *(inferred)*): pre-packet self-review: read-only reviewer subagent (.claude/agents/reviewer.md), run once on the final tree before a commit diff or review/approval packet for Go changes; CLAUDE.md working-agreement bullet; Self-review: section in docs/handoff.md packets.
+- `claude/pre-packet-self-review-8oxgvr` (PR #17 *(inferred)*): pre-packet self-review: read-only reviewer subagent (.claude/agents/reviewer.md), run once on the final tree before a commit diff or review/approval packet for Go changes; CLAUDE.md working-agreement bullet; Self-review: section in docs/handoff.md packets, and [missed]/[repo-unseeable]/[dup] tags on Feedback: lines to measure the reviewer.
 
 ## Next
 - gate/ (DESIGN.md sec 7), consuming testvectors for Stage 2 interop and contract conformance; design packet first.
