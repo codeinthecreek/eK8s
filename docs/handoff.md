@@ -64,16 +64,21 @@ For code review of a change.
   `go test ./...`, `gofmt -l .` (passes on empty output). On failure,
   only the failing part.
 - `git diff --stat <base>`
-- Full diff, in two parts, both excluding generated files (a
+- Full diff, in three parts, all excluding generated files (a
   `// Code generated ... DO NOT EDIT.` header); list any excluded under
   `Omitted:`.
-  - Go files: `git diff -W <base> -- '*.go'`. Git's default
+  - Go files except tests:
+    `git diff -W <base> -- '*.go' ':(exclude)*_test.go'`. Git's default
     function-boundary rule already gives whole Go functions with their
     doc comments (checked on git 2.43), so no `.gitattributes` entry is
     needed.
-  - Everything else: `git diff <base> -- . ':(exclude)*.go' ':(exclude)go.sum'`
+  - Go test files: `git diff -U10 <base> -- '*_test.go'`.
+  - Everything else:
+    `git diff <base> -- . ':(exclude)*.go' ':(exclude)go.sum' ':(exclude)docs/STATUS.md'`
     (no -W: on Markdown it widens to the whole file).
-- If the full diff exceeds about 1500 lines: everything except the full
+  - docs/STATUS.md: no diff unless the owner asks; it stays in the
+    `--stat` and is listed under `Omitted:`.
+- If the full diff exceeds about 600 lines: everything except the full
   diff, plus a per-file line count of it, so the owner can choose what to
   include.
 - Before a commit exists: mark untracked files with `git add -N <files>`,
