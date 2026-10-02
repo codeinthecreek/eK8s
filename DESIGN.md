@@ -119,10 +119,12 @@ repo/
                           # pinned -- see below.
   internal/classifier/   # shared three-bucket response classifier (sec 8)
                           # + the shared hang-timeout/latency ceiling
-                          # constant + the shared test-vector pool
-                          # (precomputed testdata). Imported read-only by
-                          # wrapper, gate, loadgen, and orchestrator. Never
-                          # in mutation scope.
+                          # constant. Imported read-only by wrapper, gate,
+                          # loadgen, and orchestrator. Never in mutation
+                          # scope.
+    testvectors/         # the shared test-vector pool (precomputed,
+                          # embedded). Imported by gate and loadgen only;
+                          # never by wrapper.
   gate/                  # correctness gate, five ordered stages.
   loadgen/               # open-loop load generator (sec 10): per-variant
                           # sustained streams + Stage 5 burst mode.
@@ -148,9 +150,11 @@ read-only, to enforce the same ceiling in its own request-timeout
 behavior; it is never copied into the mutation driver's sandbox (section
 12), and the mutation driver never sees or edits it.
 
-internal/classifier/ also holds the shared test-vector pool (sections 7
-and 10), as precomputed testdata generated once by a small tool that uses
-internal/hashcore/. internal/classifier/ itself never imports
+The shared test-vector pool (sections 7 and 10) lives in the
+internal/classifier/testvectors/ subpackage, as precomputed data
+generated once by a small tool that uses internal/hashcore/.
+internal/wrapper/ never imports the subpackage (the Stage 1 allowlist,
+section 7, forbids it), and internal/classifier/ itself never imports
 internal/hashcore/. The pool also holds a small gate-only negative set,
 not used by loadgen: well-formed PHC strings at non-exact parameters
 (section 7, Stage 2 contract conformance), generated with the reference
@@ -227,7 +231,10 @@ build/boot sub-checks below:
 1. `internal/wrapper/hasher.go` is byte-identical to the canonical
    version (section 5).
 2. Import allowlist for `internal/wrapper`, checked via `go list`: a
-   stdlib subset plus `internal/classifier`. Explicitly forbidden:
+   stdlib subset plus `internal/classifier`, matched exactly, not as a
+   prefix, so its subpackages are forbidden: a wrapper importing the
+   test-vector pool (`internal/classifier/testvectors`, section 5) could
+   answer `/verify` by table lookup, skipping Argon2. Explicitly forbidden:
    `internal/hashcore`, `golang.org/x/crypto/...`,
    `github.com/alexedwards/argon2id`, `crypto/subtle`. `runtime/debug` is
    allowed (legitimate tuning). This is the backstop described in section
