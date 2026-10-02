@@ -218,17 +218,22 @@
 - Reason: per-window Runs let a mutant cache hash strings from an earlier window and replay them later, skipping Argon2, caught only by sampled FullVerify; a late hash not recorded could be replayed once on time. Stage 5's burst uses its own Run.
 - Reverse: DESIGN.md sec 8 edit (hash success conditions); drop the late-salt recording in Classify.
 
-## 2026-10-02 · PR #16 *(inferred)* · Test-vector pool in internal/classifier/testvectors; Stage 1 allowlist matches internal/classifier exactly
+## 2026-10-02 · PR #16 · Test-vector pool in internal/classifier/testvectors; Stage 1 allowlist matches internal/classifier exactly
 - Rejected: the pool inside internal/classifier (DESIGN.md sec 5's earlier wording); a prefix match on internal/classifier.
 - Reason: wrapper imports internal/classifier; with the pool reachable, a mutant could answer /verify by table lookup, skipping Argon2. See DESIGN.md sec 5, sec 7 Stage 1.
 - Reverse: move vectors.json and its loader into internal/classifier; DESIGN.md sec 5/sec 7 edit.
 
-## 2026-10-02 · PR #16 *(inferred)* · Mismatch pairs are stored in vectors.json, not derived by callers
+## 2026-10-02 · PR #16 · Mismatch pairs are stored in vectors.json, not derived by callers
 - Rejected: storing only matching pairs and letting gate/loadgen pair passwords with other hashes.
 - Reason: one definition of "should reject" for gate and loadgen, checked once by the pool-validity test; callers cannot pick a pairing that accidentally matches.
 - Reverse: drop Match=false entries from gen and the format; derive mismatches in callers.
 
-## 2026-10-02 · PR #16 *(inferred)* · Pool-validity test (every pair through hashcore Verify) always runs in non-race test runs, including under -short; skipped under -race only
+## 2026-10-02 · PR #16 · Pool-validity test (every pair through hashcore Verify) always runs in non-race test runs, including under -short; skipped under -race only
 - Rejected: skipping it under -short as a slow Argon2 test (~6s); running it under -race too (~60s on 4 cores).
 - Reason: the pool is the ground truth for gate and loadgen; a stale or corrupt vectors.json must fail every non-race run. Under -race it (and TestAgreement) has no shared mutable state to race on, and CI's plain go test step runs both.
 - Reverse: add `if testing.Short() { t.Skip(...) }` to TestPoolVerify; drop the raceEnabled skips (race_test.go, norace_test.go).
+
+## 2026-10-02 · PR #17 *(inferred)* · Pre-packet self-review by a read-only reviewer subagent (.claude/agents/reviewer.md) on Go changes
+- Rejected: relying on the planning chat alone to review.
+- Reason: the chat cannot read the repo, so each finding it makes costs a relay round trip, and most were checkable in-repo. One run per packet on the final tree, not per edit, to keep usage down; docs-only changes skip it.
+- Reverse: delete .claude/agents/reviewer.md, the self-review bullet in CLAUDE.md's working agreement, and the Self-review: section in docs/handoff.md; restore `.claude/` in .gitignore.

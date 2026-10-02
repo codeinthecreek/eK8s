@@ -30,6 +30,11 @@ by name: "design packet", "review packet" or "approval packet".
   packet opens (after the header) with a `Feedback:` section: one line per
   item, `<item> -- done | declined: <reason> | question: <question>`, so
   the loop closes visibly.
+- Review and approval packets also carry a `Self-review:` section
+  (after `Feedback:` when there is one): the reviewer subagent's findings
+  on the final tree (CLAUDE.md), one line per finding,
+  `<n> <severity> <file:line> <finding> -- fixed | declined: <reason> | deferred: <where recorded>`,
+  or `Self-review: skipped (docs-only)`.
 
 ## Design packet
 
