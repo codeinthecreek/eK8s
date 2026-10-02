@@ -228,7 +228,7 @@
 - Reason: one definition of "should reject" for gate and loadgen, checked once by the pool-validity test; callers cannot pick a pairing that accidentally matches.
 - Reverse: drop Match=false entries from gen and the format; derive mismatches in callers.
 
-## 2026-10-02 · PR #16 *(inferred)* · Pool-validity test (every pair through hashcore Verify) always runs, including under -short
-- Rejected: skipping it under -short as a slow Argon2 test (~6s; ~60s under -race on 4 cores).
-- Reason: the pool is the ground truth for gate and loadgen; a stale or corrupt vectors.json must fail every test run, not only full ones.
-- Reverse: add `if testing.Short() { t.Skip(...) }` to TestPoolVerify.
+## 2026-10-02 · PR #16 *(inferred)* · Pool-validity test (every pair through hashcore Verify) always runs in non-race test runs, including under -short; skipped under -race only
+- Rejected: skipping it under -short as a slow Argon2 test (~6s); running it under -race too (~60s on 4 cores).
+- Reason: the pool is the ground truth for gate and loadgen; a stale or corrupt vectors.json must fail every non-race run. Under -race it (and TestAgreement) has no shared mutable state to race on, and CI's plain go test step runs both.
+- Reverse: add `if testing.Short() { t.Skip(...) }` to TestPoolVerify; drop the raceEnabled skips (race_test.go, norace_test.go).

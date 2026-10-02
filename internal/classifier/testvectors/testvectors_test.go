@@ -103,7 +103,11 @@ func TestPoolMultiByte(t *testing.T) {
 
 // TestPoolVerify runs every pair through the fixed core. Not skipped
 // under -short: the pool is the ground truth for gate and loadgen.
+// Skipped under -race only.
 func TestPoolVerify(t *testing.T) {
+	if raceEnabled {
+		t.Skip("Argon2-heavy, no shared mutable state to race on; the plain go test step runs it on every CI run")
+	}
 	core := hashcore.New()
 	for i, p := range Pairs() {
 		t.Run(fmt.Sprintf("pair%03d", i), func(t *testing.T) {
@@ -160,7 +164,11 @@ func TestNegatives(t *testing.T) {
 // TestAgreement checks that the classifier's canonical-PHC check and
 // hashcore's parameter check agree: hashcore Verify returns no error if
 // and only if a hash response carrying the string classifies Success.
+// Skipped under -race only.
 func TestAgreement(t *testing.T) {
+	if raceEnabled {
+		t.Skip("Argon2-heavy, no shared mutable state to race on; the plain go test step runs it on every CI run")
+	}
 	type tc struct{ name, password, hash string }
 	var cases []tc
 
