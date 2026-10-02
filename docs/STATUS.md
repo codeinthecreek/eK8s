@@ -4,16 +4,18 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 *(inferred)* are guesses, not read from the repo; correct them.
 
 ## Now
-- `claude/classifier-testvectors-pool-ymr1of` (PR #16 *(inferred)*): internal/classifier PR B of 2: test-vector pool in internal/classifier/testvectors (embedded vectors.json: 256 passwords x match/mismatch pairs, 7 gate-only negatives), its generator (./gen, via hashcore), pool-validity and hashcore-vs-classifier agreement tests; DESIGN.md sec 5/sec 7 make the Stage 1 allowlist match internal/classifier exactly.
+- `claude/pre-packet-self-review-8oxgvr` (PR #17 *(inferred)*): pre-packet self-review: read-only reviewer subagent (.claude/agents/reviewer.md), run once on the final tree before a commit diff or review/approval packet for Go changes; CLAUDE.md working-agreement bullet; Self-review: section in docs/handoff.md packets, and [missed]/[repo-unseeable]/[dup] tags on Feedback: lines to measure the reviewer.
 
 ## Next
-- gate/ (DESIGN.md sec 7), consuming testvectors for Stage 2 interop and contract conformance (*(inferred)* next step; not yet planned).
+- gate/ (DESIGN.md sec 7), consuming testvectors for Stage 2 interop and contract conformance; design packet first.
 
 ## Parked
 - Fitness (sec 9): treat integrity failures (verify_mismatch, verify_error, wrong_match, non_canonical_phc, salt_reused) as disqualifying, not one failed request: a mutant can relabel undelivered Argon2 results (timed-out clients) as hashes for later requests, caught only by sampled FullVerify.
 - Verify-result caching: a finite pool lets a mutant memoize (password, hash) -> match and skip Argon2; loadgen should draw some verify pairs from the variant's own fresh /hash output.
+- Pool-hash replay: a mutant can remember (password, hash) pairs from match=true pool /verify requests and answer /hash for that password with the remembered hash, skipping Argon2; the Run never sees that salt (it records salts from /hash responses only). loadgen must not send pool passwords to /hash, or the Run must be pre-seeded with the pool's salts.
 
 ## Recent
+- #16 internal/classifier PR B: test-vector pool (internal/classifier/testvectors), generator, pool-validity and agreement tests (2026-10-02)
 - #15 internal/classifier PR A: three-bucket response classifier with injected Verifier (2026-10-02)
 - #14 handoff: shorten review-packet full diffs (2026-10-02)
 - #13 CLAUDE.md: reconcile STATUS.md and decisions.md with main at PR start (2026-10-01)

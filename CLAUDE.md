@@ -47,6 +47,15 @@ Applies to every session in this repo.
 - Material for my planning/review chat goes in the packet formats in
   `docs/handoff.md`, and only when I ask for a packet; the end-of-task
   report rule (a)-(g) is unchanged.
+- Self-review: on any change touching Go code, before showing a diff
+  for commit approval or producing a review or approval packet, run the
+  `reviewer` subagent (`.claude/agents/reviewer.md`) once on the final
+  tree, giving it the task prompt and the base SHA. Fix its must-fix
+  findings (re-run it only if a fix was non-trivial) and record every
+  finding's disposition (fixed / declined / deferred), in the packet's
+  `Self-review:` section when there is one (`docs/handoff.md`).
+  Docs-only changes may skip it. One review per packet, not per edit,
+  to keep usage down.
 
 ## Repo layout
 
