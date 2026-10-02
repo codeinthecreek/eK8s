@@ -353,13 +353,16 @@ internal/classifier/ (section 5).
   (same constant as the fitness function's latency-normalization ceiling,
   section 9 -- one number serving both purposes rather than two thresholds
   that could drift apart).
-- **`graceful_shed`** -- HTTP 503 **and** a `Retry-After` header present.
-  Both parts of the contract required; a bare 503 (e.g. from the Service
-  reporting no ready endpoints) must not be indistinguishable from the
-  wrapper's own deliberate load-shedding.
-- **`failed`** -- anything else: connection refused/reset, response
-  exceeding the hang-timeout, a 5xx without the `Retry-After` contract, a
-  malformed response.
+- **`graceful_shed`** -- HTTP 503 **and** exactly one `Retry-After` value
+  that parses as delay-seconds or an HTTP-date (RFC 9110 sec 10.2.3; it is
+  a single-value field, so a repeated header fails), arriving within the
+  hang-timeout ceiling. Both parts of the contract required; a bare 503
+  (e.g. from the Service reporting no ready endpoints) must not be
+  indistinguishable from the wrapper's own deliberate load-shedding.
+- **`failed`** -- anything else: connection refused/reset, any response
+  arriving after the hang-timeout (a 503 shed included), a 5xx without the
+  `Retry-After` contract, a malformed response (including a 2xx body that
+  is not exactly the contract object below).
 
 For `verify` calls specifically, "success" additionally requires the
 *objectively correct* accept/reject determination against the shared
@@ -374,8 +377,14 @@ stress-active half where the fitness signal is most trusted.)
 `hash` calls get the same anti-gaming treatment. A hash response is
 `success` only if all of the following hold: 2xx within the hang-timeout
 ceiling; a well-formed PHC string; exactly the section 6 parameters; a
-salt not repeated within the run; and it verifies against the password
-sent. Structural checks (format, parameters, salt reuse) apply to every
+salt not repeated within the variant's live lifetime; and it verifies
+against the password sent. "Live lifetime" means one classifier run from
+promotion to cull, not one per observation window, so a mutant cannot
+cache hash strings from an earlier window and replay them later to skip
+Argon2 (only sampled full verification would catch that). Stage 5's burst
+uses its own run. Salts from 2xx hash responses that arrive after the
+hang-timeout are recorded too, so a late hash cannot be replayed on time.
+Structural checks (format, parameters, salt reuse) apply to every
 response. Full verification is mandatory for every Stage 5 response; in
 the sustained observation window it is applied to a sample, since a full
 verify costs one Argon2 run on the same node.
@@ -389,11 +398,14 @@ implements it, and a mutant that breaks it fails Stage 2.
 - `POST /hash`, JSON `{"password": string}` -> 200 `{"hash": string}`.
 - `POST /verify`, JSON `{"password": string, "hash": string}` -> 200
   `{"match": bool}`.
+- A 200 body is exactly the contract object: one JSON object holding only
+  its one key (matched case-sensitively), with a non-null value of the
+  stated type, and nothing after it but whitespace.
 - Malformed input, an empty or >1024-byte password on either endpoint
   (`/hash` or `/verify`), or a hash whose parameters hashcore rejects
   -> 400.
-- Deliberate load shedding -> 503 with a `Retry-After` header (the
-  `graceful_shed` contract above).
+- Deliberate load shedding -> 503 with exactly one valid `Retry-After`
+  value (the `graceful_shed` contract above).
 - `GET /healthz` -> 200 while the process is up; `GET /readyz` -> 200
   when ready, 503 otherwise.
 
