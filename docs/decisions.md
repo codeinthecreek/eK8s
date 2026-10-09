@@ -307,3 +307,8 @@
 - Rejected: gate/testdata/candidates/<case>/ with full copies of the wrapper.
 - Reason: fixtures would be stale copies of gen 0; each case is one edit to the live gen-0 files. PR1's tests are pure go list runs, fine under -race.
 - Reverse: add fixture dirs and point TestRejects at them.
+
+## 2026-10-09 · PR #18 *(inferred)* · CI pins go-version 1.26.9 in ci.yml (departs from the PR #7 "latest patch" entry)
+- Rejected: '1.26.x' with check-latest (setup-go resolves it from the actions/go-versions manifest, which lags: newest 1.26 there is 1.26.8).
+- Reason: govulncheck fails on stdlib advisories fixed in 1.26.9, but setup-go resolves '1.26.x' to the runner's cached 1.26.8 and its manifest has nothing newer; a version missing from the manifest is downloaded from go.dev instead.
+- Revisit: switch back to '1.26.x' once the manifest lists >= 1.26.9.
