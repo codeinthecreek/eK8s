@@ -326,7 +326,7 @@
 ## 2026-10-09 · PR #21 *(inferred)* · Bare boot: bwrap argv, no /dev, no --disable-userns
 - Argv (gate/boot.go bwrapArgs): --unshare-all --unshare-user --die-with-parent --new-session --clearenv --setenv EK8S_VARIANT <label> --uid 65532 --gid 65532 --hostname hasher-<10>-<5> (random per run, pod-like: removes the fixed-hostname tell only; others remain, STATUS Parked) --ro-bind <bin> /service --proc /proc --chdir / --cap-drop ALL --info-fd 3 /service.
 - Rejected: --dev /dev and --disable-userns: either makes the relay's `nsenter -U -n` fail with EPERM (bisected in the PR2 design session). Hashing works without /dev (verified); without syscall, os/exec or unsafe the candidate cannot call unshare/clone anyway.
-- Reason: --unshare-user is explicit because --unshare-all only tries it. Verified as root and as an unprivileged user.
+- Reason: --unshare-user is explicit because --unshare-all only tries it. Verified as root and as an unprivileged user, but not under Ubuntu's AppArmor userns restriction (fails there; PR #21 CI entry).
 - Reverse: edit bwrapArgs; adding --dev or --disable-userns needs another way to reach the candidate (Q1 options A/D).
 
 ## 2026-10-09 · PR #21 *(inferred)* · Gate reaches the sandbox via a relay: nsenter -U -n into its namespaces, Unix socket in the gate tmp dir (Q1 option B)
@@ -349,3 +349,8 @@
 - Rejected: a Config knob to skip the docker sub-check; skipping all Stage 2 tests on hosts without docker (cloud sessions).
 - Reason: tests swap the unexported dockerSubCheck var for a stub when no daemon runs, so Stages 2-3 are still tested; CI apt-installs bubblewrap and sets the env var, so there both are required.
 - Reverse: drop the env var from ci.yml and setupHost in gate/stages_test.go.
+
+## 2026-10-09 · PR #21 *(inferred)* · CI lifts Ubuntu's AppArmor userns restriction (sysctl) for the bare boot
+- Rejected: running the gate tests as root (root bypasses the restriction, hiding the unprivileged path operators use); a shared host net ns (excluded: candidate egress).
+- Reason: on ubuntu-latest (24.04) bwrap got a userns without capabilities: "bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted" (run 37903906043). `sysctl kernel.apparmor_restrict_unprivileged_userns=0` on the ephemeral runner is one line; operator hosts should prefer an AppArmor profile granting bwrap userns (CLAUDE.md, gate/doc.go; STATUS Parked).
+- Reverse: drop the sysctl step from ci.yml (CI then fails at boot unless a bwrap profile is installed instead).

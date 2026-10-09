@@ -10,6 +10,9 @@
 //
 // Prerequisites: the module cache holds every module (`go mod download`
 // in the repo), since those go commands run with GOPROXY=off; bwrap and
-// nsenter on PATH; a docker daemon. A missing one is a gate fault (an
-// error from Run), never a candidate failure.
+// nsenter on PATH; unprivileged user namespaces that keep their
+// capabilities (on Ubuntu >= 23.10, an AppArmor profile granting bwrap
+// userns, preferred, or kernel.apparmor_restrict_unprivileged_userns=0);
+// a docker daemon. A missing one is a gate fault (an error from Run),
+// never a candidate failure.
 package gate

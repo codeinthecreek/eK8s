@@ -4,13 +4,14 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 *(inferred)* are guesses, not read from the repo; correct them.
 
 ## Now
-- `claude/gate-pr2` (PR #21 *(inferred)*): gate Stage 1 build/boot (static build, bare boot under bwrap with its own network namespace via an nsenter relay, FROM scratch image), Stage 2 (interop + contract), Stage 3 (cost params); minimum-toolchain gate fault; CI installs bubblewrap.
+- `claude/gate-pr2` (PR #21 *(inferred)*): gate Stage 1 build/boot (static build, bare boot under bwrap with its own network namespace via an nsenter relay, FROM scratch image), Stage 2 (interop + contract), Stage 3 (cost params); minimum-toolchain gate fault; CI installs bubblewrap and lifts Ubuntu's AppArmor userns restriction.
 
 ## Next
 - gate PR3: Stage 4 (cgo race build, shed retry, race-report capture).
 - deploy/ (kind config, manifests, stress-ng; name the variant Deployment `hasher`, or change newPodName's prefix in gate/boot.go to match, so the sandbox hostname stays pod-like), then loadgen (sustained + burst), then gate PR4: Stage 5.
 
 ## Parked
+- Gate host userns: verify an AppArmor profile granting bwrap `userns` (CI option B) on the gate host when deploy/ is built, and prefer it over the sysctl CI uses on operator hosts.
 - Fitness (sec 9): treat integrity failures (verify_mismatch, verify_error, wrong_match, non_canonical_phc, salt_reused) as disqualifying, not one failed request: a mutant can relabel undelivered Argon2 results (timed-out clients) as hashes for later requests, caught only by sampled FullVerify.
 - Verify-result caching: a finite pool lets a mutant memoize (password, hash) -> match and skip Argon2; loadgen should draw some verify pairs from the variant's own fresh /hash output.
 - Pool-hash replay: a mutant can remember (password, hash) pairs from match=true pool /verify requests and answer /hash for that password with the remembered hash, skipping Argon2; the Run never sees that salt (it records salts from /hash responses only). loadgen must not send pool passwords to /hash, or the Run must be pre-seeded with the pool's salts.

@@ -49,6 +49,12 @@ jobs:
           go-version: '1.26.9'
       # Gate Stage 1 boots the candidate under bubblewrap.
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends bubblewrap
+      # Ubuntu >= 23.10 restricts unprivileged user namespaces through
+      # AppArmor (kernel.apparmor_restrict_unprivileged_userns=1): bwrap
+      # gets a user namespace without capabilities and cannot set up the
+      # sandbox's loopback ("loopback: Failed RTM_NEWADDR"). The tests stay
+      # unprivileged; only this host knob changes.
+      - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - run: go vet ./...
       - run: go test -count=1 ./...
       - run: go test -race -count=1 ./...
