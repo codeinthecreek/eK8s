@@ -76,6 +76,8 @@ internal/wrapper/   evolvable: concurrency/backpressure/timeouts. The only
                     source the mutation driver copies into its sandbox.
                     hasher.go (fixed core's calling interface) is pinned.
 gate/               correctness gate, five ordered stages (DESIGN.md sec 7).
+  cmd/gate/         CLI for manual gate runs; the orchestrator calls the
+                    package directly.
 loadgen/            open-loop load generator: per-variant sustained streams +
                     Stage 5 burst mode. Imports internal/classifier.
 deploy/             kind cluster config, k8s manifests, stress-ng.
@@ -88,8 +90,15 @@ docs/               decisions.md: implementation-level decision log.
 ## Build / test
 
 - `go build ./...` -- local build.
-- `go test ./...` -- unit tests (gate Stage 1's local sub-check; Stage 4's
-  `-race` build is a separate binary, never the deployed image).
+- `go test ./...` -- this repo's unit tests, gen-0 wrapper tests included.
+  The gate runs no candidate tests (candidates carry no `_test.go`).
+- `go mod download` -- once per module cache, before any gate run: the
+  gate's go commands run with `GOPROXY=off`. On a host whose go is older
+  than the go directive, the first gate run may download that toolchain
+  (checksum-verified) before any check.
+- `go run ./gate/cmd/gate -candidate DIR` -- gate one candidate wrapper
+  by hand. Stage 4's `-race` build needs cgo and a C compiler (gcc); it is
+  a separate binary, never the deployed image.
 - `docker build` -- Stage 1's second sub-check (container boots, health
   endpoint responds).
 - `kind load docker-image <image> --name <cluster>` -- load a locally built
