@@ -4,7 +4,6 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 *(inferred)* are guesses, not read from the repo; correct them.
 
 ## Now
-- `claude/pre-packet-self-review-8oxgvr` (PR #17 *(inferred)*): pre-packet self-review: read-only reviewer subagent (.claude/agents/reviewer.md), run once on the final tree before a commit diff or review/approval packet for Go changes; CLAUDE.md working-agreement bullet; Self-review: section in docs/handoff.md packets, and [missed]/[repo-unseeable]/[dup] tags on Feedback: lines to measure the reviewer.
 
 ## Next
 - gate/ (DESIGN.md sec 7), consuming testvectors for Stage 2 interop and contract conformance; design packet first.
@@ -15,6 +14,7 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 - Pool-hash replay: a mutant can remember (password, hash) pairs from match=true pool /verify requests and answer /hash for that password with the remembered hash, skipping Argon2; the Run never sees that salt (it records salts from /hash responses only). loadgen must not send pool passwords to /hash, or the Run must be pre-seeded with the pool's salts.
 
 ## Recent
+- #17 Pre-packet self-review by a read-only reviewer subagent (2026-10-02)
 - #16 internal/classifier PR B: test-vector pool (internal/classifier/testvectors), generator, pool-validity and agreement tests (2026-10-02)
 - #15 internal/classifier PR A: three-bucket response classifier with injected Verifier (2026-10-02)
 - #14 handoff: shorten review-packet full diffs (2026-10-02)
