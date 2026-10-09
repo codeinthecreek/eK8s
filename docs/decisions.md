@@ -317,3 +317,8 @@
 - Rejected: CI go-version-file now (the actions/go-versions manifest still lags 1.26.9; revisit with the CI unpin item in STATUS).
 - Reason: under GOTOOLCHAIN=auto, local, cloud and gate resolveToolchain builds use >= 1.26.9, never 1.26.0's vulnerable stdlib. Each Go security patch needs this line bumped.
 - Reverse: delete the toolchain line.
+
+## 2026-10-09 · PR #21 *(inferred)* · Gate fault when the resolved go is older than go.mod's toolchain line (Q3 item 15)
+- Rejected: trusting the toolchain line alone (under GOTOOLCHAIN=local it is only a preference, so a 1.26.0-1.26.8 go would build the deployed binary).
+- Reason: resolveToolchain compares `go env GOVERSION` with go.mod's toolchain line (the go directive when there is none); older is an error from Run, before any candidate check that builds.
+- Reverse: drop the minGoVersion comparison in gate/assemble.go.

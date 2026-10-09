@@ -241,8 +241,10 @@ and the module and build caches (resolved once from the operator's
 `GOOS=linux`, `GOARCH` of the gate host, `CGO_ENABLED` per build). So the
 module cache must already be populated (`go mod download` in the repo).
 That one operator `go env` runs under the operator's `GOTOOLCHAIN`: on a
-host whose go is older than the go directive, the first run may download
-the directive's toolchain (checksum-verified) before any check.
+host whose go is older than go.mod's `toolchain` line (the go directive if
+there is none), the first run may download that toolchain
+(checksum-verified) before any check. A resolved go still older than it
+is a gate fault: the deployed binary never gets an older stdlib.
 
 Pre-build checks first, zero-tolerance, each logged distinctly from the
 build/boot sub-checks below:

@@ -379,3 +379,60 @@ func TestReportPassed(t *testing.T) {
 		t.Error("empty Report passed")
 	}
 }
+
+func TestParseGoVersion(t *testing.T) {
+	for s, want := range map[string]goVersion{
+		"go1.26.9":    {1, 26, 9},
+		"go1.26":      {1, 26, -2},
+		"go1.27rc1":   {1, 27, -1},
+		"go1.27beta2": {1, 27, -1},
+		"go1.100.0":   {1, 100, 0},
+	} {
+		if got, ok := parseGoVersion(s); !ok || got != want {
+			t.Errorf("%s: %v %v, want %v", s, got, ok, want)
+		}
+	}
+	for _, s := range []string{"", "1.26.9", "go1", "go1.26.9 X:foo", "devel go1.27", "go1.26.9.1"} {
+		if _, ok := parseGoVersion(s); ok {
+			t.Errorf("%q parsed", s)
+		}
+	}
+	if compareGoVersions(goVersion{1, 27, -1}, goVersion{1, 26, 9}) <= 0 ||
+		compareGoVersions(goVersion{1, 27, -1}, goVersion{1, 27, 0}) >= 0 ||
+		compareGoVersions(goVersion{1, 27, -2}, goVersion{1, 27, -1}) >= 0 {
+		t.Error("compareGoVersions order")
+	}
+}
+
+func TestMinGoVersion(t *testing.T) {
+	got, err := minGoVersion(filepath.Join(repoRoot(t), "go.mod"))
+	if err != nil || compareGoVersions(got, goVersion{1, 26, 0}) <= 0 {
+		t.Fatalf("repo go.mod: %v %v (want its toolchain line, above the go directive)", got, err)
+	}
+	dir := t.TempDir()
+	mod := filepath.Join(dir, "go.mod")
+	for content, want := range map[string]goVersion{
+		"module m\n\ngo 1.26.0\n":                       {1, 26, 0},
+		"module m\n\ngo 1.26.0\n\ntoolchain go1.26.9\n": {1, 26, 9},
+	} {
+		must(t, os.WriteFile(mod, []byte(content), 0o644))
+		if got, err := minGoVersion(mod); err != nil || got != want {
+			t.Errorf("%q: %v %v, want %v", content, got, err, want)
+		}
+	}
+	must(t, os.WriteFile(mod, []byte("module m\n"), 0o644))
+	if _, err := minGoVersion(mod); err == nil {
+		t.Error("go.mod without go or toolchain line accepted")
+	}
+}
+
+// TestToolchainTooOld: a resolved go older than go.mod's toolchain line
+// is a gate fault. GOTOOLCHAIN=local keeps go from switching to it.
+func TestToolchainTooOld(t *testing.T) {
+	dir := t.TempDir()
+	must(t, os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module m\n\ngo 1.26.0\n\ntoolchain go1.999.0\n"), 0o644))
+	t.Setenv("GOTOOLCHAIN", "local")
+	if _, err := resolveToolchain(context.Background(), dir); err == nil || !strings.Contains(err.Error(), "older than go.mod's minimum go1.999.0") {
+		t.Fatalf("err %v", err)
+	}
+}

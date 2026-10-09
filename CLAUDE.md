@@ -94,8 +94,9 @@ docs/               decisions.md: implementation-level decision log.
   The gate runs no candidate tests (candidates carry no `_test.go`).
 - `go mod download` -- once per module cache, before any gate run: the
   gate's go commands run with `GOPROXY=off`. On a host whose go is older
-  than the go directive, the first gate run may download that toolchain
-  (checksum-verified) before any check.
+  than go.mod's toolchain line, the first gate run may download that
+  toolchain (checksum-verified) before any check; a resolved go still
+  older than it is a gate fault.
 - `go run ./gate/cmd/gate -candidate DIR` -- gate one candidate wrapper
   by hand. Stage 4's `-race` build needs cgo and a C compiler (gcc); it is
   a separate binary, never the deployed image.
