@@ -4,7 +4,6 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 *(inferred)* are guesses, not read from the repo; correct them.
 
 ## Now
-- `claude/gate-pr-split-design-aq3sd8` (PR #18 *(inferred)*): gate PR1 of 4: build-tree assembly and Stage 1 pre-build checks (candidate file set, hasher pin, build-constraint ban, go list allowlist under the deployed and race builds), gate/cmd/gate CLI; DESIGN.md sec 5, 7, 12 and CLAUDE.md edits for the approved gate design.
 
 ## Next
 - gate PR2: Stage 1 build/boot (static build, bare boot under bwrap, FROM scratch image), Stage 2 (HTTP to the booted binary, X-EK8s-Variant check, classifier Run), Stage 3.
@@ -18,6 +17,7 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 - CI: unpin go-version 1.26.9 back to '1.26.x' once actions/go-versions' manifest lists >= 1.26.9 (docs/decisions.md, PR #18 entry).
 
 ## Recent
+- #18 Gate PR1 of 4: build-tree assembly and Stage 1 pre-build checks (candidate file set, hasher pin, build-constraint ban, go list allowlist under the deployed and race builds), gate/cmd/gate CLI; DESIGN.md sec 5, 7, 12 and CLAUDE.md edits for the approved gate design (2026-10-09)
 - #17 Pre-packet self-review by a read-only reviewer subagent (2026-10-02)
 - #16 internal/classifier PR B: test-vector pool (internal/classifier/testvectors), generator, pool-validity and agreement tests (2026-10-02)
 - #15 internal/classifier PR A: three-bucket response classifier with injected Verifier (2026-10-02)
