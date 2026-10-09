@@ -354,3 +354,9 @@
 - Rejected: running the gate tests as root (root bypasses the restriction, hiding the unprivileged path operators use); a shared host net ns (excluded: candidate egress).
 - Reason: on ubuntu-latest (24.04) bwrap got a userns without capabilities: "bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted" (run 37903906043). `sysctl kernel.apparmor_restrict_unprivileged_userns=0` on the ephemeral runner is one line; operator hosts should prefer an AppArmor profile granting bwrap userns (CLAUDE.md, gate/doc.go; STATUS Parked).
 - Reverse: drop the sysctl step from ci.yml (CI then fails at boot unless a bwrap profile is installed instead).
+
+## 2026-10-09 · PR #21 *(inferred)* · Sandbox preflight: boot a gate-built probe through the whole bare-boot path before any candidate
+- Decision: gate/internal/probe (stdlib, /healthz like cmd/service) is booted with the same bwrapArgs, nsenter -U -n join, relay "ready" and /healthz, then torn down; any failure is a gate fault (error from Run, no "boot" Result) carrying bwrap's/nsenter's output.
+- Rejected: classifying by a "bwrap:" prefix in the output (gameable: a candidate can print it and exit); --json-status-fd (cannot tell a bwrap setup failure from a candidate's exit 1).
+- Reason: bwrap reports child-pid before it sets up loopback, so on the AppArmor-restricted runner a host failure read as the candidate's boot failure (run 37903906043). Residual gap: a host failure after a passing preflight still reads as a candidate boot failure.
+- Reverse: drop the preflight call in Run and gate/internal/probe.

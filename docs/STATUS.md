@@ -4,7 +4,7 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 *(inferred)* are guesses, not read from the repo; correct them.
 
 ## Now
-- `claude/gate-pr2` (PR #21 *(inferred)*): gate Stage 1 build/boot (static build, bare boot under bwrap with its own network namespace via an nsenter relay, FROM scratch image), Stage 2 (interop + contract), Stage 3 (cost params); minimum-toolchain gate fault; CI installs bubblewrap and lifts Ubuntu's AppArmor userns restriction.
+- `claude/gate-pr2` (PR #21 *(inferred)*): gate Stage 1 build/boot (static build, bare boot under bwrap with its own network namespace via an nsenter relay, FROM scratch image), Stage 2 (interop + contract), Stage 3 (cost params); minimum-toolchain gate fault; CI installs bubblewrap and lifts Ubuntu's AppArmor userns restriction; a sandbox preflight (gate-built probe) makes host sandbox failures gate faults.
 
 ## Next
 - gate PR3: Stage 4 (cgo race build, shed retry, race-report capture).

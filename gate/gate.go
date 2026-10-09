@@ -42,6 +42,7 @@ func Run(ctx context.Context, cfg Config) (r Report, err error) {
 	defer os.RemoveAll(work)
 	service := filepath.Join(work, "service")
 	relay := filepath.Join(work, "relay")
+	probe := filepath.Join(work, "probe")
 
 	// Stage 1 build/boot sub-check 1: static build, bare boot.
 	_, out, err := goBuild(ctx, tc, tree, "cmd/service", service)
@@ -51,13 +52,18 @@ func Run(ctx context.Context, cfg Config) (r Report, err error) {
 	if !r.add(1, "build", out) {
 		return r, nil
 	}
-	if ok, out, err := goBuild(ctx, tc, cfg.RepoRoot, relayPkg, relay); err != nil {
-		return r, fmt.Errorf("build relay: %w", err)
-	} else if !ok {
-		return r, fmt.Errorf("build relay: %s", out)
+	for _, b := range []struct{ pkg, out string }{{relayPkg, relay}, {probePkg, probe}} {
+		if ok, out, err := goBuild(ctx, tc, cfg.RepoRoot, b.pkg, b.out); err != nil {
+			return r, fmt.Errorf("build %s: %w", b.pkg, err)
+		} else if !ok {
+			return r, fmt.Errorf("build %s: %s", b.pkg, out)
+		}
+	}
+	if err := preflight(ctx, probe, relay, work); err != nil {
+		return r, err
 	}
 	label := newLabel()
-	sb, problem, err := bootBare(ctx, service, relay, work, label)
+	sb, problem, err := bootBare(ctx, "candidate", service, relay, work, label)
 	if err != nil {
 		return r, err
 	}
@@ -98,8 +104,12 @@ func Run(ctx context.Context, cfg Config) (r Report, err error) {
 // docker daemon, so Stages 2-3 still run there.
 var dockerSubCheck = checkDocker
 
-// relayPkg is the relay's package, built from the repo (bootBare).
-const relayPkg = "gate/internal/relay"
+// relayPkg and probePkg are the relay's and the preflight probe's
+// packages, built from the repo per run (bootBare, preflight).
+const (
+	relayPkg = "gate/internal/relay"
+	probePkg = "gate/internal/probe"
+)
 
 // preBuild runs Stage 1's pre-build checks, adding a Result per check;
 // ok reports whether all passed. It returns the resolved toolchain and

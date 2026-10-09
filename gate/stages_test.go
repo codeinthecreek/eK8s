@@ -3,6 +3,7 @@ package gate
 import (
 	"bufio"
 	"context"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -291,6 +292,87 @@ func TestMissingHostToolIsGateFault(t *testing.T) {
 	}
 	if last := rep.Results[len(rep.Results)-1]; last.Check != "build" || !last.Pass {
 		t.Fatalf("results before the fault: %+v", rep.Results)
+	}
+}
+
+// fakeBwrapPath puts a bwrap script on a PATH holding only it, go and the
+// real nsenter, so the preflight's handling of a host failure is tested
+// without a real sandbox.
+func fakeBwrapPath(t *testing.T, script string) {
+	t.Helper()
+	bin := t.TempDir()
+	for _, tool := range []string{"go", "nsenter"} {
+		p, err := exec.LookPath(tool)
+		if err != nil {
+			if os.Getenv(requireToolsEnv) == "1" {
+				t.Fatalf("%s=1 but %s is missing", requireToolsEnv, tool)
+			}
+			t.Skipf("%s not on PATH", tool)
+		}
+		must(t, os.Symlink(p, filepath.Join(bin, tool)))
+	}
+	must(t, os.WriteFile(filepath.Join(bin, "bwrap"), []byte("#!/bin/sh\n"+script), 0o755))
+	t.Setenv("PATH", bin)
+}
+
+// TestPreflightIsGateFault: a host whose sandbox fails, after bwrap has
+// reported the child (the ubuntu-latest AppArmor case) or at the nsenter
+// join, makes Run return an error before any candidate boots: no "boot"
+// Result, bwrap's or nsenter's output in the error.
+func TestPreflightIsGateFault(t *testing.T) {
+	for _, tt := range []struct {
+		name, script string
+		want         []string
+	}{
+		{"bwrap setup fails after child-pid", `printf '{"child-pid": %d}\n' $$ >&3
+exec 3>&-
+echo "bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted" >&2
+exit 1
+`, []string{"sandbox preflight", "RTM_NEWADDR"}},
+		{"nsenter join fails", `printf '{"child-pid": %d}\n' $$ >&3
+exec 3>&-
+exec /bin/sleep 60
+`, []string{"sandbox preflight", "relay did not start", "nsenter"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			fakeBwrapPath(t, tt.script)
+			rep, err := Run(context.Background(), Config{RepoRoot: repoRoot(t), CandidateDir: gen0(t)})
+			if err == nil {
+				t.Fatalf("no error; results %+v", rep.Results)
+			}
+			for _, w := range tt.want {
+				if !strings.Contains(err.Error(), w) {
+					t.Errorf("error %q lacks %q", err, w)
+				}
+			}
+			if last := rep.Results[len(rep.Results)-1]; last.Check != "build" || !last.Pass {
+				t.Fatalf("results after the build: %+v", rep.Results)
+			}
+		})
+	}
+}
+
+// TestPreflightTearsDown: a passing preflight stops its probe and relay,
+// so nothing answers on its socket afterwards.
+func TestPreflightTearsDown(t *testing.T) {
+	setupHost(t)
+	tc, err := resolveToolchain(context.Background(), repoRoot(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	work := t.TempDir()
+	relay, probe := filepath.Join(work, "relay"), filepath.Join(work, "probe")
+	for _, b := range []struct{ pkg, out string }{{relayPkg, relay}, {probePkg, probe}} {
+		if ok, out, err := goBuild(context.Background(), tc, repoRoot(t), b.pkg, b.out); !ok || err != nil {
+			t.Fatalf("build %s: %v %s", b.pkg, err, out)
+		}
+	}
+	if err := preflight(context.Background(), probe, relay, work); err != nil {
+		t.Fatal(err)
+	}
+	if c, err := net.Dial("unix", filepath.Join(work, "preflight", "relay.sock")); err == nil {
+		c.Close()
+		t.Fatal("preflight relay still listening after preflight returned")
 	}
 }
 

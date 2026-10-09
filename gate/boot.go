@@ -118,7 +118,8 @@ type sandbox struct {
 	bwrap, relay       *exec.Cmd
 	relayStdin         io.Closer     // closing it (or the gate dying) ends the relay
 	exited, relayEnded chan struct{} // closed once each Wait returns
-	output             *cappedBuffer // the candidate's (and bwrap's) stdout+stderr
+	who                string        // "candidate", or "probe" in the preflight; names it in failures
+	output             *cappedBuffer // the sandboxed binary's (and bwrap's) stdout+stderr
 	client             *http.Client  // reaches the candidate's :8080 via the relay
 }
 
@@ -151,7 +152,7 @@ var hostTools = []string{"bwrap", "nsenter"}
 // with the relay (built at relayBin) listening on a socket in work, and
 // waits for /healthz. problem is non-empty if the candidate failed to
 // come up; err is a gate fault. On success the caller must call stop.
-func bootBare(ctx context.Context, binary, relayBin, work, label string) (sb *sandbox, problem string, err error) {
+func bootBare(ctx context.Context, who, binary, relayBin, work, label string) (sb *sandbox, problem string, err error) {
 	for _, tool := range hostTools {
 		if _, err := exec.LookPath(tool); err != nil {
 			return nil, "", fmt.Errorf("bare boot needs %s on PATH: %w", tool, err)
@@ -167,7 +168,7 @@ func bootBare(ctx context.Context, binary, relayBin, work, label string) (sb *sa
 		return nil, "", err
 	}
 	defer infoR.Close()
-	sb = &sandbox{output: new(cappedBuffer), exited: make(chan struct{})}
+	sb = &sandbox{who: who, output: new(cappedBuffer), exited: make(chan struct{})}
 	sb.bwrap = exec.Command("bwrap", bwrapArgs(binary, label, newPodName())...)
 	sb.bwrap.Env = []string{} // bwrap's own environment; --clearenv covers the candidate's
 	sb.bwrap.Stdout = sb.output
@@ -221,6 +222,29 @@ func bootBare(ctx context.Context, binary, relayBin, work, label string) (sb *sa
 	return sb, "", nil
 }
 
+// preflight boots the fixed, gate-built probe (gate/internal/probe)
+// exactly as a candidate is booted: same bwrapArgs, nsenter join, relay
+// "ready" and /healthz, then teardown. Only gate code runs, so any
+// failure is the host's (no user namespaces with capabilities, a broken
+// nsenter): a gate fault carrying bwrap's and nsenter's output, never a
+// candidate Result. A host failure after a passing preflight still
+// reads as the candidate's boot failure (docs/decisions.md).
+func preflight(ctx context.Context, probeBin, relayBin, work string) error {
+	dir := filepath.Join(work, "preflight") // its own relay.sock
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		return err
+	}
+	sb, problem, err := bootBare(ctx, "probe", probeBin, relayBin, dir, newLabel())
+	if err != nil {
+		return fmt.Errorf("sandbox preflight (gate probe, no candidate code): %w", err)
+	}
+	if problem != "" {
+		return fmt.Errorf("sandbox preflight (gate probe, no candidate code): %s", problem)
+	}
+	sb.stop()
+	return nil
+}
+
 // startRelay runs the relay inside the sandbox's user and network
 // namespaces and waits for it to print "ready". If the join fails because
 // the candidate already exited, that is the candidate's problem;
@@ -271,10 +295,10 @@ func (sb *sandbox) startRelay(ctx context.Context, pid int, relayBin, sock strin
 	// namespaces went with it and the join could not have worked.
 	select {
 	case <-sb.exited:
-		return sb.withOutput("candidate exited during startup: " + sb.bwrap.ProcessState.String()), nil
+		return sb.withOutput(sb.who + " exited during startup: " + sb.bwrap.ProcessState.String()), nil
 	case <-time.After(exitGrace):
 	}
-	return "", fmt.Errorf("relay did not start in the sandbox's namespaces: %s", strings.TrimSpace(relayOut.String()))
+	return "", fmt.Errorf("relay did not start in the sandbox's namespaces: %s", sb.withOutput(strings.TrimSpace(relayOut.String())))
 }
 
 // stop kills bwrap (whose sandbox pid 1 dies with it, taking the
@@ -289,10 +313,11 @@ func (sb *sandbox) stop() {
 	<-sb.exited
 }
 
-// withOutput appends the candidate's captured output to a failure detail.
+// withOutput appends the sandboxed binary's captured output (bwrap's
+// included) to a failure detail.
 func (sb *sandbox) withOutput(problem string) string {
 	if out := strings.TrimSpace(sb.output.String()); out != "" {
-		return problem + "\ncandidate output:\n" + out
+		return problem + "\n" + sb.who + " output:\n" + out
 	}
 	return problem
 }
@@ -311,7 +336,7 @@ func waitHealthy(ctx context.Context, client *http.Client, url, label string, ti
 		}
 		select {
 		case <-exited:
-			return "candidate exited before /healthz answered (last: " + last + ")"
+			return "exited before /healthz answered (last: " + last + ")"
 		case <-ctx.Done():
 			return "cancelled" // the caller reports ctx.Err() as a gate fault
 		case <-time.After(healthPoll):
