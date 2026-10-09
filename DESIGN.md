@@ -241,8 +241,10 @@ and the module and build caches (resolved once from the operator's
 `GOOS=linux`, `GOARCH` of the gate host, `CGO_ENABLED` per build). So the
 module cache must already be populated (`go mod download` in the repo).
 That one operator `go env` runs under the operator's `GOTOOLCHAIN`: on a
-host whose go is older than the go directive, the first run may download
-the directive's toolchain (checksum-verified) before any check.
+host whose go is older than go.mod's `toolchain` line (the go directive if
+there is none), the first run may download that toolchain
+(checksum-verified) before any check. A resolved go still older than it
+is a gate fault: the deployed binary never gets an older stdlib.
 
 Pre-build checks first, zero-tolerance, each logged distinctly from the
 build/boot sub-checks below:
@@ -278,8 +280,11 @@ build/boot sub-checks below:
 
 Known limit: `net/http`, which every wrapper needs, can read files
 (`http.Dir`) and send them out (`http.Client`); no allowlist closes that.
-So the bare boot below runs under bubblewrap (`--clearenv`, binary bound
-read-only, no `/home` or repo bound), and the image is `FROM scratch`.
+So the bare boot below runs under bubblewrap (`--clearenv`, only the
+binary bound, read-only; no `/home`, repo or `/dev`) in its own network
+namespace, so it has no network egress either; the gate reaches its :8080
+through a relay joined to that namespace with `nsenter`, over a Unix
+socket in the gate's private temp dir. The image is `FROM scratch`.
 
 Then two sub-checks, kept distinct in the lineage log because they fail for
 different reasons:
@@ -298,8 +303,8 @@ No kind involved.
 Tests that the mutated wrapper has not corrupted data in flight between
 its concurrency/request-handling layer and the (unchanged) fixed core --
 not re-validating the hashing algorithm itself -- and that it implements
-the error paths of the section 8 HTTP contract. Two groups of assertions,
-all zero-tolerance. Stage 2 talks HTTP to the process Stage 1 booted, one
+the error paths of the section 8 HTTP contract. Three groups of
+assertions, all zero-tolerance. Stage 2 talks HTTP to the process Stage 1 booted, one
 request at a time; every response must carry `X-EK8s-Variant` equal to
 that run's label (section 5).
 
@@ -324,6 +329,10 @@ an unloaded process fails Stage 2.
    library, verify via mutant wrapper, wrong password: must correctly
    reject.
 
+**Password bounds**: `/hash` with fresh 1-byte and 1024-byte passwords
+(never pool passwords) must classify as `success`, fully verified; their
+hashes count toward Stage 3.
+
 **Contract conformance** (section 8): each case must return exactly 400,
 never 2xx:
 1. `/verify` with a malformed hash string.
@@ -332,7 +341,10 @@ never 2xx:
    negative set (section 5). This is the fail-open case: all four interop
    assertions use correct-params hashes, so hashcore's Verify never errors
    there, and a wrapper that turns a Verify error into a match would
-   otherwise pass them, Stage 3, Stage 5 and fitness.
+   otherwise pass them, Stage 3, Stage 5 and fitness. This closes the
+   fail-open bypass at the gate only: a wrapper that detects the gate can
+   fail open outside it, and Stage 5 and fitness never send non-exact
+   parameter hashes, a gap tracked in docs/STATUS.md (Parked).
 3. `/verify` with an empty hash; `/hash` and `/verify` with an empty or
    missing password.
 4. `/hash` and `/verify` with a password over 1024 bytes.

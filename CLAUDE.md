@@ -94,13 +94,21 @@ docs/               decisions.md: implementation-level decision log.
   The gate runs no candidate tests (candidates carry no `_test.go`).
 - `go mod download` -- once per module cache, before any gate run: the
   gate's go commands run with `GOPROXY=off`. On a host whose go is older
-  than the go directive, the first gate run may download that toolchain
-  (checksum-verified) before any check.
+  than go.mod's toolchain line, the first gate run may download that
+  toolchain (checksum-verified) before any check; a resolved go still
+  older than it is a gate fault.
 - `go run ./gate/cmd/gate -candidate DIR` -- gate one candidate wrapper
   by hand. Stage 4's `-race` build needs cgo and a C compiler (gcc); it is
   a separate binary, never the deployed image.
 - `docker build` -- Stage 1's second sub-check (container boots, health
   endpoint responds).
+- Stage 1's bare boot needs `bwrap` (bubblewrap) and `nsenter` on PATH,
+  and unprivileged user namespaces with capabilities: on Ubuntu >= 23.10
+  an AppArmor profile granting bwrap `userns` (preferred), or
+  `sysctl kernel.apparmor_restrict_unprivileged_userns=0` (what CI does).
+  The docker sub-check needs a docker daemon. Gate tests skip without
+  bwrap/nsenter and stub the docker sub-check without a daemon, unless
+  `EK8S_GATE_REQUIRE_TOOLS=1` (CI sets it), which makes both failures.
 - `kind load docker-image <image> --name <cluster>` -- load a locally built
   image straight into the cluster; no registry in this project.
 - Stage 5 (degradation under contention) only runs against the live kind

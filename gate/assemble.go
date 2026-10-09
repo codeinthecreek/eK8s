@@ -10,8 +10,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"syscall"
 )
@@ -180,13 +182,20 @@ type toolchain struct {
 }
 
 // resolveToolchain asks the operator's go, run in repoRoot so any
-// GOTOOLCHAIN switch to the go directive's version happens, for its
-// GOROOT and caches. Every later go command runs that GOROOT's go
-// directly, under toolchain.env. On a host whose go is older than the go
-// directive, this go env may first download that toolchain
-// (checksum-verified) under the operator's GOTOOLCHAIN and GOPROXY.
+// GOTOOLCHAIN switch to go.mod's toolchain or go line happens, for its
+// GOROOT, version and caches. Every later go command runs that GOROOT's
+// go directly, under toolchain.env. On a host whose go is older than
+// go.mod asks for, this go env may first download that toolchain
+// (checksum-verified) under the operator's GOTOOLCHAIN and GOPROXY. A
+// resolved go older than go.mod's minimum (minGoVersion) is a gate
+// fault: under GOTOOLCHAIN=local the toolchain line is only a
+// preference, and the deployed binary must not get an older stdlib.
 func resolveToolchain(ctx context.Context, repoRoot string) (toolchain, error) {
-	cmd := exec.CommandContext(ctx, "go", "env", "-json", "GOROOT", "GOMODCACHE", "GOCACHE")
+	min, err := minGoVersion(filepath.Join(repoRoot, "go.mod"))
+	if err != nil {
+		return toolchain{}, err
+	}
+	cmd := exec.CommandContext(ctx, "go", "env", "-json", "GOROOT", "GOVERSION", "GOMODCACHE", "GOCACHE")
 	cmd.Dir = repoRoot
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
@@ -194,12 +203,21 @@ func resolveToolchain(ctx context.Context, repoRoot string) (toolchain, error) {
 	if err != nil {
 		return toolchain{}, fmt.Errorf("go env: %w: %s", err, strings.TrimSpace(stderr.String()))
 	}
-	var v struct{ GOROOT, GOMODCACHE, GOCACHE string }
+	var v struct{ GOROOT, GOVERSION, GOMODCACHE, GOCACHE string }
 	if err := json.Unmarshal(out, &v); err != nil {
 		return toolchain{}, fmt.Errorf("go env: %w", err)
 	}
 	if v.GOROOT == "" || v.GOMODCACHE == "" || v.GOCACHE == "" {
 		return toolchain{}, fmt.Errorf("go env: empty GOROOT, GOMODCACHE or GOCACHE: %s", out)
+	}
+	// GOVERSION may carry experiments after a space: "go1.26.9 X:foo".
+	release, _, _ := strings.Cut(v.GOVERSION, " ")
+	got, ok := parseGoVersion(release)
+	if !ok {
+		return toolchain{}, fmt.Errorf("go env: unparseable GOVERSION %q", v.GOVERSION)
+	}
+	if compareGoVersions(got, min) < 0 {
+		return toolchain{}, fmt.Errorf("resolved go %s (%s) is older than go.mod's minimum go%d.%d.%d", v.GOVERSION, v.GOROOT, min[0], min[1], min[2])
 	}
 	return toolchain{
 		goBin:      filepath.Join(v.GOROOT, "bin", "go"),
@@ -234,4 +252,66 @@ func (t toolchain) env(cgo bool) []string {
 		"GOMODCACHE=" + t.modCache,
 		"GOCACHE=" + t.buildCache,
 	}
+}
+
+// goVersion is a release's major, minor and patch numbers. As in Go's own
+// ordering, a language version (go1.27, patch -2) sorts below its
+// pre-releases (go1.27rc1, patch -1), which sort below go1.27.0.
+type goVersion [3]int
+
+var goVersionRE = regexp.MustCompile(`^go(\d+)\.(\d+)(?:\.(\d+)|(rc|beta)\d+)?$`)
+
+// parseGoVersion parses a go version string such as go1.26.9, go1.26
+// (a language version, as in a go directive) or go1.27rc1.
+func parseGoVersion(s string) (goVersion, bool) {
+	m := goVersionRE.FindStringSubmatch(s)
+	if m == nil {
+		return goVersion{}, false
+	}
+	var v goVersion
+	for i, part := range m[1:4] {
+		if part == "" {
+			v[i] = -2 // only the patch can be absent
+			continue
+		}
+		n, err := strconv.Atoi(part)
+		if err != nil {
+			return goVersion{}, false
+		}
+		v[i] = n
+	}
+	if m[4] != "" {
+		v[2] = -1
+	}
+	return v, true
+}
+
+func compareGoVersions(a, b goVersion) int { return slices.Compare(a[:], b[:]) }
+
+// minGoVersion reads the go.mod at path and returns its toolchain line's
+// version, or the go directive's when there is no toolchain line (go
+// itself refuses a go older than the directive).
+func minGoVersion(path string) (goVersion, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return goVersion{}, err
+	}
+	var directive, toolchainLine string
+	for _, line := range strings.Split(string(b), "\n") {
+		switch f := strings.Fields(line); {
+		case len(f) == 2 && f[0] == "go":
+			directive = "go" + f[1]
+		case len(f) == 2 && f[0] == "toolchain":
+			toolchainLine = f[1]
+		}
+	}
+	want := directive
+	if toolchainLine != "" {
+		want = toolchainLine
+	}
+	v, ok := parseGoVersion(want)
+	if !ok {
+		return goVersion{}, fmt.Errorf("%s: no parseable toolchain or go line (%q)", path, want)
+	}
+	return v, nil
 }
