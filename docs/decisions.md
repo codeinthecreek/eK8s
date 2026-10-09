@@ -312,3 +312,8 @@
 - Rejected: '1.26.x' with check-latest (setup-go resolves it from the actions/go-versions manifest, which lags: newest 1.26 there is 1.26.8).
 - Reason: govulncheck fails on stdlib advisories fixed in 1.26.9, but setup-go resolves '1.26.x' to the runner's cached 1.26.8 and its manifest has nothing newer; a version missing from the manifest is downloaded from go.dev instead.
 - Revisit: switch back to '1.26.x' once the manifest lists >= 1.26.9.
+
+## 2026-10-09 · PR #20 *(inferred)* · go.mod gains `toolchain go1.26.9` (go directive stays 1.26.0)
+- Rejected: CI go-version-file now (the actions/go-versions manifest still lags 1.26.9; revisit with the CI unpin item in STATUS).
+- Reason: under GOTOOLCHAIN=auto, local, cloud and gate resolveToolchain builds use >= 1.26.9, never 1.26.0's vulnerable stdlib. Each Go security patch needs this line bumped.
+- Reverse: delete the toolchain line.

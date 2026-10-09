@@ -4,7 +4,7 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 *(inferred)* are guesses, not read from the repo; correct them.
 
 ## Now
-- (nothing in flight)
+- `toolchain go1.26.9` line in go.mod (PR #20 *(inferred)*).
 
 ## Next
 - gate PR2: Stage 1 build/boot (static build, bare boot under bwrap, FROM scratch image), Stage 2 (HTTP to the booted binary, X-EK8s-Variant check, classifier Run), Stage 3.
@@ -16,7 +16,6 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 - Verify-result caching: a finite pool lets a mutant memoize (password, hash) -> match and skip Argon2; loadgen should draw some verify pairs from the variant's own fresh /hash output.
 - Pool-hash replay: a mutant can remember (password, hash) pairs from match=true pool /verify requests and answer /hash for that password with the remembered hash, skipping Argon2; the Run never sees that salt (it records salts from /hash responses only). loadgen must not send pool passwords to /hash, or the Run must be pre-seeded with the pool's salts.
 - CI: unpin go-version 1.26.9 back to '1.26.x' once actions/go-versions' manifest lists >= 1.26.9 (docs/decisions.md, PR #18 entry).
-- go.mod: consider a `toolchain go1.26.9` line, so local and gate builds under GOTOOLCHAIN=auto never build the deployed binary with 1.26.0's vulnerable stdlib (go.mod says `go 1.26.0`).
 
 ## Recent
 - #19 reviewer: three checklist items from PR #18's [missed] feedback (2026-10-09)
