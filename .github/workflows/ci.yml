@@ -28,6 +28,10 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
+    env:
+      # Gate tests fail, not skip, without bwrap, nsenter or a docker
+      # daemon (the runner image has docker; nsenter is in util-linux).
+      EK8S_GATE_REQUIRE_TOOLS: '1'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -43,6 +47,8 @@ jobs:
           # and a version missing from that manifest is fetched from go.dev.
           # Return to '1.26.x' once the manifest lists >= 1.26.9.
           go-version: '1.26.9'
+      # Gate Stage 1 boots the candidate under bubblewrap.
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends bubblewrap
       - run: go vet ./...
       - run: go test -count=1 ./...
       - run: go test -race -count=1 ./...

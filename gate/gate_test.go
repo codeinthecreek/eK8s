@@ -76,11 +76,26 @@ func checks(rep Report) []string {
 	return out
 }
 
-var allChecks = []string{"candidate-files", "hasher-pin", "build-constraints", "go-list", "imports", "package-files"}
+var preBuildChecks = []string{"candidate-files", "hasher-pin", "build-constraints", "go-list", "imports", "package-files"}
 
-func TestGen0Passes(t *testing.T) {
-	rep := run(t, gen0(t))
-	if !rep.Passed() || !slices.Equal(checks(rep), allChecks) {
+// preBuildReport runs only Stage 1's pre-build checks on dir, so it needs
+// no bwrap, nsenter or docker.
+func preBuildReport(t *testing.T, dir string) Report {
+	t.Helper()
+	var rep Report
+	_, tree, _, err := preBuild(context.Background(), Config{RepoRoot: repoRoot(t), CandidateDir: dir}, &rep)
+	if tree != "" {
+		os.RemoveAll(tree)
+	}
+	if err != nil {
+		t.Fatalf("preBuild: %v", err)
+	}
+	return rep
+}
+
+func TestGen0PassesPreBuild(t *testing.T) {
+	rep := preBuildReport(t, gen0(t))
+	if !rep.Passed() || !slices.Equal(checks(rep), preBuildChecks) {
 		t.Fatalf("gen 0: %+v", rep.Results)
 	}
 }
@@ -221,7 +236,7 @@ func TestAllowedImports(t *testing.T) {
 		t.Run(imp, func(t *testing.T) {
 			dir := gen0(t)
 			edit(t, dir, "doc.go", addImport(imp))
-			if rep := run(t, dir); !rep.Passed() {
+			if rep := preBuildReport(t, dir); !rep.Passed() {
 				t.Fatalf("%+v", rep.Results)
 			}
 		})

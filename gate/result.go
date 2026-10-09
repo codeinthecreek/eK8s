@@ -13,6 +13,11 @@ type Result struct {
 // first failure (zero tolerance), so a failing Report ends with it.
 type Report struct {
 	Results []Result
+
+	// Image is the candidate's docker image tag, set only when the
+	// candidate passed; Stage 5 loads it into kind. On a failure the gate
+	// removes the image, unless it existed before the run.
+	Image string
 }
 
 // Passed reports whether every check ran and passed.

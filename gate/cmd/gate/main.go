@@ -34,9 +34,9 @@ func main() {
 	rep, err := gate.Run(ctx, gate.Config{RepoRoot: *repo, CandidateDir: *candidate})
 	for _, r := range rep.Results {
 		if r.Pass {
-			fmt.Printf("stage %d %-18s PASS\n", r.Stage, r.Check)
+			fmt.Printf("stage %d %-30s PASS\n", r.Stage, r.Check)
 		} else {
-			fmt.Printf("stage %d %-18s FAIL: %s\n", r.Stage, r.Check, r.Detail)
+			fmt.Printf("stage %d %-30s FAIL: %s\n", r.Stage, r.Check, r.Detail)
 		}
 	}
 	switch {
@@ -46,4 +46,5 @@ func main() {
 	case !rep.Passed():
 		os.Exit(1)
 	}
+	fmt.Println("image", rep.Image)
 }

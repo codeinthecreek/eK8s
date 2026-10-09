@@ -102,6 +102,10 @@ docs/               decisions.md: implementation-level decision log.
   a separate binary, never the deployed image.
 - `docker build` -- Stage 1's second sub-check (container boots, health
   endpoint responds).
+- Stage 1's bare boot needs `bwrap` (bubblewrap) and `nsenter` on PATH;
+  the docker sub-check needs a docker daemon. Gate tests skip without
+  bwrap/nsenter and stub the docker sub-check without a daemon, unless
+  `EK8S_GATE_REQUIRE_TOOLS=1` (CI sets it), which makes both failures.
 - `kind load docker-image <image> --name <cluster>` -- load a locally built
   image straight into the cluster; no registry in this project.
 - Stage 5 (degradation under contention) only runs against the live kind
