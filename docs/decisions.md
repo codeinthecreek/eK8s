@@ -105,12 +105,12 @@
 - Reason: the DESIGN.md sec 8 contract is silent on error bodies; JSON matches the success bodies, and fixed messages never echo passwords or hashes. Clients must rely on the status code, not the message.
 - Reverse: change writeError in the wrapper (evolvable; not part of the contract).
 
-## 2026-09-27 · PR #6 · OPEN: gen-0 wrapper tests are copied into the mutation sandbox
+## 2026-09-27 · PR #6 · OPEN: gen-0 wrapper tests are copied into the mutation sandbox (closed by the PR #18 _test.go entry)
 - Question: DESIGN.md sec 12 copies "the wrapper's existing .go files", which includes _test.go, so mutants can edit gen-0 tests, and gen-0-specific tests would fail legitimate mutants if Stage 1 ran them.
 - Options: exclude _test.go from the copy and from gate runs, or keep them as mutant-editable, non-gating tests.
 - To be settled when the driver and gate are built; recorded here so it is not lost.
 
-## 2026-09-27 · PR #6 · Stage 1 import allowlist checks direct imports only (DESIGN.md sec 7 edit pending)
+## 2026-09-27 · PR #6 · Stage 1 import allowlist checks direct imports only (DESIGN.md sec 7 edit done in PR #18)
 - Rejected: checking the full dependency closure (`go list -deps`).
 - Reason: net/http transitively imports crypto/* and std's vendored x/crypto, so a -deps check would reject every HTTP-serving wrapper. Direct-only is sound only if the allowlist excludes unsafe (the compiler allows `//go:linkname` only in files that import unsafe), cgo ("C"), os/exec, syscall and plugin.
 - Reverse: n/a until gate/ exists; amend DESIGN.md sec 7 when it is built.
@@ -130,7 +130,7 @@
 - Reason: a mutant that could fail liveness under load would get its pods restarted (restartCount fails Stage 5) instead of shedding; readiness (/readyz) is the wrapper's load-aware signal.
 - Reverse: route /healthz through a wrapper method (changes the fixed API).
 
-## 2026-09-27 · PR #6 · X-EK8s-Variant writer exposes Unwrap(); unwrapping can bypass the header
+## 2026-09-27 · PR #6 · X-EK8s-Variant writer exposes Unwrap(); unwrapping can bypass the header (reason superseded by the PR #18 header entry)
 - Rejected: no Unwrap (breaks http.ResponseController Flush/deadlines for mutants); forcing the header into the underlying writer up front (a handler could still delete it).
 - Reason: the header is a sanity check, not load-bearing (DESIGN.md sec 5); a mutant writing through Unwrap to hide it gains nothing scored.
 - Reverse: drop Unwrap from variantWriter in cmd/service/main.go.
@@ -242,3 +242,68 @@
 - Rejected: seeded-defect runs on a scratch branch as the routine measure (kept for an occasional check once gate/ exists).
 - Reason: zero extra reviewer runs; after a few Go PRs the [missed] count shows whether the reviewer earns its cost, and each [missed] item is a concrete checklist edit. Self-review `declined:` lines give its false positives.
 - Reverse: drop the tagging bullet from docs/handoff.md's rules for every packet.
+
+## 2026-10-09 · PR #18 *(inferred)* · gate/ in four PRs: Stage 1 pre-build checks; Stage 1 build/boot + Stages 2-3; Stage 4; Stage 5
+- Rejected: Stages 1-3 in one PR; all local stages in one PR; deferring the docker sub-check to deploy/.
+- Reason: the pre-build checks are the sec 4 backstop and get a review of their own; each PR fits one review packet. Stage 5 waits for deploy/ and loadgen burst mode; namespace lifecycle is already settled by DESIGN.md sec 11.
+- Reverse: merge the remaining gate PRs into fewer.
+
+## 2026-10-09 · PR #18 *(inferred)* · Build tree: fresh temp dir with the fixed tree + candidate; go env built from scratch (DESIGN.md sec 7 Stage 1)
+- Rejected: building in the repo checkout; inheriting the operator's environment or go env file.
+- Reason: inherited GOFLAGS can carry -toolexec, and the go env file can set CC, CGO_*, GOEXPERIMENT, GOCACHEPROG; so GOENV=off, GOFLAGS=-mod=readonly, GOPROXY=off, GOWORK=off, GOTOOLCHAIN=local, and only PATH, GOMODCACHE, GOCACHE (resolved once via the operator's `go env`) carried over; without HOME or XDG_CONFIG_HOME no go env file can be located. That one operator `go env` may download the go directive's toolchain (checksum-verified) on an older host go. GOPROXY=off makes `go mod download` a prerequisite. GOARCH is the gate host's (kind runs on the same host).
+- Reverse: edit toolchain.env in gate/assemble.go.
+
+## 2026-10-09 · PR #18 *(inferred)* · Candidate files: exactly doc.go, hasher.go, server.go, tunables.go; regular files only, 256 KiB cap each
+- Rejected: copying whatever .go files the candidate dir holds; following symlinks.
+- Reason: a mutant cannot create files (sec 12), so any other entry is a driver or tampering fault. Entries are typed by lstat (ReadDir), then opened O_NOFOLLOW|O_NONBLOCK and re-checked on the descriptor, so a swap after the listing cannot be followed. A test keeps the set equal to gen 0's non-test files.
+- Reverse: edit candidateFiles / maxCandidateFileBytes in gate/assemble.go.
+
+## 2026-10-09 · PR #18 *(inferred)* · Canonical hasher.go is a SHA-256 constant in gate/, kept equal to the repo file by a test
+- Rejected: comparing against the working tree's internal/wrapper/hasher.go at gate time; an embedded copy in gate/.
+- Reason: a working-tree file could have been overwritten; //go:embed cannot reach ../internal/wrapper, and a copy would be a second source. Changing hasher.go now takes a deliberate gate edit.
+- Reverse: compare against the repo file in checkHasherPin.
+
+## 2026-10-09 · PR #18 *(inferred)* · Stages 2-4 talk HTTP to the booted binary; X-EK8s-Variant becomes load-bearing in the gate (supersedes the PR #6 Unwrap entry's reason)
+- Rejected: in-process tests of the candidate package (a generated harness run with go test).
+- Reason: same binary as the image, through cmd/service's mux and body limit. With fixed :8080, every response must carry X-EK8s-Variant equal to a per-run label, so a stale listener cannot answer; a mutant that writes via Unwrap and drops the header now fails Stage 2 (DESIGN.md sec 5 edited). Unwrap stays, for http.ResponseController.
+- Reverse: DESIGN.md sec 5, sec 7 edit; drop the header check from Stages 2-4.
+
+## 2026-10-09 · PR #18 *(inferred)* · Stage 1 allowlist finalized in DESIGN.md sec 7 (closes "Stage 1 import allowlist checks direct imports only")
+- Rejected: a denylist; a -deps check; one go list under default tags only.
+- Reason: listed under CGO_ENABLED=0 and CGO_ENABLED=1 -race, each re-checking imports and CgoFiles/IgnoredGoFiles, plus a lexical ban on //go:build and // +build lines, so no constraint hides a file's imports from either build. os is excluded (env and limits come via cmd/service). Imports are checked before load errors: go list -e still reports a forbidden import that fails to resolve.
+- Reverse: edit allowedImports / listings in gate/precheck.go and DESIGN.md sec 7 together.
+
+## 2026-10-09 · PR #18 *(inferred)* · Known limit: net/http can read and exfiltrate files; contained by bwrap for the bare boot and a scratch image
+- Rejected: dropping net/http from the allowlist (every wrapper serves HTTP).
+- Reason: http.Dir("/").Open / FileServer read files and http.Client sends them; no import allowlist closes that. Stage 1's bare boot (PR2) runs under bubblewrap (--clearenv, binary bound ro, no /home or repo); the container and pod see only a FROM scratch image.
+- Reverse: n/a (a limit, not a choice); revisit if the boot ever runs unsandboxed.
+
+## 2026-10-09 · PR #18 *(inferred)* · Gen-0 _test.go files are excluded from the sandbox copy and the gate (closes OPEN "gen-0 wrapper tests are copied into the mutation sandbox")
+- Rejected: copying them as mutant-editable, non-gating tests.
+- Reason: gen-0 tests would fail legitimate mutants and add nothing the gate does not check; they stay in the repo as CI coverage of gen 0. DESIGN.md sec 12 and CLAUDE.md's Build/test lines edited (the gate runs no candidate tests).
+- Reverse: DESIGN.md sec 12 edit; add test files to candidateFiles.
+
+## 2026-10-09 · PR #18 *(inferred)* · Stage 2: fresh random passwords for MutantHash, sequential requests, success-only, one classifier Run (closes the PR #15 2xx-body follow-up)
+- Rejected: pool passwords for /hash with an ordering rule (all /hash before any /verify).
+- Reason: never sending a pool password to /hash leaves a mutant no pool pair to replay, with no ordering to get wrong. Each 2xx goes through one classifier.Run with FullVerify (strict body, canonical PHC, salt reuse); a graceful_shed on one request to an idle process fails. Contract cases assert exactly 400.
+- Reverse: DESIGN.md sec 7 Stage 2 edit.
+
+## 2026-10-09 · PR #18 *(inferred)* · Image: host-built static binary, FROM scratch, USER 65532:65532; build context holds only Dockerfile + binary
+- Rejected: building inside a golang image; a distroless base.
+- Reason: no image pulls or network, the bare-booted binary is the one deployed, matching sec 11's go build -> docker build -> kind load; a minimal context keeps the repo out of the image.
+- Reverse: change the Dockerfile (PR2) and DESIGN.md sec 7 Stage 1.
+
+## 2026-10-09 · PR #18 *(inferred)* · Stage 4: retry shed requests; fail on cross-talk, any status but 200 or a 503 shed (a 400 included), or any race report; race build needs cgo + gcc
+- Rejected: counting a 503 shed as failure; applying HangTimeout under -race.
+- Reason: a shed proves nothing either way, but every password must eventually succeed; Stage 4 sends only valid distinct passwords, so a 400 is a broken wrapper. Verified: CGO_ENABLED=0 go build -race fails ("-race requires cgo"), and with CGO_ENABLED=1 and no gcc on PATH it fails in runtime/cgo; go list -race needs no gcc. CI's existing go test -race step shows ubuntu-latest has a C compiler.
+- Reverse: DESIGN.md sec 7 Stage 4 edit.
+
+## 2026-10-09 · PR #18 *(inferred)* · gate API: Run returns a Report of per-check Results plus an error only for gate faults; CLI at gate/cmd/gate
+- Rejected: one pass/fail bool; reporting gate faults as candidate failures; no CLI.
+- Reason: Stage 1's checks are logged distinctly (sec 7); a gate fault (no go, I/O) says nothing about the candidate. A go list that exits non-zero is a candidate failure, since the tree differs from a good one only in the candidate. Nothing is persisted until lineage/ exists.
+- Reverse: change gate.Run's signature and its callers.
+
+## 2026-10-09 · PR #18 *(inferred)* · Gate tests mutate a temp copy of gen 0 instead of keeping testdata fixture dirs
+- Rejected: gate/testdata/candidates/<case>/ with full copies of the wrapper.
+- Reason: fixtures would be stale copies of gen 0; each case is one edit to the live gen-0 files. PR1's tests are pure go list runs, fine under -race.
+- Reverse: add fixture dirs and point TestRejects at them.
