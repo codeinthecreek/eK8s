@@ -4,17 +4,21 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 *(inferred)* are guesses, not read from the repo; correct them.
 
 ## Now
-- `claude/pre-packet-self-review-8oxgvr` (PR #17 *(inferred)*): pre-packet self-review: read-only reviewer subagent (.claude/agents/reviewer.md), run once on the final tree before a commit diff or review/approval packet for Go changes; CLAUDE.md working-agreement bullet; Self-review: section in docs/handoff.md packets, and [missed]/[repo-unseeable]/[dup] tags on Feedback: lines to measure the reviewer.
+- `claude/gate-pr-split-design-aq3sd8` (PR #18 *(inferred)*): gate PR1 of 4: build-tree assembly and Stage 1 pre-build checks (candidate file set, hasher pin, build-constraint ban, go list allowlist under the deployed and race builds), gate/cmd/gate CLI; DESIGN.md sec 5, 7, 12 and CLAUDE.md edits for the approved gate design.
 
 ## Next
-- gate/ (DESIGN.md sec 7), consuming testvectors for Stage 2 interop and contract conformance; design packet first.
+- gate PR2: Stage 1 build/boot (static build, bare boot under bwrap, FROM scratch image), Stage 2 (HTTP to the booted binary, X-EK8s-Variant check, classifier Run), Stage 3.
+- gate PR3: Stage 4 (cgo race build, shed retry, race-report capture).
+- deploy/ (kind config, manifests, stress-ng), then loadgen (sustained + burst), then gate PR4: Stage 5.
 
 ## Parked
 - Fitness (sec 9): treat integrity failures (verify_mismatch, verify_error, wrong_match, non_canonical_phc, salt_reused) as disqualifying, not one failed request: a mutant can relabel undelivered Argon2 results (timed-out clients) as hashes for later requests, caught only by sampled FullVerify.
 - Verify-result caching: a finite pool lets a mutant memoize (password, hash) -> match and skip Argon2; loadgen should draw some verify pairs from the variant's own fresh /hash output.
 - Pool-hash replay: a mutant can remember (password, hash) pairs from match=true pool /verify requests and answer /hash for that password with the remembered hash, skipping Argon2; the Run never sees that salt (it records salts from /hash responses only). loadgen must not send pool passwords to /hash, or the Run must be pre-seeded with the pool's salts.
+- CI: unpin go-version 1.26.9 back to '1.26.x' once actions/go-versions' manifest lists >= 1.26.9 (docs/decisions.md, PR #18 entry).
 
 ## Recent
+- #17 Pre-packet self-review by a read-only reviewer subagent (2026-10-02)
 - #16 internal/classifier PR B: test-vector pool (internal/classifier/testvectors), generator, pool-validity and agreement tests (2026-10-02)
 - #15 internal/classifier PR A: three-bucket response classifier with injected Verifier (2026-10-02)
 - #14 handoff: shorten review-packet full diffs (2026-10-02)

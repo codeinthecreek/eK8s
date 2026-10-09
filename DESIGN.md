@@ -178,7 +178,8 @@ type Hasher interface {
 
 It is pinned: gate Stage 1 requires it byte-identical to the canonical
 version (section 7), so a mutation may read it but any edit to it fails
-the gate.
+the gate. The canonical version is a SHA-256 constant in gate/, kept equal
+to this file by a gate test, so changing it takes a deliberate gate edit.
 
 **`cmd/service/` responsibilities -- all fixed at generation 0**, because
 `cmd/service/` can never change later:
@@ -193,7 +194,10 @@ the gate.
   nothing: Go >= 1.25 sets `GOMAXPROCS` from the cgroup CPU limit.
 - Sets an `X-EK8s-Variant` response header from the variant label (via
   the downward API), in middleware that wraps the `ResponseWriter` so the
-  handler cannot overwrite it. A sanity check only, not load-bearing.
+  handler cannot overwrite it. Load-bearing in the gate only: Stages 2-4
+  require it on every response, equal to the per-run label, so a stale
+  listener on :8080 cannot answer for the candidate (section 7). A mutant
+  that writes through the writer's `Unwrap` and drops it fails the gate.
 
 ## 6. Fixed-core parameters
 
@@ -226,26 +230,66 @@ counts as graceful degradation" cannot silently diverge between the two.
 
 ### Stage 1 -- Build / boot (local)
 
+The gate assembles a fresh build tree outside the repo (section 4): the
+repo's go.mod, go.sum, `cmd/service/`, `internal/hashcore/` and
+`internal/classifier/` (non-test files, top level only, so never the
+test-vector pool), plus the candidate's files as `internal/wrapper/`. Every
+go command on it runs with an environment built from scratch: only `PATH`
+and the module and build caches (resolved once from the operator's
+`go env`) are carried over; the rest is fixed (`GOENV=off`,
+`GOFLAGS=-mod=readonly`, `GOPROXY=off`, `GOWORK=off`, `GOTOOLCHAIN=local`,
+`GOOS=linux`, `GOARCH` of the gate host, `CGO_ENABLED` per build). So the
+module cache must already be populated (`go mod download` in the repo).
+That one operator `go env` runs under the operator's `GOTOOLCHAIN`: on a
+host whose go is older than the go directive, the first run may download
+the directive's toolchain (checksum-verified) before any check.
+
 Pre-build checks first, zero-tolerance, each logged distinctly from the
 build/boot sub-checks below:
-1. `internal/wrapper/hasher.go` is byte-identical to the canonical
+1. The candidate is exactly `doc.go`, `hasher.go`, `server.go`,
+   `tunables.go`: regular files (no symlinks, checked without following
+   them), each under a size cap; anything else, `_test.go` included,
+   fails.
+2. `internal/wrapper/hasher.go` is byte-identical to the canonical
    version (section 5).
-2. Import allowlist for `internal/wrapper`, checked via `go list`: a
-   stdlib subset plus `internal/classifier`, matched exactly, not as a
-   prefix, so its subpackages are forbidden: a wrapper importing the
-   test-vector pool (`internal/classifier/testvectors`, section 5) could
-   answer `/verify` by table lookup, skipping Argon2. Explicitly forbidden:
+3. No build-constraint line (`//go:build` or `// +build`, also after a
+   leading BOM) anywhere in the candidate, so no file can hide its
+   imports from one build configuration; check 5 backstops it.
+4. Import allowlist for `internal/wrapper`, checked via `go list` on
+   direct imports only, under both the deployed build (`CGO_ENABLED=0`)
+   and Stage 4's race build (`CGO_ENABLED=1 -race`). Exactly these,
+   matched exactly, not as a prefix: `bytes`, `container/heap`,
+   `container/list`, `context`, `encoding/json`, `errors`, `fmt`, `io`,
+   `log/slog`, `maps`, `math`, `math/rand/v2`, `net/http`, `runtime`,
+   `runtime/debug` (legitimate tuning), `runtime/metrics`, `slices`,
+   `sort`, `strconv`, `strings`, `sync`, `sync/atomic`, `time`,
+   `unicode/utf8`, `internal/classifier`. So its subpackages are
+   forbidden: a wrapper importing the test-vector pool
+   (`internal/classifier/testvectors`, section 5) could answer `/verify`
+   by table lookup, skipping Argon2. Also outside it, among others:
    `internal/hashcore`, `golang.org/x/crypto/...`,
-   `github.com/alexedwards/argon2id`, `crypto/subtle`. `runtime/debug` is
-   allowed (legitimate tuning). This is the backstop described in section
-   4. The exact allowlist is finalized when gate/ is implemented.
+   `github.com/alexedwards/argon2id`, `crypto/...`, `os`. Direct-only is
+   sound because `unsafe` (needed for `//go:linkname`), cgo (`"C"`),
+   `os/exec`, `syscall` and `plugin` are all outside it; a -deps check
+   would reject every wrapper, since `net/http` itself reaches crypto.
+   This is the backstop described in section 4.
+5. Both listings compile exactly the candidate's files as plain Go: no
+   cgo, ignored, invalid or test files, no load errors.
+
+Known limit: `net/http`, which every wrapper needs, can read files
+(`http.Dir`) and send them out (`http.Client`); no allowlist closes that.
+So the bare boot below runs under bubblewrap (`--clearenv`, binary bound
+read-only, no `/home` or repo bound), and the image is `FROM scratch`.
 
 Then two sub-checks, kept distinct in the lineage log because they fail for
 different reasons:
-1. `go build` succeeds, then the compiled binary boots as a bare local
-   process and its health endpoint responds.
+1. `go build` (static, `CGO_ENABLED=0`) succeeds, then the compiled binary
+   boots as a bare local process under bubblewrap (above) and its health
+   endpoint responds.
 2. `docker build` + `docker run` succeeds locally, health endpoint
-   responds from the container.
+   responds from the container. The image is `FROM scratch`, the same
+   host-built binary, `USER 65532:65532`; the build context is a temp dir
+   holding only the Dockerfile and the binary.
 
 No kind involved.
 
@@ -255,11 +299,19 @@ Tests that the mutated wrapper has not corrupted data in flight between
 its concurrency/request-handling layer and the (unchanged) fixed core --
 not re-validating the hashing algorithm itself -- and that it implements
 the error paths of the section 8 HTTP contract. Two groups of assertions,
-all zero-tolerance.
+all zero-tolerance. Stage 2 talks HTTP to the process Stage 1 booted, one
+request at a time; every response must carry `X-EK8s-Variant` equal to
+that run's label (section 5).
 
-**Interoperability**: four assertions using a shared password/hash
-test-vector pool (also used by the load generator, section 10, so
-gate-time and run-time correctness share one definition of "correct"):
+**Interoperability**: four assertions. The `RealHash` pair uses the shared
+password/hash test-vector pool (also used by the load generator, section
+10, so gate-time and run-time correctness share one definition of
+"correct"). The `MutantHash` pair uses fresh random passwords (`NoMatch`:
+a different fresh one), so the gate never sends a pool password to
+`/hash` and a mutant has no pool pair to replay. Every 2xx response goes
+through one classifier run (section 8), hash responses fully verified,
+and must classify as `success`: a `graceful_shed` on a single request to
+an unloaded process fails Stage 2.
 
 1. `TestInterop_MutantHash_RealVerify_Match` -- hash via mutant wrapper,
    verify via real reference library, matching password: must succeed.
@@ -302,7 +354,14 @@ Fire N concurrent requests with distinct passwords, assert no cross-talk
 (password A's result never validates against password B). Build a
 separate `-race`-instrumented binary for this stage only -- race-detector
 overhead would distort Stage 5's timing behavior, so it is never the
-image that gets deployed.
+image that gets deployed. The race build needs cgo (`CGO_ENABLED=1`) and a
+C compiler on the gate host. A 503 shed is no evidence either way: shed
+requests are retried a bounded number of times, and every password must
+eventually succeed. Stage 4 sends only valid, distinct passwords, so the
+only allowed statuses are 200 and a 503 shed: fail on any cross-talk, any
+other status (a 400 included), or any race report on the process's
+stderr.
+`HangTimeout` is not applied under `-race`.
 
 ### Stage 5 -- Degradation under contention (kind, candidate namespace)
 
@@ -662,7 +721,9 @@ directory outside the repo, never from the repo checkout (section 4).
 
 **Per-run directories:**
 - `$RUN/work` -- the session's cwd. Real copies (no symlinks) of the
-  wrapper's existing `.go` files only.
+  wrapper's existing non-test `.go` files only (`doc.go`, `hasher.go`,
+  `server.go`, `tunables.go`). Gen-0 tests stay in the repo as CI
+  coverage of gen 0; the gate runs no candidate tests.
 - `$RUN/home` -- `HOME`, outside the file tools' reach. A fresh `HOME`
   also means no user-level `CLAUDE.md` is loaded.
 

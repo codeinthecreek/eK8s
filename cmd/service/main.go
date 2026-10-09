@@ -100,7 +100,8 @@ func limitBody(next http.Handler) http.Handler {
 }
 
 // withVariant sets X-EK8s-Variant on every response, overruling any
-// value a handler set or deleted. A sanity check only (DESIGN.md sec 5).
+// value a handler set or deleted. DESIGN.md sec 5, sec 7 make it
+// load-bearing in the gate: required on every response.
 func withVariant(variant string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		vw := &variantWriter{ResponseWriter: w, variant: variant}
@@ -137,8 +138,8 @@ func (w *variantWriter) Write(b []byte) (int, error) {
 }
 
 // Unwrap lets http.ResponseController reach the underlying writer
-// (Flush, deadlines). Writing through it bypasses the variant header;
-// accepted, since the header is a sanity check, not load-bearing.
+// (Flush, deadlines). Writing through it bypasses the variant header,
+// which by DESIGN.md sec 5 fails the gate.
 func (w *variantWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
 func main() { os.Exit(run()) }
