@@ -56,6 +56,12 @@ guess from file names.
    start-of-PR reconcile with `git log origin/main` done, decisions.md
    entries in the required form (date, PR, decision, rejected
    alternative, reason, how to reverse; max 5 lines).
+7. New or edited DESIGN.md text: re-check it against its own stated
+   preconditions (e.g. a stage that sends only valid input must not
+   allow error statuses).
+8. `bufio.Scanner` loops that never check `sc.Err()` after the loop.
+9. Doc comments and comments naming identifiers (functions, types,
+   fields, constants, files) that do not exist in the tree.
 
 Also run `go build ./...`, `go vet ./...`, `go test ./...` and
 `gofmt -l .`; any failure or `gofmt -l` output is a must-fix finding.
