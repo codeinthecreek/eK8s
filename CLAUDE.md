@@ -109,8 +109,10 @@ docs/               overview.md (plain-language introduction; DESIGN.md is
   toolchain (checksum-verified) before any check; a resolved go still
   older than it is a gate fault.
 - `go run ./gate/cmd/gate -candidate DIR` -- gate one candidate wrapper
-  by hand. Stage 4's `-race` build needs cgo and a C compiler (gcc); it is
-  a separate binary, never the deployed image.
+  by hand. Stage 4's `-race` build needs cgo, a C compiler (gcc) and a
+  static libc (libc6-dev / glibc-static), since it is linked statically
+  to boot in the same sandbox; it is a separate binary, never the
+  deployed image.
 - `docker build` -- Stage 1's second sub-check (container boots, health
   endpoint responds).
 - Stage 1's bare boot needs `bwrap` (bubblewrap) and `nsenter` on PATH,

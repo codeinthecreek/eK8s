@@ -208,7 +208,7 @@ func TestRejects(t *testing.T) {
 		detail    string
 	}{"import C", func(t *testing.T, dir string) {
 		edit(t, dir, "doc.go", func(s string) string { return s + "\nimport \"C\"\n" })
-	}, "imports", `CGO_ENABLED=1 -race: import "C"`})
+	}, "imports", `CGO_ENABLED=1 -race -tags netgo,osusergo: import "C"`})
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

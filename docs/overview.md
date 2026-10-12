@@ -668,10 +668,10 @@ In broad terms, as of 2026-10-12:
 - **Built:** the *thing being evolved* and the *rulebook for judging
   it*. That is the generation-0 service, the locked hashing core, the
   shared judge (classifier) and the known-answer test pool, plus gate
-  Stages 1-3 (section 6), all tested in CI.
-- **Next:** gate Stage 4, then the cluster setup and load generator,
-  then gate Stage 5, which needs both.
-- **Not built yet:** gate Stages 4-5, the load generator, cluster
+  Stages 1-4 (section 6), all tested in CI.
+- **Next:** the cluster setup and load generator, then gate Stage 5,
+  which needs both.
+- **Not built yet:** gate Stage 5, the load generator, cluster
   setup, AI driver, orchestrator and lineage records. No generation
   has evolved yet.
 

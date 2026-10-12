@@ -380,3 +380,34 @@
 - Rejected: bundling the reconcile with the task's commit.
 - Reason: one logical change per commit; the bundling recurred in PRs #22 and #23.
 - Reverse: drop the "own commit, first" clause from CLAUDE.md's reconcile bullet.
+
+## 2026-10-12 · PR #25 *(inferred)* · Stage 4 race build: static link, -tags netgo,osusergo, same bwrap sandbox (packet Q1 A)
+- Rejected: a dynamic build with ld.so and libc --ro-bind'ed (per-distro paths, more in the sandbox); static without the tags (getaddrinfo static-link warning).
+- Reason: the bwrap argv binds only the binary, so a dynamic race build fails "execvp /service: No such file or directory"; -linkmode=external -extldflags=-static boots and reports races there, as root and unprivileged. The race go list carries the same -tags (raceFlags). Needs gcc plus libc.a.
+- Reverse: drop raceLinkFlags/raceTags in gate/boot.go and bind the libs in bwrapArgs; DESIGN.md sec 7 Stages 1 and 4 edit.
+
+## 2026-10-12 · PR #25 *(inferred)* · Race report: GORACE halt_on_error=1 exitcode=66, exit status primary, full-output marker scan (packet Q2 A)
+- Rejected: scanning only the 64 KiB cappedBuffer (a candidate can log past it); the exit code alone.
+- Reason: halt_on_error ends the process at the first report with 66, passed through by bwrap, and no allowlisted import can exit with a chosen code; raceWatch scans every byte (overlap of len(marker)-1), keeps an 8 KiB tail; the Detail is at most 4 KiB. Checked after the load plus a 1s grace; teardown stays SIGKILL.
+- Reverse: edit goRace and raceWatch in gate/stage4.go.
+
+## 2026-10-12 · PR #25 *(inferred)* · Stage 4 load: N = 2 x NumCPU in [8, 64], fixed 1s+jitter retry, 15 sends, transport errors retried (packet Q4)
+- Rejected: fixed N=32 (an unbounded-concurrency mutant hits cmd/service's 6s WriteTimeout on a 4-CPU host); honouring Retry-After (a mutant could stall the gate); failing at once on a transport error.
+- Reason: constant per-CPU load and gen 0 sheds on any host; a shed or transport error is no evidence either way, but every request must get a final answer within 15 sends and 120s. A bare 503 is final and fails (graceful_shed minus HangTimeout).
+- Reverse: edit the constants and sendWithRetry in gate/stage4.go; DESIGN.md sec 7 Stage 4 edit.
+
+## 2026-10-12 · PR #25 *(inferred)* · Stage 4 order: stop the Stage 2 process, race-build and boot the probe (gate fault), then the candidate (packet Q5 B)
+- Rejected: relying on the Stage 1 preflight only (a missing gcc or libc.a would read as a candidate race-build failure); a docker sub-check of the race binary (never deployed).
+- Reason: as in the PR #21 preflight, only gate code runs in the probe, so a failure there is the host's. sandbox.stop is now idempotent (sync.Once), so Run's deferred stop is safe after the explicit one.
+- Reverse: drop the probe build and preflight call in runStage4.
+
+## 2026-10-12 · PR #25 *(inferred)* · Known gap: a wrapper can tell Stage 4 from its build info (A1)
+- Decision: no mitigation in this PR; recorded in docs/STATUS.md Parked (gate detectability).
+- Rejected: stripping or faking build info (it would change the deployed binary too, or diverge the two builds further).
+- Reason: `go version -m` differs only in `-race=true`, `-tags=netgo,osusergo` and `CGO_ENABLED=1` (-ldflags not recorded), readable via runtime/debug.ReadBuildInfo (allowlisted); GORACE is readable from /proc/self/environ via http.Dir. A mutant could synchronize only under -race.
+- Reverse: n/a (a limit); revisit with the gate-detectability item.
+
+## 2026-10-12 · PR #25 *(inferred)* · Stage 4 fails a candidate that exits after the load (owner review)
+- Rejected: catching exits only through failed requests during the load.
+- Reason: a mutant that answers everything and then exits (e.g. a panic in a goroutine) left no failed request; a crash under concurrency is a broken wrapper. Exit 66 stays a race-report; any other exit by the end of the load and the 1s grace fails concurrency. Gap: an exit later than that grace is not seen.
+- Reverse: drop the sb.exited select after checkOutcomes in runStage4; DESIGN.md sec 7 Stage 4 edit.

@@ -19,11 +19,12 @@ type Config struct {
 	CandidateDir string
 }
 
-// Run gates the candidate through Stages 1-3 (DESIGN.md sec 7); Stages
-// 4 and 5 come in later PRs (docs/STATUS.md). A check that fails is a
+// Run gates the candidate through Stages 1-4 (DESIGN.md sec 7); Stage 5
+// comes in a later PR (docs/STATUS.md). A check that fails is a
 // Result in the Report and stops the run; the error is only for the gate
-// itself failing (no go, bwrap, nsenter or docker daemon, I/O), which
-// says nothing about the candidate. On a pass, Report.Image names the
+// itself failing (no go, bwrap, nsenter, docker daemon, or gcc and a
+// static libc for the race build; I/O), which says nothing about the
+// candidate. On a pass, Report.Image names the
 // candidate's image, kept for kind load; otherwise the gate removes it,
 // unless that image already existed before the run.
 func Run(ctx context.Context, cfg Config) (r Report, err error) {
@@ -45,15 +46,15 @@ func Run(ctx context.Context, cfg Config) (r Report, err error) {
 	probe := filepath.Join(work, "probe")
 
 	// Stage 1 build/boot sub-check 1: static build, bare boot.
-	_, out, err := goBuild(ctx, tc, tree, "cmd/service", service)
+	built, out, err := goBuild(ctx, tc, tree, "cmd/service", service, false)
 	if err != nil {
 		return r, err
 	}
-	if !r.add(1, "build", out) {
+	if !r.add(1, "build", buildDetail(built, out)) {
 		return r, nil
 	}
 	for _, b := range []struct{ pkg, out string }{{relayPkg, relay}, {probePkg, probe}} {
-		if ok, out, err := goBuild(ctx, tc, cfg.RepoRoot, b.pkg, b.out); err != nil {
+		if ok, out, err := goBuild(ctx, tc, cfg.RepoRoot, b.pkg, b.out, false); err != nil {
 			return r, fmt.Errorf("build %s: %w", b.pkg, err)
 		} else if !ok {
 			return r, fmt.Errorf("build %s: %s", b.pkg, out)
@@ -96,8 +97,15 @@ func Run(ctx context.Context, cfg Config) (r Report, err error) {
 		}
 		return r, err
 	}
-	r.add(3, "cost-params", checkCostParams(s.hashes))
-	return r, nil
+	if !r.add(3, "cost-params", checkCostParams(s.hashes)) {
+		return r, nil
+	}
+
+	// Stage 4 against a separate race build, never deployed; the Stage 2
+	// process goes first, so the two never compete for the host.
+	sb.stop()
+	_, err = runStage4(ctx, &r, tc, tree, cfg.RepoRoot, work, relay, s.run)
+	return r, err
 }
 
 // dockerSubCheck is checkDocker; tests replace it on hosts with no
