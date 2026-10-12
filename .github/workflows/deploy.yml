@@ -59,13 +59,21 @@ jobs:
           k() { kubectl --context kind-ek8s "$@"; }
           k get pods -A -o wide || true
           k describe node || true
-          # Events of every pod that is not Running or Succeeded.
+          # Every pod in the namespaces this PR deploys into, with events.
+          for ns in ek8s-stress kube-system; do
+            echo "=== pods in $ns"
+            k -n "$ns" describe pods || true
+          done
+          # Elsewhere, any pod with a container not ready (or none started
+          # yet). Phase alone misses CrashLoopBackOff: it stays Running.
           k get pods -A --no-headers \
-            --field-selector=status.phase!=Running,status.phase!=Succeeded \
-            -o custom-columns=NS:.metadata.namespace,NAME:.metadata.name 2>/dev/null |
-            while read -r ns name; do
-              echo "--- $ns/$name"
-              k -n "$ns" describe pod "$name" || true
+            -o jsonpath='{range .items[*]}{.metadata.namespace}{" "}{.metadata.name}{" "}{.status.containerStatuses[*].ready}{"\n"}{end}' 2>/dev/null |
+            while read -r ns name ready; do
+              case "$ns" in ek8s-stress|kube-system) continue ;; esac
+              if [ -z "$ready" ] || [[ " $ready " == *" false "* ]]; then
+                echo "--- $ns/$name (ready: ${ready:-none})"
+                k -n "$ns" describe pod "$name" || true
+              fi
             done
           k get events -A --sort-by=.lastTimestamp | tail -n 50 || true
       - name: Delete cluster
