@@ -3,6 +3,11 @@
 # image into it and applies the cluster-wide infrastructure: metrics-server
 # and the stress-ng Deployment (left at 0 replicas, stress off). Safe to
 # re-run; a re-run resets stress-ng to off. See deploy/README.md.
+#
+# Parameters (environment; the defaults are the full-size workstation setup,
+# CI sets the smaller ones, see .github/workflows/deploy.yml):
+#   EK8S_KIND_CONFIG       kind config, relative to deploy/ (kind/cluster.yaml)
+#   EK8S_STRESS_KUSTOMIZE  stress-ng kustomization dir, relative to deploy/ (stress)
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -11,6 +16,8 @@ ctx="kind-$cluster"
 kind_version=v0.33.0
 stress_src=colinianking/stress-ng@sha256:f59a28ca71cf104db7c068d226ed77ad6b05afbbcd2560bfbf176f00b1808a7d
 stress_tag=ek8s-stress-ng:f59a28ca71cf # must match deploy/stress/deployment.yaml
+kind_config=${EK8S_KIND_CONFIG:-kind/cluster.yaml}
+stress_kustomize=${EK8S_STRESS_KUSTOMIZE:-stress}
 
 die() { echo "up.sh: $*" >&2; exit 1; }
 
@@ -28,7 +35,7 @@ esac
 # pipeline with SIGPIPE.
 clusters=$(kind get clusters)
 if ! grep -x "$cluster" >/dev/null <<<"$clusters"; then
-	kind create cluster --config kind/cluster.yaml --wait 180s
+	kind create cluster --config "$kind_config" --wait 180s
 fi
 
 # kind load takes a tagged local image; the pull is by digest, so the tag
@@ -38,6 +45,6 @@ docker tag "$stress_src" "$stress_tag"
 kind load docker-image "$stress_tag" --name "$cluster"
 
 kubectl --context "$ctx" apply -k metrics-server
-kubectl --context "$ctx" apply -k stress
+kubectl --context "$ctx" apply -k "$stress_kustomize"
 kubectl --context "$ctx" -n kube-system rollout status deploy/metrics-server --timeout=180s
 echo "up.sh: cluster $cluster ready (context $ctx)"

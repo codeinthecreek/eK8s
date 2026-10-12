@@ -5,12 +5,14 @@ neighbour (DESIGN.md sec 5). Everything here runs on the one Linux
 workstation (DESIGN.md sec 2).
 
 ```
-kind/cluster.yaml   the cluster: name ek8s, one node, Kubernetes 1.37.0
-metrics-server/     metrics-server v0.9.0, vendored, + --kubelet-insecure-tls
-stress/             namespace ek8s-stress: stress-ng Deployment (0 replicas),
-                    its dose ConfigMap, a deny-all NetworkPolicy
-up.sh               create the cluster (if absent) and apply the above
-smoke.sh            infra smoke test (run after up.sh)
+kind/cluster.yaml     the cluster: name ek8s, one node, Kubernetes 1.37.0
+kind/cluster-ci.yaml  the same at CI size (100m / 256Mi reserved)
+metrics-server/       metrics-server v0.9.0, vendored, + --kubelet-insecure-tls
+stress/               namespace ek8s-stress: stress-ng Deployment (0 replicas),
+                      its dose ConfigMap, a deny-all NetworkPolicy
+stress-ci/            overlay of stress/ at CI size (500m / 512Mi, 1 CPU worker)
+up.sh                 create the cluster (if absent) and apply the above
+smoke.sh              infra smoke test (run after up.sh)
 ```
 
 The per-variant bundle (namespace `ek8s-v<id>`, LimitRange, Deployment
@@ -118,6 +120,33 @@ kind delete cluster --name ek8s   # tear down
 `up.sh` is safe to re-run; each run resets stress-ng to off.
 `up.sh` is setup only: because it resets stress-ng to off, never run it
 during an orchestrator run.
+
+### Parameters and CI size
+
+Both scripts take their sizes from the environment; the defaults are the
+full-size workstation setup, so running them with nothing set is the real
+configuration.
+
+| Variable | Script | Default (full size) | CI size |
+|----------|--------|---------------------|---------|
+| `EK8S_KIND_CONFIG` | up.sh | `kind/cluster.yaml` | `kind/cluster-ci.yaml` |
+| `EK8S_STRESS_KUSTOMIZE` | up.sh | `stress` | `stress-ci` |
+| `EK8S_RESERVED_CPU_MILLIS` | smoke.sh | `1000` | `100` |
+| `EK8S_STRESS_MIN_CPU_MILLIS` | smoke.sh | `1000` | `250` |
+
+Paths are relative to deploy/. The reserved value must equal the kind
+config's kubeReserved + systemReserved CPU; the stress minimum must sit
+below the stress-ng CPU limit (3 CPU full size, 500m CI size).
+
+CI (`.github/workflows/deploy.yml`) runs up.sh then smoke.sh at CI size on
+every pull request touching deploy/ or the workflow; the repo is private, so
+its ubuntu-latest runner has 2 CPU / 8 GB, too small for the full-size
+reservation and stress dose. On failure it dumps `kubectl get pods -A`,
+`kubectl describe node` and the failing pods' events. It proves the
+mechanics (pinned images, kustomizations, PSA, metrics-server, stress-ng on
+and off), not the full-size numbers; those need a workstation run.
+`workflow_dispatch` (manual runs) works only once the workflow is on the
+default branch.
 
 ## stress-ng
 

@@ -1,0 +1,73 @@
+name: deploy smoke
+
+# Brings up the kind cluster at CI size and runs deploy/smoke.sh. It proves
+# the mechanics (pinned images, kustomizations, metrics-server, stress-ng on
+# and off), not the full-size numbers: those need the workstation
+# (docs/STATUS.md, Parked). workflow_dispatch only works once this file is
+# on the default branch.
+on:
+  pull_request:
+    paths:
+      - 'deploy/**'
+      - '.github/workflows/deploy.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      KIND_VERSION: v0.33.0
+      KIND_SHA256: aee6151561422756b764a4ae28e7f44cda5af5a9eead3cc9985112b1de8d8e0d
+      KUBECTL_VERSION: v1.37.0
+      KUBECTL_SHA256: 6129359f4e1f3848a5572ccb0b26cf28b8ca08cef38c95a765b2f64a2c961a2f
+      # CI size (deploy/README.md): 2-CPU runner.
+      EK8S_KIND_CONFIG: kind/cluster-ci.yaml
+      EK8S_STRESS_KUSTOMIZE: stress-ci
+      EK8S_RESERVED_CPU_MILLIS: '100'
+      EK8S_STRESS_MIN_CPU_MILLIS: '250'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Kubernetes 1.35+ (the v1.37.0 node image) needs a cgroup v2 host.
+      - name: Require cgroup v2
+        run: |
+          fs=$(stat -fc %T /sys/fs/cgroup)
+          if [ "$fs" != cgroup2fs ]; then
+            echo "::error::/sys/fs/cgroup is $fs, not cgroup2fs: the kind v1.37.0 node needs cgroup v2"
+            exit 1
+          fi
+      - name: Install kind and kubectl (checksum-verified)
+        run: |
+          curl -fsSLo kind "https://github.com/kubernetes-sigs/kind/releases/download/${KIND_VERSION}/kind-linux-amd64"
+          echo "${KIND_SHA256}  kind" | sha256sum -c -
+          curl -fsSLo kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+          echo "${KUBECTL_SHA256}  kubectl" | sha256sum -c -
+          sudo install -m 0755 kind kubectl /usr/local/bin/
+          rm kind kubectl
+          kind version
+          kubectl version --client
+      - run: deploy/up.sh
+      - run: deploy/smoke.sh
+      - name: Dump cluster state
+        if: failure()
+        run: |
+          k() { kubectl --context kind-ek8s "$@"; }
+          k get pods -A -o wide || true
+          k describe node || true
+          # Events of every pod that is not Running or Succeeded.
+          k get pods -A --no-headers \
+            --field-selector=status.phase!=Running,status.phase!=Succeeded \
+            -o custom-columns=NS:.metadata.namespace,NAME:.metadata.name 2>/dev/null |
+            while read -r ns name; do
+              echo "--- $ns/$name"
+              k -n "$ns" describe pod "$name" || true
+            done
+          k get events -A --sort-by=.lastTimestamp | tail -n 50 || true
+      - name: Delete cluster
+        if: always()
+        run: kind delete cluster --name ek8s || true
