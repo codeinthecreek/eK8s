@@ -366,17 +366,17 @@
 - Reason: DESIGN.md is a spec, not an introduction; a separate overview keeps the landing page to what/layout/build/links. The overview defers to DESIGN.md and docs/STATUS.md, and a CLAUDE.md bullet makes DESIGN.md and seed-wrapper PRs check it, so it cannot drift silently.
 - Reverse: delete docs/overview.md, README.md's links to it, and the CLAUDE.md overview bullet.
 
-## 2026-10-12 · PR #23 *(inferred)* · Packets are the default end-of-task output (reverses PR #11's "only on request")
+## 2026-10-12 · PR #23 · Packets are the default end-of-task output (reverses PR #11's "only on request")
 - Rejected: a prose report followed by a separate packet on request.
 - Reason: the same facts were produced twice per task, and a packet already carries most of the (a)-(g) items.
 - Reverse: restore the request-only wording in handoff.md and the standalone report rule in CLAUDE.md.
 
-## 2026-10-12 · PR #23 *(inferred)* · Packet header carries origin/main and the last merged PR; sync packet type; chat-side staleness check
+## 2026-10-12 · PR #23 · Packet header carries origin/main and the last merged PR; sync packet type; chat-side staleness check
 - Rejected: relying on project-knowledge GitHub sync alone (manual; no sync control found in the iPad app or the claude.ai web UI, re-adding the files is the only refresh found).
 - Reason: the planning chat wrote docs/overview.md from snapshots four PRs stale and nothing flagged it; the header exposes drift at the first packet.
 - Reverse: drop the main field and the Sync packet and Chat side sections from handoff.md.
 
-## 2026-10-12 · PR #23 *(inferred)* · The start-of-PR reconcile goes in its own commit, first
+## 2026-10-12 · PR #23 · The start-of-PR reconcile goes in its own commit, first
 - Rejected: bundling the reconcile with the task's commit.
 - Reason: one logical change per commit; the bundling recurred in PRs #22 and #23.
 - Reverse: drop the "own commit, first" clause from CLAUDE.md's reconcile bullet.
