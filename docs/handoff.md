@@ -162,7 +162,7 @@ keeps #2 from matching #21), and use that commit as <sha>. Header:
 - `git log --oneline <sha>..origin/main`
 - docs/STATUS.md in full.
 - docs/decisions.md entries added or changed since <sha>, quoted in full.
-- `git diff <sha> origin/main -- DESIGN.md CLAUDE.md docs/handoff.md docs/overview.md`
+- `git diff <sha> origin/main -- DESIGN.md CLAUDE.md README.md docs/handoff.md docs/overview.md`
 - If that diff is over about 400 lines: per-file line counts plus the
   changed section headings, with the rest listed under `Omitted:`.
 - Never include Go code.

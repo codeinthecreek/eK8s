@@ -411,3 +411,8 @@
 - Rejected: catching exits only through failed requests during the load.
 - Reason: a mutant that answers everything and then exits (e.g. a panic in a goroutine) left no failed request; a crash under concurrency is a broken wrapper. Exit 66 stays a race-report; any other exit by the end of the load and the 1s grace fails concurrency. Gap: an exit later than that grace is not seen.
 - Reverse: drop the sb.exited select after checkOutcomes in runStage4; DESIGN.md sec 7 Stage 4 edit.
+
+## 2026-10-12 · PR #26 *(inferred)* · README carries no status, only a pointer; overview.md's status section is tied to the STATUS.md rule
+- Rejected: keeping README's status sentence and triggering its update on "changes what is built" too.
+- Reason: README went stale after #25 (a gate PR that touched neither DESIGN.md nor the wrapper), and the sync packet's diff list omitted README.md.
+- Reverse: restore the status sentence and the "(planned)" layout markers; drop the README.md and overview-status clauses from CLAUDE.md.
