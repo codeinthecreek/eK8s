@@ -4,7 +4,7 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 *(inferred)* are guesses, not read from the repo; correct them.
 
 ## Now
-- `claude/gate-stage4` (PR #25 *(inferred)*): gate PR3 of 4, Stage 4 concurrency safety: static race build booted in the same bwrap sandbox after a race probe preflight, N = 2 x NumCPU concurrent requests with bounded shed/transport retries, race report by exit 66 plus a full-output scan, cross-talk via Stage 2's classifier Run; fails a candidate that has exited by the end of the load; DESIGN.md sec 7, CLAUDE.md, overview status.
+- `claude/deploy`: deploy/ PR, design packet pending.
 
 ## Next
 - deploy/ (kind config, manifests, stress-ng; name the variant Deployment `hasher`, or change newPodName's prefix in gate/boot.go to match, so the sandbox hostname stays pod-like), then loadgen (sustained + burst), then gate PR4: Stage 5.
@@ -21,6 +21,7 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 - CI: unpin go-version 1.26.9 back to '1.26.x' once actions/go-versions' manifest lists >= 1.26.9 (docs/decisions.md, PR #18 entry).
 
 ## Recent
+- #25 Gate PR3 of 4: Stage 4 concurrency safety (static race build in the same bwrap sandbox after a race probe preflight, N = 2 x NumCPU concurrent requests with bounded retries, race report by exit status plus output scan, cross-talk via the Stage 2 Run; fails a candidate that exits by the end of the load) (2026-10-12)
 - #24 Reviewer checklist gains limit-boundary and child-process-lifetime items; handoff.md Feedback rule covers any owner reply carrying feedback, conditions or an approval with changes (2026-10-12)
 - #23 Packets are the default end-of-task output (CLAUDE.md, docs/handoff.md); packet header gains origin/main and the last merged PR; new Sync packet type and a Chat side staleness check; the start-of-PR reconcile goes in its own commit (2026-10-12)
 - #22 Newcomer overview (docs/overview.md) and a short front-door README.md; CLAUDE.md layout line and a bullet to keep the overview in step with DESIGN.md and the generation-0 wrapper (2026-10-12)
