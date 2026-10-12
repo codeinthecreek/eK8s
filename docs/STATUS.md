@@ -4,7 +4,6 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 *(inferred)* are guesses, not read from the repo; correct them.
 
 ## Now
-- `claude/gate-pr2` (PR #21 *(inferred)*): gate Stage 1 build/boot (static build, bare boot under bwrap with its own network namespace via an nsenter relay, FROM scratch image), Stage 2 (interop + contract), Stage 3 (cost params); minimum-toolchain gate fault; CI installs bubblewrap and lifts Ubuntu's AppArmor userns restriction; a sandbox preflight (gate-built probe) makes host sandbox failures gate faults.
 
 ## Next
 - gate PR3: Stage 4 (cgo race build, shed retry, race-report capture).
@@ -21,6 +20,7 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 - CI: unpin go-version 1.26.9 back to '1.26.x' once actions/go-versions' manifest lists >= 1.26.9 (docs/decisions.md, PR #18 entry).
 
 ## Recent
+- #21 Gate PR2 of 4: Stage 1 build/boot (static build, bare boot under bwrap via an nsenter relay, FROM scratch image), Stage 2 interop + contract, Stage 3 cost params; minimum-toolchain gate fault; CI installs bubblewrap and lifts the AppArmor userns restriction; sandbox preflight (2026-10-09)
 - #20 go.mod: `toolchain go1.26.9` for GOTOOLCHAIN=auto builds (2026-10-09)
 - #19 reviewer: three checklist items from PR #18's [missed] feedback (2026-10-09)
 - #18 Gate PR1 of 4: build-tree assembly and Stage 1 pre-build checks (candidate file set, hasher pin, build-constraint ban, go list allowlist under the deployed and race builds), gate/cmd/gate CLI; DESIGN.md sec 5, 7, 12 and CLAUDE.md edits for the approved gate design (2026-10-09)

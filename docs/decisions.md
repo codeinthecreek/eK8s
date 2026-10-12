@@ -211,7 +211,7 @@
 - Rejected: encoding/json struct decoding (matches keys case-insensitively, accepts null as absent); ignoring unknown fields.
 - Reason: the HTTP contract (DESIGN.md sec 8) is fixed, so extra or misspelled fields mean a broken mutant. Duplicate keys are not detected (last wins); the wrapper's encoder never emits them.
 - Reverse: DESIGN.md sec 8 edit (HTTP contract 200-body bullet); let decodeField ignore keys other than the contract one.
-- Follow-up (done in PR #21 *(inferred)*: every Stage 2 2xx goes through classifier.Run): gate Stage 2 must assert the 200-body contract when gate/ is built (DESIGN.md sec 8 says a mutant that breaks it fails Stage 2).
+- Follow-up (done in PR #21: every Stage 2 2xx goes through classifier.Run): gate Stage 2 must assert the 200-body contract when gate/ is built (DESIGN.md sec 8 says a mutant that breaks it fails Stage 2).
 
 ## 2026-10-02 · PR #15 · Salt-reuse scope: one classifier Run per variant live lifetime (promotion to cull); late 2xx hash salts recorded too
 - Rejected: a Run per observation window; ignoring salts from responses over HangTimeout.
@@ -273,7 +273,7 @@
 - Reason: listed under CGO_ENABLED=0 and CGO_ENABLED=1 -race, each re-checking imports and CgoFiles/IgnoredGoFiles, plus a lexical ban on //go:build and // +build lines, so no constraint hides a file's imports from either build. os is excluded (env and limits come via cmd/service). Imports are checked before load errors: go list -e still reports a forbidden import that fails to resolve.
 - Reverse: edit allowedImports / listings in gate/precheck.go and DESIGN.md sec 7 together.
 
-## 2026-10-09 · PR #18 · Known limit: net/http can read and exfiltrate files; contained by bwrap for the bare boot and a scratch image (updated PR #21 *(inferred)*)
+## 2026-10-09 · PR #18 · Known limit: net/http can read and exfiltrate files; contained by bwrap for the bare boot and a scratch image (updated PR #21)
 - Rejected: dropping net/http from the allowlist (every wrapper serves HTTP).
 - Reason: http.Dir("/").Open / FileServer read files and http.Client sends them; no import allowlist closes that. Stage 1's bare boot runs under bubblewrap (--clearenv, only the binary bound, ro; no /home, repo or /dev) in its own network namespace, so it has no network egress either (PR #21 bwrap entry); the container and pod see only a FROM scratch image, and keep bridge/pod egress.
 - Reverse: n/a (a limit, not a choice); revisit if the boot ever runs unsandboxed or shares the host network namespace.
@@ -318,44 +318,44 @@
 - Reason: under GOTOOLCHAIN=auto, local, cloud and gate resolveToolchain builds use >= 1.26.9, never 1.26.0's vulnerable stdlib. Each Go security patch needs this line bumped.
 - Reverse: delete the toolchain line.
 
-## 2026-10-09 · PR #21 *(inferred)* · Gate fault when the resolved go is older than go.mod's toolchain line (Q3 item 15)
+## 2026-10-09 · PR #21 · Gate fault when the resolved go is older than go.mod's toolchain line (Q3 item 15)
 - Rejected: trusting the toolchain line alone (under GOTOOLCHAIN=local it is only a preference, so a 1.26.0-1.26.8 go would build the deployed binary).
 - Reason: resolveToolchain compares `go env GOVERSION` with go.mod's toolchain line (the go directive when there is none); older is an error from Run, before any candidate check that builds.
 - Reverse: drop the minGoVersion comparison in gate/assemble.go.
 
-## 2026-10-09 · PR #21 *(inferred)* · Bare boot: bwrap argv, no /dev, no --disable-userns
+## 2026-10-09 · PR #21 · Bare boot: bwrap argv, no /dev, no --disable-userns
 - Argv (gate/boot.go bwrapArgs): --unshare-all --unshare-user --die-with-parent --new-session --clearenv --setenv EK8S_VARIANT <label> --uid 65532 --gid 65532 --hostname hasher-<10>-<5> (random per run, pod-like: removes the fixed-hostname tell only; others remain, STATUS Parked) --ro-bind <bin> /service --proc /proc --chdir / --cap-drop ALL --info-fd 3 /service.
 - Rejected: --dev /dev and --disable-userns: either makes the relay's `nsenter -U -n` fail with EPERM (bisected in the PR2 design session). Hashing works without /dev (verified); without syscall, os/exec or unsafe the candidate cannot call unshare/clone anyway.
 - Reason: --unshare-user is explicit because --unshare-all only tries it. Verified as root and as an unprivileged user, but not under Ubuntu's AppArmor userns restriction (fails there; PR #21 CI entry).
 - Reverse: edit bwrapArgs; adding --dev or --disable-userns needs another way to reach the candidate (Q1 options A/D).
 
-## 2026-10-09 · PR #21 *(inferred)* · Gate reaches the sandbox via a relay: nsenter -U -n into its namespaces, Unix socket in the gate tmp dir (Q1 option B)
+## 2026-10-09 · PR #21 · Gate reaches the sandbox via a relay: nsenter -U -n into its namespaces, Unix socket in the gate tmp dir (Q1 option B)
 - Rejected: --share-net (host egress, kind API, metadata endpoint; :8080 collisions); the Stage 2 client inside the sandbox (shares the candidate's uid, pool readable via http.Dir); in-process setns (needs CAP_SYS_ADMIN, so root).
 - Reason: only option with no candidate egress, working unprivileged. gate/internal/relay is stdlib-only, go-built per run from the repo with the resolved toolchain; it stays in the host mount and pid namespaces. Not joined -> gate fault, unless the candidate already exited (boot failure). It exits on stdin EOF from a pipe the gate never writes, so a SIGKILLed gate does not leave it holding the dead candidate's namespaces (Pdeathsig fires on the creating OS thread's exit in Go).
 - Reverse: --share-net in bwrapArgs, drop the relay and dial 127.0.0.1:8080.
 
-## 2026-10-09 · PR #21 *(inferred)* · Stage 1 order and docker sub-check (Q3 items 1-8, 12-14)
+## 2026-10-09 · PR #21 · Stage 1 order and docker sub-check (Q3 items 1-8, 12-14)
 - Order: build -> bare boot + /healthz (100ms polls, 10s, fail at once on exit) -> docker build/run/health/rm (30s) -> Stages 2-3 on the bare process -> kill bwrap. Label "gate-" + 16 hex per run; EK8S_*_LIMIT unset (0) until deploy/. docker run -d --rm -p 127.0.0.1::8080 --read-only --cap-drop ALL --security-opt no-new-privileges --pids-limit 256 --memory 256m --memory-swap 256m --cpus 1 -e EK8S_VARIANT.
 - Rejected: --network none (needs root to reach); treating docker CLI failures as candidate failures (daemon faults say nothing about it).
 - Reason: the bare process has no egress and is the one Stages 2-3 need; the container only proves the image boots. Only its /healthz (or exiting before its port is published) is a candidate Result. Tag ek8s-wrapper:<12 hex of the binary's sha256>, built -trimpath so identical code gets one tag; kept on pass (Report.Image), rmi on fail unless it existed before the run. Output kept 64 KiB, in Detail on boot/Stage 2 failures.
 - Reverse: edit gate/docker.go, gate/boot.go constants and Run's order.
 
-## 2026-10-09 · PR #21 *(inferred)* · Stage 2: 3 inputs per interop assertion, hashcore Verify as the real library, client timeout HangTimeout+0.5s; Stage 3 its own parser (Q3 items 9-11)
+## 2026-10-09 · PR #21 · Stage 2: 3 inputs per interop assertion, hashcore Verify as the real library, client timeout HangTimeout+0.5s; Stage 3 its own parser (Q3 items 9-11)
 - Rejected: one input per assertion; relying on the classifier's exact params segment for Stage 3 (it already rejects any other).
 - Reason: the pool's hashes came from hashcore, so hashcore.Verify is the reference; the client timeout sits above HangTimeout so the classifier reports hangs. Stage 3 parses m, t, p numerically against restated constants, so a classifier bug is not a single point of failure. Contract cases also cover a missing hash, non-object body and truncated hash; "password-bounds" hashes fresh 1- and 1024-byte passwords (never pool ones), fully verified, counted by Stage 3.
 - Reverse: edit pairsPerAssertion, clientTimeout, contractCases and checkCostParams in gate/interop.go.
 
-## 2026-10-09 · PR #21 *(inferred)* · Missing bwrap, nsenter or docker daemon: gate fault; tests skip/stub unless EK8S_GATE_REQUIRE_TOOLS=1 (CI)
+## 2026-10-09 · PR #21 · Missing bwrap, nsenter or docker daemon: gate fault; tests skip/stub unless EK8S_GATE_REQUIRE_TOOLS=1 (CI)
 - Rejected: a Config knob to skip the docker sub-check; skipping all Stage 2 tests on hosts without docker (cloud sessions).
 - Reason: tests swap the unexported dockerSubCheck var for a stub when no daemon runs, so Stages 2-3 are still tested; CI apt-installs bubblewrap and sets the env var, so there both are required.
 - Reverse: drop the env var from ci.yml and setupHost in gate/stages_test.go.
 
-## 2026-10-09 · PR #21 *(inferred)* · CI lifts Ubuntu's AppArmor userns restriction (sysctl) for the bare boot
+## 2026-10-09 · PR #21 · CI lifts Ubuntu's AppArmor userns restriction (sysctl) for the bare boot
 - Rejected: running the gate tests as root (root bypasses the restriction, hiding the unprivileged path operators use); a shared host net ns (excluded: candidate egress).
 - Reason: on ubuntu-latest (24.04) bwrap got a userns without capabilities: "bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted" (run 37903906043). `sysctl kernel.apparmor_restrict_unprivileged_userns=0` on the ephemeral runner is one line; operator hosts should prefer an AppArmor profile granting bwrap userns (CLAUDE.md, gate/doc.go; STATUS Parked).
 - Reverse: drop the sysctl step from ci.yml (CI then fails at boot unless a bwrap profile is installed instead).
 
-## 2026-10-09 · PR #21 *(inferred)* · Sandbox preflight: boot a gate-built probe through the whole bare-boot path before any candidate
+## 2026-10-09 · PR #21 · Sandbox preflight: boot a gate-built probe through the whole bare-boot path before any candidate
 - Decision: gate/internal/probe (stdlib, /healthz like cmd/service) is booted with the same bwrapArgs, nsenter -U -n join, relay "ready" and /healthz, then torn down; any failure is a gate fault (error from Run, no "boot" Result) carrying bwrap's/nsenter's output.
 - Rejected: classifying by a "bwrap:" prefix in the output (gameable: a candidate can print it and exit); --json-status-fd (cannot tell a bwrap setup failure from a candidate's exit 1).
 - Reason: bwrap reports child-pid before it sets up loopback, so on the AppArmor-restricted runner a host failure read as the candidate's boot failure (run 37903906043). Residual gap: a host failure after a passing preflight still reads as a candidate boot failure.
