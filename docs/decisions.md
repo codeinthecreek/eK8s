@@ -452,3 +452,8 @@
 - Rejected: the gate's "gate-<16 hex>" (a gate tell); a label carrying the variant id.
 - Reason: one shape everywhere removes the label as a gate tell; the label -> ek8s-v<id> mapping lives in the orchestrator and lineage. PR (2) changes the gate's prefix (one line in gate/boot.go's newLabel).
 - Reverse: DESIGN.md sec 5 edit; revert newLabel's prefix.
+
+## 2026-10-12 · PR #26 · Merge gate for deploy/ PR (1): CI-size kind smoke run, not the workstation run
+- Rejected: waiting for the owner's workstation (away for over a week).
+- Reason: kind cannot run in the cloud container (cgroup v1, runc denied oom_score_adj), and CI's 2-CPU runner cannot hold the full-size reservation and stress dose; CI at CI size (cluster-ci.yaml, stress-ci overlay, EK8S_* parameters defaulting to full size) proves the mechanics but not the numbers, so the full-size run, budget numbers and host userns checks stay Parked, required before the first real orchestrator run.
+- Reverse: drop .github/workflows/deploy.yml and the CI-size files; restore the local run as the merge gate.
