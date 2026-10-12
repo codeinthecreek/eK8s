@@ -90,16 +90,18 @@ func TestStage4Failures(t *testing.T) {
 			{"server.go", verifyEntry, verifyEntry + inflight},
 			{"server.go", hashCall, hashCall + "\n\t\ts.mu.Lock()\n\t\tother := s.last\n\t\ts.last = hash\n\t\ts.mu.Unlock()\n\t\tif other != \"\" && s.inflight.Load() > 1 {\n\t\t\thash = other\n\t\t}"},
 		}, "concurrency", "hash failed ("},
-		// ... and /verify, which records every hash on entry, checks the
-		// password against another request's hash whenever another request
-		// is in flight, so a matching pair answers false (wrong_match).
+		// ... and /verify, which records every hash before acquire,
+		// re-checks the password against another request's hash once it
+		// has ever seen two requests in flight (sticky, so a request that
+		// runs alone in a retry round still leaks), so a matching pair
+		// answers false (wrong_match).
 		{"verify cross-talk without a race", []edit1{
 			{"server.go", "\"strconv\"", syncImport},
-			{"server.go", slotsLine, slotsLine + "\n\tmu sync.Mutex\n\tseen []string\n\tinflight atomic.Int64"},
-			{"server.go", hashEntry, hashEntry + inflight},
-			{"server.go", verifyEntry, verifyEntry + inflight},
+			{"server.go", slotsLine, slotsLine + "\n\tmu sync.Mutex\n\tseen []string\n\tinflight atomic.Int64\n\tconcurrent atomic.Bool"},
+			{"server.go", hashEntry, hashEntry + concurrent},
+			{"server.go", verifyEntry, verifyEntry + concurrent},
 			{"server.go", hashRequired, hashRequired + "\n\t\ts.mu.Lock()\n\t\ts.seen = append(s.seen, req.Hash)\n\t\ts.mu.Unlock()"},
-			{"server.go", verifyCall, "hash := req.Hash\n\t\ts.mu.Lock()\n\t\tfor _, h := range s.seen {\n\t\t\tif h != req.Hash && s.inflight.Load() > 1 {\n\t\t\t\thash = h\n\t\t\t\tbreak\n\t\t\t}\n\t\t}\n\t\ts.mu.Unlock()\n\t\tmatch, err := s.h.Verify(req.Password, hash)"},
+			{"server.go", verifyCall, verifyCall + "\n\t\tif err == nil && s.concurrent.Load() {\n\t\t\tother := \"\"\n\t\t\ts.mu.Lock()\n\t\t\tfor _, h := range s.seen {\n\t\t\t\tif h != req.Hash {\n\t\t\t\t\tother = h\n\t\t\t\t\tbreak\n\t\t\t\t}\n\t\t\t}\n\t\t\ts.mu.Unlock()\n\t\t\tif other != \"\" {\n\t\t\t\tmatch, err = s.h.Verify(req.Password, other)\n\t\t\t}\n\t\t}"},
 		}, "concurrency", "wrong_match"},
 		// Exits only after answering everything (N, computed as the gate
 		// does), so no request sees it: only the post-load exit check can.
