@@ -57,6 +57,10 @@ since #N"); "no packet" in the task prompt opts out.
   saying docs/STATUS.md was updated in this PR, and uncommitted/unpushed
   state. (a) maps to Task/stat/Feedback and (b) to the `(inferred)`
   lines. Design packets carry only the items that apply.
+- A `Verify:` line for a test of a probabilistic check, or a seed or
+  negative test for one (randomized inputs, timing, concurrency,
+  retries), carries its `-count` (default `-count=20`), and the packet
+  states the count the test was validated at.
 
 ## Chat side
 
