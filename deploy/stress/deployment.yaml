@@ -1,0 +1,79 @@
+# stress-ng, off (0 replicas) by default. The orchestrator scales it
+# 0 <-> 1 for the baseline and stress halves and turns it on before gate
+# Stage 5 (DESIGN.md sec 7, sec 11).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: stress-ng
+  namespace: ek8s-stress
+  labels:
+    app: stress-ng
+spec:
+  replicas: 0
+  strategy:
+    type: Recreate # never two dosing pods at once
+  selector:
+    matchLabels:
+      app: stress-ng
+  template:
+    metadata:
+      labels:
+        app: stress-ng
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 5
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: stress-ng
+        # Loaded into the node by deploy/up.sh from
+        # colinianking/stress-ng@sha256:f59a28ca71cf104db7c068d226ed77ad6b05afbbcd2560bfbf176f00b1808a7d
+        # (stress-ng 0.22.01); the tag is the digest's first 12 hex.
+        image: ek8s-stress-ng:f59a28ca71cf
+        imagePullPolicy: Never
+        # Kubernetes expands $(VAR) from the env below; --timeout 0 runs
+        # until the pod is stopped. stress-ng needs a writable temp path,
+        # and the root filesystem is read-only.
+        args:
+        - --temp-path=/tmp
+        - --cpu=$(CPU_WORKERS)
+        - --cpu-load=$(CPU_LOAD)
+        - --vm=$(VM_WORKERS)
+        - --vm-bytes=$(VM_BYTES)
+        - --timeout=0
+        env:
+        - name: CPU_WORKERS
+          valueFrom: {configMapKeyRef: {name: stress-dose, key: CPU_WORKERS}}
+        - name: CPU_LOAD
+          valueFrom: {configMapKeyRef: {name: stress-dose, key: CPU_LOAD}}
+        - name: VM_WORKERS
+          valueFrom: {configMapKeyRef: {name: stress-dose, key: VM_WORKERS}}
+        - name: VM_BYTES
+          valueFrom: {configMapKeyRef: {name: stress-dose, key: VM_BYTES}}
+        # Guaranteed QoS: under contention CPU is shared by request, so a
+        # small request would make a weak neighbour. Starting guesses
+        # (DESIGN.md sec 15).
+        resources:
+          requests:
+            cpu: "3"
+            memory: 2Gi
+          limits:
+            cpu: "3"
+            memory: 2Gi
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: [ALL]
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      - name: tmp
+        emptyDir:
+          sizeLimit: 64Mi

@@ -1,0 +1,12 @@
+# stress-ng needs no network: deny all ingress and egress (enforced by
+# kindnet's built-in NetworkPolicy support, kind >= v0.24.0).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: deny-all
+  namespace: ek8s-stress
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress

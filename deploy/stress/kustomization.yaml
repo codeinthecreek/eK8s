@@ -1,0 +1,10 @@
+# The stress-ng noisy neighbour (DESIGN.md sec 3, sec 7 Stage 5, sec 11).
+# Apply with: kubectl --context kind-ek8s apply -k deploy/stress
+# Applying resets the Deployment to 0 replicas (stress off).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- namespace.yaml
+- networkpolicy.yaml
+- dose.yaml
+- deployment.yaml

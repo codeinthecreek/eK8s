@@ -1,0 +1,14 @@
+# The stress dose: starting guesses (DESIGN.md sec 15), tuned once real
+# telemetry is visible. The orchestrator owns stress state: it may patch this
+# ConfigMap while stress is off; the next scale-up reads the new values.
+# VM_BYTES must stay under the container's memory limit (deployment.yaml).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: stress-dose
+  namespace: ek8s-stress
+data:
+  CPU_WORKERS: "3"   # --cpu: CPU-loading workers
+  CPU_LOAD: "100"    # --cpu-load: percent load per CPU worker
+  VM_WORKERS: "1"    # --vm: anonymous-mmap memory workers
+  VM_BYTES: "1G"     # --vm-bytes: total across the VM workers

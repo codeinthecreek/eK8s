@@ -417,6 +417,21 @@
 - Reason: README went stale after #25 (a gate PR that touched neither DESIGN.md nor the wrapper), and the sync packet's diff list omitted README.md.
 - Reverse: restore the status sentence and the "(planned)" layout markers; drop the README.md and overview-status clauses from CLAUDE.md.
 
+## 2026-10-12 · PR #26 · kind cluster: kind v0.33.0, one node, v1.37.0 by digest, name ek8s, 1 CPU / 2Gi reserved, no host ports (design packet Q1)
+- Rejected: node v1.36.4 (closer to metrics-server's build deps, not a support statement); no reservation (allocatable = whole host); host loadgen via NodePort extraPortMappings (fixed port pool; the default listenAddress is 0.0.0.0).
+- Reason: v1.37.0 is kind's tested default and inside metrics-server 0.9.x's 1.34+; kubeReserved + systemReserved 500m/1Gi each schedule pod requests against DESIGN.md sec 2's budget; loadgen runs in-cluster (DESIGN.md sec 10 edit), so nothing is published on the host.
+- Reverse: edit deploy/kind/cluster.yaml (image, kubeadmConfigPatches) and recreate the cluster; DESIGN.md sec 10 edit for loadgen's location.
+
+## 2026-10-12 · PR #26 · metrics-server v0.9.0 vendored, image by digest, --kubelet-insecure-tls (Q6)
+- Rejected: the Helm chart (a new host tool); serverTLSBootstrap plus approving kubelet-serving CSRs on every cluster create.
+- Reason: components.yaml is the unmodified release asset (sha256 in its kustomization); the digest comes from the k8s.io image promoter manifest; kind's kubelet cert is not signed by the cluster CA, acceptable with the API server on loopback only. HPA ships with the variant bundle in PR (2).
+- Reverse: replace deploy/metrics-server/ and drop the patch.
+
+## 2026-10-12 · PR #26 · stress-ng: upstream image by digest, kind-loaded under a digest tag; 0 <-> 1 replicas; dose in a ConfigMap; Guaranteed 3 CPU / 2Gi (Q7)
+- Rejected: building FROM a distro base with apt (base pull plus apt network at build); a static build; an always-on pod driven by kubectl exec; a Job per stress half.
+- Reason: colinianking/stress-ng@sha256:f59a28ca... is stress-ng 0.22.01; up.sh tags it ek8s-stress-ng:<12 hex> because kind load takes a tagged local image; pull Never, so the node never pulls. Runs as 65532 with a read-only root and an emptyDir /tmp (--temp-path), checked with docker. A small CPU request would make a weak neighbour.
+- Reverse: edit deploy/stress/ and up.sh's stress_src/stress_tag.
+
 ## 2026-10-12 · PR #26 · The orchestrator owns stress state; Stage 5 requires stress-ng Running, else gate fault (Q7; DESIGN.md sec 7, sec 11)
 - Rejected: Stage 5 turning stress on itself; Stage 5 waiting for a stress half.
 - Reason: one owner for stress state; the orchestrator turns it on and marks the window excluded (sec 7 already excludes Stage 5 windows) before calling Stage 5. Anything but Running says nothing about the candidate.
