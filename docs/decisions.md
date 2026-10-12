@@ -457,3 +457,8 @@
 - Rejected: waiting for the owner's workstation (away for over a week).
 - Reason: kind cannot run in the cloud container (cgroup v1, runc denied oom_score_adj), and CI's 2-CPU runner cannot hold the full-size reservation and stress dose; CI at CI size (cluster-ci.yaml, stress-ci overlay, EK8S_* parameters defaulting to full size) proves the mechanics but not the numbers, so the full-size run, budget numbers and host userns checks stay Parked, required before the first real orchestrator run.
 - Reverse: drop .github/workflows/deploy.yml and the CI-size files; restore the local run as the merge gate.
+
+## 2026-10-12 · PR #26 · CI (ci.yml) path filter: its own file, not all of .github/workflows/** (amends the PR #12 CI paths entry)
+- Rejected: keeping '.github/workflows/**' (every deploy.yml-only change ran the Go suite and its flaky Stage 4 seeds, as on this PR).
+- Reason: a change to another workflow says nothing about Go code; ci.yml still re-runs when ci.yml itself changes, and weekly and by hand as before.
+- Reverse: restore '.github/workflows/**' in both paths lists of .github/workflows/ci.yml.

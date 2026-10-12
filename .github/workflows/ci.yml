@@ -7,7 +7,7 @@ on:
       - 'go.mod'
       - 'go.sum'
       - '**/testdata/**'
-      - '.github/workflows/**'
+      - '.github/workflows/ci.yml'
   push:
     branches: [main]
     paths:
@@ -15,7 +15,7 @@ on:
       - 'go.mod'
       - 'go.sum'
       - '**/testdata/**'
-      - '.github/workflows/**'
+      - '.github/workflows/ci.yml'
   # govulncheck results change as advisories are published, not only when
   # Go code changes; the weekly run catches those, dispatch runs it by hand.
   schedule:
