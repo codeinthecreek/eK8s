@@ -4,7 +4,7 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 *(inferred)* are guesses, not read from the repo; correct them.
 
 ## Now
-- (none)
+- `claude/packets-default` (PR #23 *(inferred)*): packets become the default end-of-task output (CLAUDE.md, docs/handoff.md); packet header gains origin/main and the last merged PR; new Sync packet type and a Chat side staleness check.
 
 ## Next
 - gate PR3: Stage 4 (cgo race build, shed retry, race-report capture).
