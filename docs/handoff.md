@@ -33,10 +33,12 @@ since #N"); "no packet" in the task prompt opts out.
   context). Never full logs.
 - Last section, `Omitted:` listing anything left out for size, so the
   chat can ask for it (or `Omitted: nothing`).
-- When the owner has pasted chat feedback since the last packet, the next
-  packet opens (after the header) with a `Feedback:` section: one line per
-  item, `<item> -- done | declined: <reason> | question: <question>`, so
-  the loop closes visibly.
+- When any owner reply since the last packet carries chat feedback,
+  conditions, or an approval with changes (e.g. "approved, but ..."), the
+  next packet opens (after the header) with a `Feedback:` section: one
+  line per item,
+  `<item> -- done | declined: <reason> | question: <question>`, so the loop
+  closes visibly. A plain approval with no conditions is not feedback.
 - Review and approval packets also carry a `Self-review:` section
   (after `Feedback:` when there is one): the reviewer subagent's findings
   on the final tree (CLAUDE.md), one line per finding,
