@@ -30,12 +30,15 @@ Applies to every session in this repo.
 - Log each non-trivial decision in `docs/decisions.md`: date, PR,
   decision, rejected alternative, reason, how to reverse. Max 5 lines per
   entry.
-- End every task with: (a) what changed, (b) assumptions made but not
-  verified, (c) files I must understand vs boilerplate, (d) exact
-  commands to verify it works, (e) a brief explanation of any Go idiom or
-  concurrency pattern used that a non-Go-specialist wouldn't know,
-  (f) uncommitted/unpushed state, (g) confirmation that
-  `docs/STATUS.md` was updated in this PR.
+- End every task with the packet its next step needs (`docs/handoff.md`,
+  "Which packet"); the packet carries items (a)-(g) and there is no
+  separate prose report. If the task prompt says "no packet", end with
+  (a)-(g) as a short plain report instead. The items: (a) what changed,
+  (b) assumptions made but not verified, (c) files I must understand vs
+  boilerplate, (d) exact commands to verify it works, (e) a brief
+  explanation of any Go idiom or concurrency pattern used that a
+  non-Go-specialist wouldn't know, (f) uncommitted/unpushed state,
+  (g) confirmation that `docs/STATUS.md` was updated in this PR.
 - One logical change per commit; the message explains why, not what.
 - Every PR updates `docs/STATUS.md` (Now/Next/Parked/Recent) in the
   same PR.
@@ -46,10 +49,12 @@ Applies to every session in this repo.
   `docs/decisions.md` with `git log origin/main`: move merged items from
   Now to Recent with their real PR numbers, and replace "(inferred)" PR
   numbers that git log now confirms. Do it in the same PR as the task,
-  not a separate one.
+  not a separate one, but in its own commit, first (before the task's
+  commit).
 - Material for my planning/review chat goes in the packet formats in
-  `docs/handoff.md`, and only when I ask for a packet; the end-of-task
-  report rule (a)-(g) is unchanged.
+  `docs/handoff.md`: by default at the end of every task, or on request
+  by name ("design packet", "review packet", "approval packet",
+  "sync packet since <sha>" or "sync packet since #N").
 - Self-review: on any change touching Go code, before showing a diff
   for commit approval or producing a review or approval packet, run the
   `reviewer` subagent (`.claude/agents/reviewer.md`) once on the final
