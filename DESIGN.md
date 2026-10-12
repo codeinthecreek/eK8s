@@ -259,7 +259,8 @@ build/boot sub-checks below:
    imports from one build configuration; check 5 backstops it.
 4. Import allowlist for `internal/wrapper`, checked via `go list` on
    direct imports only, under both the deployed build (`CGO_ENABLED=0`)
-   and Stage 4's race build (`CGO_ENABLED=1 -race`). Exactly these,
+   and Stage 4's race build (`CGO_ENABLED=1 -race -tags netgo,osusergo`,
+   the flags it is built with). Exactly these,
    matched exactly, not as a prefix: `bytes`, `container/heap`,
    `container/list`, `context`, `encoding/json`, `errors`, `fmt`, `io`,
    `log/slog`, `maps`, `math`, `math/rand/v2`, `net/http`, `runtime`,
@@ -371,9 +372,45 @@ C compiler on the gate host. A 503 shed is no evidence either way: shed
 requests are retried a bounded number of times, and every password must
 eventually succeed. Stage 4 sends only valid, distinct passwords, so the
 only allowed statuses are 200 and a 503 shed: fail on any cross-talk, any
-other status (a 400 included), or any race report on the process's
-stderr.
+other status (a 400 included), or any race report in the process's
+output (stdout and stderr).
 `HangTimeout` is not applied under `-race`.
+
+Mechanics:
+- The race build is linked statically (`-race -tags netgo,osusergo
+  -ldflags='-linkmode=external -extldflags=-static'`), so it boots in the
+  same bubblewrap sandbox as Stage 1's bare boot, with only the binary
+  bound; it needs gcc and a static libc (libc6-dev, glibc-static). Before
+  it, the gate's probe is race-built and booted the same way; any failure
+  there is a gate fault. The Stage 2 process is stopped first.
+- `GORACE="halt_on_error=1 exitcode=66 atexit_sleep_ms=0"` (via bwrap
+  `--setenv`): the first race report ends the process with status 66. A
+  report is that exit status, or "WARNING: DATA RACE" anywhere in the
+  output, scanned in full (a candidate can log to stderr, so no prefix cap
+  hides it). Checked once the load ends (or the process exits) and a 1s
+  grace has passed.
+- N = 2 x the gate host's CPUs, clamped to [8, 64]: above generation 0's
+  one slot per CPU, so it sheds on any host, at a constant per-CPU load.
+  Half `/hash` with fresh passwords (never pool ones), half `/verify`
+  with pool pairs (distinct passwords, alternately match and mismatch),
+  interleaved and released together.
+- A "503 shed" is a 503 that classifies as `graceful_shed` (section 8)
+  apart from the `HangTimeout` check; a bare 503 fails. It is retried
+  after 1s plus up to 250ms of jitter (Retry-After is validated, not
+  honoured), at most 15 sends per request. A transport error (no
+  response status) is retried within the same bound, never once the
+  process has exited; a response whose body cannot be read is final.
+  The stage has a 120s deadline and each request a 30s client timeout.
+  cmd/service's fixed `WriteTimeout` (3 x `HangTimeout`, 6s) still
+  applies under `-race`: a response written later is lost as a
+  transport error.
+- The process must still be running after the load and the 1s grace:
+  any exit fails (status 66 as a race report, any other in the checks
+  below).
+- After the load, every final response must be exactly 200, carry exactly
+  one `X-EK8s-Variant` equal to that boot's label, and classify as
+  `success` (latency aside) in Stage 2's classifier Run, hash responses
+  fully verified against their own password.
 
 ### Stage 5 -- Degradation under contention (kind, candidate namespace)
 

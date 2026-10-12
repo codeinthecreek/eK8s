@@ -25,16 +25,17 @@ var allChecks = append(slices.Clone(preBuildChecks),
 	"build", "boot", "docker",
 	"mutanthash-realverify-match", "realhash-mutantverify-match",
 	"mutanthash-realverify-nomatch", "realhash-mutantverify-nomatch",
-	"password-bounds", "contract", "cost-params")
+	"password-bounds", "contract", "cost-params",
+	"race-build", "race-boot", "race-report", "concurrency")
 
 // setupHost skips the test (or fails it, under requireToolsEnv) unless
-// the host has bwrap and nsenter. Without a docker daemon it stubs the
+// the host has bwrap, nsenter and gcc (Stage 4's race build). Without a docker daemon it stubs the
 // docker sub-check out, so Stages 2-3 still run; it reports whether the
 // real sub-check runs.
 func setupHost(t *testing.T) (realDocker bool) {
 	t.Helper()
 	required := os.Getenv(requireToolsEnv) == "1"
-	for _, tool := range hostTools {
+	for _, tool := range append(slices.Clone(hostTools), "gcc") {
 		if _, err := exec.LookPath(tool); err != nil {
 			if required {
 				t.Fatalf("%s=1 but %s is missing", requireToolsEnv, tool)
@@ -363,7 +364,7 @@ func TestPreflightTearsDown(t *testing.T) {
 	work := t.TempDir()
 	relay, probe := filepath.Join(work, "relay"), filepath.Join(work, "probe")
 	for _, b := range []struct{ pkg, out string }{{relayPkg, relay}, {probePkg, probe}} {
-		if ok, out, err := goBuild(context.Background(), tc, repoRoot(t), b.pkg, b.out); !ok || err != nil {
+		if ok, out, err := goBuild(context.Background(), tc, repoRoot(t), b.pkg, b.out, false); !ok || err != nil {
 			t.Fatalf("build %s: %v %s", b.pkg, err, out)
 		}
 	}
@@ -422,7 +423,7 @@ func TestRelayExitsOnStdinEOF(t *testing.T) {
 	}
 	dir := t.TempDir()
 	relay := filepath.Join(dir, "relay")
-	if ok, out, err := goBuild(context.Background(), tc, repoRoot(t), relayPkg, relay); !ok || err != nil {
+	if ok, out, err := goBuild(context.Background(), tc, repoRoot(t), relayPkg, relay, false); !ok || err != nil {
 		t.Fatalf("build relay: %v %s", err, out)
 	}
 	cmd := exec.Command(relay, filepath.Join(dir, "r.sock"))

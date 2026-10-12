@@ -59,13 +59,40 @@ func newPodName() string {
 	return "hasher-" + string(b[:10]) + "-" + string(b[10:])
 }
 
-// goBuild builds pkg (relative to dir) into out, statically
-// (CGO_ENABLED=0), with the scratch environment. ok is false if go build
-// itself failed; output then holds its output, never empty.
-func goBuild(ctx context.Context, tc toolchain, dir, pkg, out string) (ok bool, output string, err error) {
-	cmd := exec.CommandContext(ctx, tc.goBin, "build", "-trimpath", "-o", out, "./"+pkg)
+// raceTags are Stage 4's race build tags: the pure-Go resolver and user
+// lookup, so the static link pulls in no glibc NSS code (DESIGN.md sec 7
+// Stage 4). raceFlags is shared with the race go list (precheck.go), so
+// the listing checks exactly the configuration that is built.
+const raceTags = "netgo,osusergo"
+
+var raceFlags = []string{"-race", "-tags", raceTags}
+
+// raceLinkFlags links the cgo race build statically, so the bare boot
+// still binds only the binary: no ld.so or libc in the sandbox. It needs
+// gcc and a static libc (libc6-dev, glibc-static) on the gate host.
+const raceLinkFlags = "-ldflags=-linkmode=external -extldflags=-static"
+
+// buildDetail is a build Result's Detail: "" when go build succeeded,
+// else its output.
+func buildDetail(ok bool, output string) string {
+	if ok {
+		return ""
+	}
+	return output
+}
+
+// goBuild builds pkg (relative to dir) into out with the scratch
+// environment: statically with CGO_ENABLED=0, or, if race, as Stage 4's
+// static race build with CGO_ENABLED=1. ok is false if go build itself
+// failed; output then holds its output, never empty.
+func goBuild(ctx context.Context, tc toolchain, dir, pkg, out string, race bool) (ok bool, output string, err error) {
+	args := []string{"build", "-trimpath"}
+	if race {
+		args = append(append(args, raceFlags...), raceLinkFlags)
+	}
+	cmd := exec.CommandContext(ctx, tc.goBin, append(args, "-o", out, "./"+pkg)...)
 	cmd.Dir = dir
-	cmd.Env = tc.env(false)
+	cmd.Env = tc.env(race)
 	var stderr bytes.Buffer
 	cmd.Stdout = &stderr
 	cmd.Stderr = &stderr
@@ -84,8 +111,8 @@ func goBuild(ctx context.Context, tc toolchain, dir, pkg, out string) (ok bool, 
 }
 
 // cappedBuffer keeps the first maxOutputBytes written to it and counts
-// the rest. It is safe for concurrent use (os/exec copies stdout and
-// stderr from separate goroutines).
+// the rest. It is safe for concurrent use: os/exec writes to it from
+// its own copying goroutines.
 type cappedBuffer struct {
 	mu      sync.Mutex
 	buf     bytes.Buffer
@@ -120,7 +147,9 @@ type sandbox struct {
 	exited, relayEnded chan struct{} // closed once each Wait returns
 	who                string        // "candidate", or "probe" in the preflight; names it in failures
 	output             *cappedBuffer // the sandboxed binary's (and bwrap's) stdout+stderr
+	race               *raceWatch    // the same output, scanned for a race report (Stage 4)
 	client             *http.Client  // reaches the candidate's :8080 via the relay
+	stopOnce           sync.Once
 }
 
 // bwrapArgs is the bare-boot argv (docs/decisions.md, PR2 entry). Not
@@ -129,19 +158,25 @@ type sandbox struct {
 // --disable-userns (also breaks the join; the candidate cannot reach
 // unshare or clone without syscall, os/exec or unsafe, all outside the
 // import allowlist). The resource limits stay unset (0, unconstrained)
-// until deploy/ fixes the LimitRange values.
-func bwrapArgs(binary, label, hostname string) []string {
-	return []string{
+// until deploy/ fixes the LimitRange values. env holds extra NAME, value
+// pairs for the sandboxed binary (Stage 4's GORACE).
+func bwrapArgs(binary, label, hostname string, env ...string) []string {
+	args := []string{
 		"--unshare-all", "--unshare-user",
 		"--die-with-parent", "--new-session",
 		"--clearenv", "--setenv", "EK8S_VARIANT", label,
+	}
+	for i := 0; i+1 < len(env); i += 2 {
+		args = append(args, "--setenv", env[i], env[i+1])
+	}
+	return append(args,
 		"--uid", sandboxUID, "--gid", sandboxUID, "--hostname", hostname,
 		"--ro-bind", binary, "/service",
 		"--proc", "/proc",
 		"--chdir", "/", "--cap-drop", "ALL",
 		"--info-fd", "3",
 		"/service",
-	}
+	)
 }
 
 // hostTools are the gate host's programs the bare boot needs. A missing
@@ -150,9 +185,10 @@ var hostTools = []string{"bwrap", "nsenter"}
 
 // bootBare starts binary under bubblewrap, joins its network namespace
 // with the relay (built at relayBin) listening on a socket in work, and
-// waits for /healthz. problem is non-empty if the candidate failed to
-// come up; err is a gate fault. On success the caller must call stop.
-func bootBare(ctx context.Context, who, binary, relayBin, work, label string) (sb *sandbox, problem string, err error) {
+// waits for /healthz. env is passed to bwrapArgs. problem is non-empty
+// if the candidate failed to come up; err is a gate fault. On success the
+// caller must call stop.
+func bootBare(ctx context.Context, who, binary, relayBin, work, label string, env ...string) (sb *sandbox, problem string, err error) {
 	for _, tool := range hostTools {
 		if _, err := exec.LookPath(tool); err != nil {
 			return nil, "", fmt.Errorf("bare boot needs %s on PATH: %w", tool, err)
@@ -168,11 +204,14 @@ func bootBare(ctx context.Context, who, binary, relayBin, work, label string) (s
 		return nil, "", err
 	}
 	defer infoR.Close()
-	sb = &sandbox{who: who, output: new(cappedBuffer), exited: make(chan struct{})}
-	sb.bwrap = exec.Command("bwrap", bwrapArgs(binary, label, newPodName())...)
+	sb = &sandbox{who: who, output: new(cappedBuffer), race: new(raceWatch), exited: make(chan struct{})}
+	sb.bwrap = exec.Command("bwrap", bwrapArgs(binary, label, newPodName(), env...)...)
 	sb.bwrap.Env = []string{} // bwrap's own environment; --clearenv covers the candidate's
-	sb.bwrap.Stdout = sb.output
-	sb.bwrap.Stderr = sb.output
+	// One writer value for both, so os/exec gives them a single pipe and
+	// never calls Write concurrently.
+	out := sb.outputWriter()
+	sb.bwrap.Stdout = out
+	sb.bwrap.Stderr = out
 	sb.bwrap.ExtraFiles = []*os.File{infoW} // fd 3
 	sb.bwrap.WaitDelay = time.Second
 	err = sb.bwrap.Start()
@@ -223,18 +262,19 @@ func bootBare(ctx context.Context, who, binary, relayBin, work, label string) (s
 }
 
 // preflight boots the fixed, gate-built probe (gate/internal/probe)
-// exactly as a candidate is booted: same bwrapArgs, nsenter join, relay
-// "ready" and /healthz, then teardown. Only gate code runs, so any
+// exactly as a candidate is booted: same bwrapArgs (env included), nsenter
+// join, relay "ready" and /healthz, then teardown. Stage 4 runs it again
+// on the probe's race build. Only gate code runs, so any
 // failure is the host's (no user namespaces with capabilities, a broken
 // nsenter): a gate fault carrying bwrap's and nsenter's output, never a
 // candidate Result. A host failure after a passing preflight still
 // reads as the candidate's boot failure (docs/decisions.md).
-func preflight(ctx context.Context, probeBin, relayBin, work string) error {
+func preflight(ctx context.Context, probeBin, relayBin, work string, env ...string) error {
 	dir := filepath.Join(work, "preflight") // its own relay.sock
 	if err := os.Mkdir(dir, 0o700); err != nil {
 		return err
 	}
-	sb, problem, err := bootBare(ctx, "probe", probeBin, relayBin, dir, newLabel())
+	sb, problem, err := bootBare(ctx, "probe", probeBin, relayBin, dir, newLabel(), env...)
 	if err != nil {
 		return fmt.Errorf("sandbox preflight (gate probe, no candidate code): %w", err)
 	}
@@ -302,16 +342,26 @@ func (sb *sandbox) startRelay(ctx context.Context, pid int, relayBin, sock strin
 }
 
 // stop kills bwrap (whose sandbox pid 1 dies with it, taking the
-// candidate) and the relay, and waits for both.
+// candidate) and the relay, and waits for both. Calls after the first do
+// nothing, so Run can stop the Stage 2 sandbox before Stage 4 and still
+// defer stop.
 func (sb *sandbox) stop() {
-	if sb.relay != nil && sb.relay.Process != nil {
-		sb.relayStdin.Close()
-		sb.relay.Process.Kill()
-		<-sb.relayEnded
-	}
-	sb.bwrap.Process.Kill()
-	<-sb.exited
+	sb.stopOnce.Do(func() {
+		if sb.relay != nil && sb.relay.Process != nil {
+			sb.relayStdin.Close()
+			sb.relay.Process.Kill()
+			<-sb.relayEnded
+		}
+		sb.bwrap.Process.Kill()
+		<-sb.exited
+	})
 }
+
+// outputWriter is where the sandboxed binary's stdout and stderr go:
+// the capped copy for Detail and the race scan. Both writers always
+// return len(p), nil, so io.MultiWriter never stops at a short write
+// and os/exec keeps draining the pipe however much the binary writes.
+func (sb *sandbox) outputWriter() io.Writer { return io.MultiWriter(sb.output, sb.race) }
 
 // withOutput appends the sandboxed binary's captured output (bwrap's
 // included) to a failure detail.

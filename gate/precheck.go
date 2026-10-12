@@ -94,7 +94,8 @@ func checkBuildConstraints(files map[string][]byte) string {
 
 // listing is one `go list` of the candidate package under one build
 // configuration. Both are checked: the deployed build (CGO_ENABLED=0)
-// and Stage 4's race build (CGO_ENABLED=1, race tag set).
+// and Stage 4's race build (CGO_ENABLED=1, raceFlags: the race tag plus
+// raceTags), with the flags it is built with.
 type listing struct {
 	name string
 	cgo  bool
@@ -103,7 +104,7 @@ type listing struct {
 
 var listings = []listing{
 	{name: "CGO_ENABLED=0", cgo: false},
-	{name: "CGO_ENABLED=1 -race", cgo: true, args: []string{"-race"}},
+	{name: "CGO_ENABLED=1 -race -tags " + raceTags, cgo: true, args: raceFlags},
 }
 
 // goPackage is the subset of `go list -json` output the checks read.
