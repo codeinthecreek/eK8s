@@ -412,7 +412,28 @@
 - Reason: a mutant that answers everything and then exits (e.g. a panic in a goroutine) left no failed request; a crash under concurrency is a broken wrapper. Exit 66 stays a race-report; any other exit by the end of the load and the 1s grace fails concurrency. Gap: an exit later than that grace is not seen.
 - Reverse: drop the sb.exited select after checkOutcomes in runStage4; DESIGN.md sec 7 Stage 4 edit.
 
-## 2026-10-12 · PR #26 *(inferred)* · README carries no status, only a pointer; overview.md's status section is tied to the STATUS.md rule
+## 2026-10-12 · PR #26 · README carries no status, only a pointer; overview.md's status section is tied to the STATUS.md rule
 - Rejected: keeping README's status sentence and triggering its update on "changes what is built" too.
 - Reason: README went stale after #25 (a gate PR that touched neither DESIGN.md nor the wrapper), and the sync packet's diff list omitted README.md.
 - Reverse: restore the status sentence and the "(planned)" layout markers; drop the README.md and overview-status clauses from CLAUDE.md.
+
+## 2026-10-12 · PR #26 · The orchestrator owns stress state; Stage 5 requires stress-ng Running, else gate fault (Q7; DESIGN.md sec 7, sec 11)
+- Rejected: Stage 5 turning stress on itself; Stage 5 waiting for a stress half.
+- Reason: one owner for stress state; the orchestrator turns it on and marks the window excluded (sec 7 already excludes Stage 5 windows) before calling Stage 5. Anything but Running says nothing about the candidate.
+- Reverse: DESIGN.md sec 7 Stage 5 and sec 11 edits.
+
+## 2026-10-12 · PR #26 · Variant pods have no egress: NetworkPolicy deny-all egress, ingress 8080 from ek8s-system app=loadgen only (Q5; DESIGN.md sec 11)
+- Updates the PR #18 net/http known-limit entry: pods no longer "keep bridge/pod egress" once PR (2) ships the policy; the container in the gate's docker sub-check still does.
+- Rejected: Calico/Cilium (kind calls third-party CNIs unsupported); accepting egress.
+- Reason: kindnet enforces NetworkPolicy since kind v0.24.0; egress enforcement is not stated in kube-network-policies' docs, so PR (2)'s smoke test must fail if egress is not denied.
+- Reverse: DESIGN.md sec 11 edit; drop the NetworkPolicy template.
+
+## 2026-10-12 · PR #26 · Variant resources: Burstable 250m/1000m CPU, 256Mi request = limit; HPA maxReplicas 2 (Q3; DESIGN.md sec 11)
+- Rejected: Guaranteed 1 CPU (8 pods request 8 cores > ~7 allocatable, so scale-outs go Pending); Guaranteed 500m (GOMAXPROCS rounds a limit under 2 up to 2, so throttling dominates); maxReplicas 3.
+- Reason: 4 variants x 2 pods = 8 pods: 2 cores requested, 2 GiB, 8 cores of limits (overcommit is the contention scored). 256Mi / 1 CPU equals the gate's docker sub-check. Implemented in PR (2)'s templates.
+- Reverse: DESIGN.md sec 11 edit; edit the LimitRange and HPA templates.
+
+## 2026-10-12 · PR #26 · Variant label "ek8s-<16 hex>", random per deployment, in gate and cluster (Q4; DESIGN.md sec 5)
+- Rejected: the gate's "gate-<16 hex>" (a gate tell); a label carrying the variant id.
+- Reason: one shape everywhere removes the label as a gate tell; the label -> ek8s-v<id> mapping lives in the orchestrator and lineage. PR (2) changes the gate's prefix (one line in gate/boot.go's newLabel).
+- Reverse: DESIGN.md sec 5 edit; revert newLabel's prefix.

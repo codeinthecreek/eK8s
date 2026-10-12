@@ -198,6 +198,11 @@ to this file by a gate test, so changing it takes a deliberate gate edit.
   require it on every response, equal to the per-run label, so a stale
   listener on :8080 cannot answer for the candidate (section 7). A mutant
   that writes through the writer's `Unwrap` and drops it fails the gate.
+- The variant label has one shape in the gate and in the cluster,
+  `ek8s-<16 hex>`, random per deployment: a pod label in the cluster,
+  passed in as `EK8S_VARIANT`. It names no variant id, so a candidate
+  cannot tell gate from cluster by its shape. The label -> `ek8s-v<id>`
+  mapping is kept by the orchestrator and lineage (section 14).
 
 ## 6. Fixed-core parameters
 
@@ -435,7 +440,10 @@ Procedure:
   never mixes with anything currently live.
 - The existing stress-ng Deployment provides contention (kind is
   single-node, so contention is a global resource -- no second stress-ng
-  instance needed).
+  instance needed). The orchestrator owns stress state (section 11): it
+  turns stress-ng on and marks the window excluded from scoring before it
+  calls Stage 5. Stage 5 only checks that stress-ng is Running; anything
+  else is a gate fault, never a candidate failure.
 
 **Pass condition (two independent, zero-tolerance assertions):**
 1. Pod health: `restartCount == 0` and no container status reason of
@@ -634,6 +642,11 @@ request, not a fixed repeated test vector.
 Same request-mix logic and classifier in both; only duration and target
 rate differ.
 
+**Runs in the cluster**, in namespace `ek8s-system`, and reaches each
+variant by Service DNS (section 11). No host ports are published; the
+gate and orchestrator stay on the host and drive the cluster through the
+API server on loopback.
+
 ## 11. Orchestrator
 
 ### Population topology
@@ -666,6 +679,19 @@ A per-namespace LimitRange enforces identical resource limits on every
 variant. `role: hasher` remains as an inventory label only; it no longer
 selects anything. Telemetry is attributed by namespace.
 
+**Variant pods have no egress.** A per-namespace NetworkPolicy denies all
+egress and admits ingress only on TCP 8080 from loadgen's pods in
+`ek8s-system` (kind's built-in kindnet enforces NetworkPolicy; that it
+enforces egress is proven by the variant smoke test in deploy/ PR (2), and
+is not verified before then). A wrapper
+can read files with `net/http` (section 7, Stage 1 known limit) but cannot
+send them anywhere.
+
+**Stress state is owned by the orchestrator.** It scales the stress-ng
+Deployment on for each stress half and off for each baseline half, and on
+before calling gate Stage 5 (section 7), marking that window excluded from
+scoring.
+
 **Readiness dodging punishes itself.** A variant that pulls all its pods
 from rotation empties its own Service, and its own traffic fails. Within
 a variant, one replica going unready shifts load to its sibling replicas
@@ -674,7 +700,8 @@ its consequences.
 
 **Live population cap: 3.** A resource/deployment constraint given the
 8-core/16GB workstation, not a statement about genome-pool size (see
-below). HPA `maxReplicas` per variant: 2-3.
+below). HPA `maxReplicas` per variant: 2 (4 variants x 2 replicas during
+probation is the binding case for the section 2 budget).
 
 ### Generational process (steady-state, single active mutation at a time)
 
