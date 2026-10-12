@@ -4,6 +4,7 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 *(inferred)* are guesses, not read from the repo; correct them.
 
 ## Now
+- `claude/newcomer-overview` (PR #22 *(inferred)*): docs/overview.md newcomer introduction and a short front-door README.md; CLAUDE.md layout line and a bullet to keep the overview in step with DESIGN.md and the generation-0 wrapper.
 
 ## Next
 - gate PR3: Stage 4 (cgo race build, shed retry, race-report capture).

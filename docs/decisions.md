@@ -360,3 +360,8 @@
 - Rejected: classifying by a "bwrap:" prefix in the output (gameable: a candidate can print it and exit); --json-status-fd (cannot tell a bwrap setup failure from a candidate's exit 1).
 - Reason: bwrap reports child-pid before it sets up loopback, so on the AppArmor-restricted runner a host failure read as the candidate's boot failure (run 37903906043). Residual gap: a host failure after a passing preflight still reads as a candidate boot failure.
 - Reverse: drop the preflight call in Run and gate/internal/probe.
+
+## 2026-10-12 · PR #22 *(inferred)* · Newcomer overview in docs/overview.md; README.md is a short front door
+- Rejected: the full overview as README.md; no overview (DESIGN.md only).
+- Reason: DESIGN.md is a spec, not an introduction; a separate overview keeps the landing page to what/layout/build/links. The overview defers to DESIGN.md and docs/STATUS.md, and a CLAUDE.md bullet makes DESIGN.md and seed-wrapper PRs check it, so it cannot drift silently.
+- Reverse: delete docs/overview.md, README.md's links to it, and the CLAUDE.md overview bullet.

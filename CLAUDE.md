@@ -39,6 +39,9 @@ Applies to every session in this repo.
 - One logical change per commit; the message explains why, not what.
 - Every PR updates `docs/STATUS.md` (Now/Next/Parked/Recent) in the
   same PR.
+- A PR that edits DESIGN.md or the generation-0 wrapper (internal/wrapper/)
+  also checks docs/overview.md and fixes anything it now contradicts, in
+  the same PR.
 - At the start of every PR, reconcile `docs/STATUS.md` and
   `docs/decisions.md` with `git log origin/main`: move merged items from
   Now to Recent with their real PR numbers, and replace "(inferred)" PR
@@ -84,7 +87,10 @@ deploy/             kind cluster config, k8s manifests, stress-ng.
 driver/             mutation driver wrapping `claude -p`.
 orchestrator/       population manager, selection, scoring loop.
 lineage/            SQLite (structured) + JSONL (raw claude -p transcripts).
-docs/               decisions.md: implementation-level decision log.
+docs/               overview.md (plain-language introduction; DESIGN.md is
+                    authoritative), decisions.md (implementation decision
+                    log), STATUS.md (resume point), handoff.md (packet
+                    formats for the planning chat).
 ```
 
 ## Build / test
