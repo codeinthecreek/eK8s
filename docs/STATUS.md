@@ -4,6 +4,7 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 *(inferred)* are guesses, not read from the repo; correct them.
 
 ## Now
+- `claude/docs-reviewer-feedback-rule` (PR #24 *(inferred)*): reviewer checklist gains limit-boundary and child-process-lifetime items; handoff.md Feedback rule covers any owner reply carrying feedback, conditions or an approval with changes.
 
 ## Next
 - gate PR3: Stage 4 (cgo race build, shed retry, race-report capture).

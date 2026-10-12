@@ -62,6 +62,18 @@ guess from file names.
 8. `bufio.Scanner` loops that never check `sc.Err()` after the loop.
 9. Doc comments and comments naming identifiers (functions, types,
    fields, constants, files) that do not exist in the tree.
+10. Every stated limit or bound (size caps, lengths, counts, timeouts,
+    ranges) is tested on both sides: the boundary value itself accepted
+    and one past it rejected. A test with only the rejecting side still
+    passes if the limit is off by one or set too tight. Name the limit and
+    the missing case.
+11. Child processes, and long-lived goroutines holding resources, must not
+    outlive their parent if it is killed, SIGKILL included, so deferred
+    cleanup is not enough. Check how lifetime is coupled (Pdeathsig, EOF
+    on a pipe the parent holds, process-group kill, context cancel) and
+    that it holds on every exit path. In Go, Pdeathsig is tied to the OS
+    thread that started the child, so it can fire while the parent process
+    is still running; on its own it is not a process-lifetime coupling.
 
 Also run `go build ./...`, `go vet ./...`, `go test ./...` and
 `gofmt -l .`; any failure or `gofmt -l` output is a must-fix finding.
