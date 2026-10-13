@@ -1,0 +1,45 @@
+# loadgen's pods (DESIGN.md sec 11).
+# Ingress: no rule, so no pod and no address outside the node is admitted.
+# The API server's service proxy still gets in: kindnet never evaluates
+# traffic from a root-owned socket on the node (kube-network-policies'
+# "meta skuid 0 accept"), the same bypass that admits kubelet probes. That
+# bypass admits every root process on the node, and only those: the API
+# server, the kubelet, the control plane and root hostNetwork pods, all of
+# which can already exec into loadgen. The bypass covers only packets made
+# on loadgen's own node: this holds because the cluster has one node
+# (deploy/kind). The control port is the only one because loadgen listens
+# on no other, not because of this policy.
+# Egress: TCP 8080 to variant namespaces (label ek8s.io/role: variant),
+# and DNS to kube-dns; nothing else.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: loadgen
+  namespace: ek8s-system
+spec:
+  podSelector:
+    matchLabels:
+      app: loadgen
+  policyTypes:
+  - Ingress
+  - Egress
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          ek8s.io/role: variant
+    ports:
+    - protocol: TCP
+      port: 8080
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53

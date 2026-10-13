@@ -1,20 +1,33 @@
 #!/usr/bin/env bash
-# Variant bundle smoke test, after deploy/up.sh: builds generation 0's
-# image, kind-loads it, renders and applies one variant bundle
-# (deploy/variant) and checks
+# Variant bundle and ek8s-system smoke test, after deploy/up.sh: builds
+# generation 0's image, kind-loads it, renders and applies one variant
+# bundle (deploy/variant), starts a stand-in for loadgen in ek8s-system
+# (app=loadgen, a busybox nc answering HTTP on the control port) and checks
 #   (a) the Deployment is Ready with one pod named like a Deployment pod,
 #       carrying the LimitRange's resources, and its env (as cmd/service
 #       logs it) carries the limits and the label;
-#   (b) a pod in ek8s-system labelled app=loadgen gets /healthz and a /hash
-#       200 from the Service;
-#   (c) the same pod, with that label removed, is refused;
-#   (d) a pod in the variant namespace has no egress: no external address,
-#       no API server (each target first shown reachable from ek8s-system,
-#       where no policy applies);
-#   (e) deleting the namespace removes everything in it.
+#   (b) the stand-in gets /healthz and a /hash 200 from the variant's
+#       Service by DNS (its egress policy admits DNS to kube-dns and TCP
+#       8080 to ek8s.io/role=variant namespaces);
+#   (c) the API server's service proxy reaches the stand-in's control
+#       port (kindnet's root-socket bypass; deploy/ek8s-system/
+#       networkpolicy.yaml);
+#   (d) a pod in the variant namespace and a pod in ek8s-system without
+#       app=loadgen are refused on the control port;
+#   (e) an ek8s-system pod without app=loadgen is refused by the variant;
+#   (f) the stand-in has no other egress: no external address (DNS to an
+#       outside resolver included), no API server;
+#   (g) a pod in the variant namespace has no egress: no external address,
+#       no API server (each target in (f) and (g) first shown reachable
+#       from the ek8s-system pod without app=loadgen, which no policy
+#       selects);
+#   (h) with the variant at 2 ready pods, deleting one marks its
+#       EndpointSlice entry ready=false, terminating=true within 2s while
+#       the other stays ready;
+#   (i) deleting the namespace removes everything in it.
 # Exits non-zero on the first failed check. Run from anywhere; needs go,
-# docker, kind and kubectl. On failure it leaves the namespaces as they
-# are for inspection; on success it removes what it created.
+# docker, kind and kubectl. On failure it leaves the namespace and the
+# smoke pods as they are for inspection; on success it removes them.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -24,6 +37,8 @@ ctx="kind-$cluster"
 id=999999
 ns="ek8s-v$id"
 sys=ek8s-system
+# deploy/ek8s-system/service.yaml
+ctl_port=9090
 # The curl project's official image, 8.22.0 (published 2026-09-02),
 # pulled by its linux/amd64 manifest digest (index sha256:58adaa4e...),
 # so only one platform is ever pulled and kind-loaded; tagged by the
@@ -42,6 +57,9 @@ for tool in go docker kind kubectl; do
 	command -v "$tool" >/dev/null || die "$tool not on PATH"
 done
 k get nodes >/dev/null || die "cluster unreachable (context $ctx); run deploy/up.sh"
+k get namespace "$sys" >/dev/null 2>&1 || die "namespace $sys missing; run deploy/up.sh"
+[ -z "$(k -n "$sys" get pods smoke-loadgen smoke-other --ignore-not-found -o name)" ] ||
+	die "smoke pods exist in $sys (a failed earlier run?); delete them first"
 ! k get namespace "$ns" >/dev/null 2>&1 ||
 	die "namespace $ns exists (a failed earlier run?); delete it first"
 
@@ -68,24 +86,18 @@ ok "built and loaded $image and $curl_tag"
 label="ek8s-$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
 go run ./deploy/variant/cmd/render -id "$id" -label "$label" -image "$image" | k apply -f -
 
-# loadgen's namespace; loadgen's own PR will create it for real.
-created_sys=false
-if ! k get namespace "$sys" >/dev/null 2>&1; then
-	k create namespace "$sys"
-	k label namespace "$sys" pod-security.kubernetes.io/enforce=restricted >/dev/null
-	created_sys=true
-fi
-
-# curl_pod NS NAME [LABEL]: a PSA-restricted pod that idles, for kubectl
-# exec. No resources: in the variant namespace the LimitRange sets them.
-curl_pod() {
-	k apply -f - <<EOF
+# pod_spec NAME NS LABELS: the head of a PSA-restricted pod with one
+# container, for kubectl exec; the caller appends the container's command
+# (and ports). No resources: in the variant namespace the LimitRange sets
+# them.
+pod_spec() {
+	cat <<EOF
 apiVersion: v1
 kind: Pod
 metadata:
-  name: $2
-  namespace: $1
-  labels: {${3:-}}
+  name: $1
+  namespace: $2
+  labels: {$3}
 spec:
   automountServiceAccountToken: false
   enableServiceLinks: false
@@ -100,16 +112,46 @@ spec:
   - name: curl
     image: $curl_tag
     imagePullPolicy: Never
-    command: [sleep, "3600"]
     securityContext:
       allowPrivilegeEscalation: false
       readOnlyRootFilesystem: true
       capabilities: {drop: [ALL]}
 EOF
 }
-curl_pod "$sys" smoke-loadgen "app: loadgen"
+# curl_pod NS NAME LABELS: a pod that idles.
+curl_pod() {
+	{ pod_spec "$2" "$1" "$3"; echo '    command: [sleep, "3600"]'; } | k apply -f -
+}
+# The stand-in for loadgen: busybox nc on the control port, forking a
+# shell per connection that reads the request head and answers 200
+# "ek8s-ctl". Reading the head first matters: closing with request bytes
+# unread would reset the connection.
+{
+	pod_spec smoke-loadgen "$sys" "app: loadgen"
+	# 9090 is $ctl_port; the heredoc is quoted for the shell script.
+	cat <<'EOF'
+    ports:
+    - name: control
+      containerPort: 9090
+      protocol: TCP
+    command:
+    - nc
+    - -lk
+    - -p
+    - "9090"
+    - -e
+    - sh
+    - -c
+    - |
+      while IFS= read -r l; do case $l in ""|"$(printf '\r')") break;; esac; done
+      printf 'HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 9\r\nConnection: close\r\n\r\nek8s-ctl\n'
+EOF
+} | k apply -f -
+# Same image and pod securityContext, idling, without app=loadgen: no
+# policy selects it.
+curl_pod "$sys" smoke-other "app: smoke-other"
 curl_pod "$ns" smoke-egress "app: egress-probe"
-for p in "$sys/smoke-loadgen" "$ns/smoke-egress"; do
+for p in "$sys/smoke-loadgen" "$sys/smoke-other" "$ns/smoke-egress"; do
 	k -n "${p%/*}" wait --for=condition=Ready "pod/${p#*/}" --timeout=120s >/dev/null ||
 		die "curl pod $p not Ready"
 done
@@ -134,21 +176,34 @@ done
 ok "(a) Deployment Ready; pod $pod, resources $res, env $label / 1000m / 268435456 bytes"
 
 svc="http://hasher.$ns.svc.cluster.local:8080"
-# kexec NS POD ARGS...: curl in a curl pod; kubectl exec exits with
-# curl's status.
-kexec() { k -n "$1" exec "$2" -- curl "${@:3}"; }
+# kx NS POD CMD ARGS...: run CMD in a smoke pod; kubectl exec exits with
+# its status. kexec runs curl.
+kx() { k -n "$1" exec "$2" -- "${@:3}"; }
+kexec() { kx "$1" "$2" curl "${@:3}"; }
 
-# --- (b) loadgen reaches /healthz and /hash through the Service.
+# --- (b) the stand-in reaches /healthz and /hash through the Service, by
+# DNS name.
 hdr=$(kexec "$sys" smoke-loadgen -sS --max-time 10 -o /dev/null -D - "$svc/healthz") ||
-	die "(b) loadgen pod: /healthz request failed"
+	die "(b) stand-in: /healthz request failed"
 [[ $(head -n1 <<<"$hdr") == HTTP/1.1\ 200* ]] || die "(b) /healthz: $(head -n1 <<<"$hdr")"
 tr -d '\r' <<<"$hdr" | grep -ix "x-ek8s-variant: $label" >/dev/null || die "(b) /healthz lacks X-EK8s-Variant: $label"
 out=$(kexec "$sys" smoke-loadgen -sS --max-time 30 -H 'Content-Type: application/json' \
 	-d '{"password":"variant-smoke"}' -w '\n%{http_code}' "$svc/hash") ||
-	die "(b) loadgen pod: /hash request failed"
+	die "(b) stand-in: /hash request failed"
 [ "$(tail -n1 <<<"$out")" = 200 ] || die "(b) /hash status $(tail -n1 <<<"$out"): $out"
 grep -qF '"hash":"$argon2id$v=19$m=19456,t=2,p=1$' <<<"$out" || die "(b) /hash body: $out"
-ok "(b) app=loadgen in $sys: /healthz 200 with the label, /hash 200"
+ok "(b) app=loadgen in $sys: $svc by DNS, /healthz 200 with the label, /hash 200"
+
+# --- (c) the API server's service proxy reaches the control port. The
+# EndpointSlice follows the pod's readiness asynchronously: allow it 30s.
+proxy=/api/v1/namespaces/$sys/services/loadgen:control/proxy/
+via_proxy() { [ "$(k get --raw "$proxy" 2>/dev/null)" = ek8s-ctl ]; }
+deadline=$((SECONDS + 30))
+until via_proxy; do
+	[ "$SECONDS" -lt "$deadline" ] || die "(c) $proxy did not answer ek8s-ctl in 30s: $(k get --raw "$proxy" 2>&1)"
+	sleep 2
+done
+ok "(c) $proxy answers through the API server"
 
 # refused NS POD URL ARGS...: curl fails to connect (7) or times out (28).
 # Any other status, an HTTP answer included, is not a refusal.
@@ -158,39 +213,101 @@ refused() {
 	[ "$rc" -eq 7 ] || [ "$rc" -eq 28 ]
 }
 
-# --- (c) the same pod, its app=loadgen label removed, is refused. The
-# policy engine follows label changes asynchronously: allow it 30s.
-k -n "$sys" label pod smoke-loadgen app- >/dev/null
-deadline=$((SECONDS + 30))
-until refused "$sys" smoke-loadgen "$svc/healthz"; do
-	[ "$SECONDS" -lt "$deadline" ] || die "(c) without app=loadgen the pod still reached $svc after 30s"
-	sleep 2
+# --- (d) no pod reaches the control port. By ClusterIP: the variant pod
+# has no DNS, and a failed lookup would prove nothing. Its own egress
+# policy already denies this; the ek8s-system pod is the one only
+# loadgen's ingress policy stops. (c) again afterwards shows the stand-in
+# was answering throughout.
+ctl_ip=$(k -n "$sys" get service loadgen -o jsonpath='{.spec.clusterIP}')
+# From the Service, so a port that no longer matches it cannot time out
+# as a false refusal.
+svc_port=$(k -n "$sys" get service loadgen -o jsonpath='{.spec.ports[?(@.name=="control")].port}')
+[ "$svc_port" = "$ctl_port" ] || die "(d) Service loadgen's control port is '$svc_port', the stand-in listens on $ctl_port"
+for p in "$ns/smoke-egress" "$sys/smoke-other"; do
+	refused "${p%/*}" "${p#*/}" "http://$ctl_ip:$ctl_port/" || die "(d) $p reached the control port"
 done
-ok "(c) the same pod without app=loadgen is refused"
+via_proxy || die "(d) the proxy no longer reaches the stand-in, so the refusals prove nothing"
+ok "(d) $ns/smoke-egress and $sys/smoke-other refused on $ctl_ip:$ctl_port; the proxy still answers"
 
-# --- (d) no egress from the variant namespace. Targets by IP: DNS is
-# denied too, and a failed lookup would prove nothing about the address.
+# --- (e) a pod in ek8s-system without app=loadgen is refused by the
+# variant, which admitted the stand-in in (b). By DNS name: no policy
+# limits this pod's egress, so the lookup works and only the variant's
+# ingress policy can refuse it.
+refused "$sys" smoke-other "$svc/healthz" || die "(e) $sys/smoke-other reached $svc"
+ok "(e) $sys/smoke-other (no app=loadgen) refused by $svc"
+
+# --- (f) and (g): targets by IP; each is first shown reachable from
+# smoke-other, which no policy selects.
 external=http://1.1.1.1/
 api_ip=$(k -n default get service kubernetes -o jsonpath='{.spec.clusterIP}')
 api_ep=$(k -n default get endpointslices -l kubernetes.io/service-name=kubernetes \
 	-o jsonpath='{.items[0].endpoints[0].addresses[0]}:{.items[0].ports[0].port}')
-for target in "$external" "https://$api_ip:443/version" "https://$api_ep/version"; do
-	kexec "$sys" smoke-loadgen -sS -k --max-time 10 -o /dev/null "$target" ||
-		die "(d) control: $target unreachable from $sys, so a refusal would prove nothing"
-	refused "$ns" smoke-egress "$target" -k || die "(d) egress from $ns reached $target"
-	ok "(d) $ns -> $target denied (reachable from $sys)"
+targets=("$external" "https://$api_ip:443/version" "https://$api_ep/version")
+for target in "${targets[@]}"; do
+	kexec "$sys" smoke-other -sS -k --max-time 10 -o /dev/null "$target" ||
+		die "control: $target unreachable from $sys/smoke-other, so a refusal would prove nothing"
 done
 
-# --- (e) deleting the namespace removes everything in it.
-k delete namespace "$ns" --wait=true --timeout=180s >/dev/null || die "(e) namespace $ns not deleted in 180s"
-! k get namespace "$ns" >/dev/null 2>&1 || die "(e) namespace $ns still exists"
-left=$(k get all,networkpolicies,limitranges,horizontalpodautoscalers -A --no-headers \
-	--field-selector "metadata.namespace=$ns") || die "(e) cannot list objects left in $ns"
-[ -z "$left" ] || die "(e) left in $ns: $left"
-ok "(e) namespace $ns and its objects are gone"
+# --- (f) the stand-in's only egress is variants' 8080 and kube-dns.
+for target in "${targets[@]}"; do
+	refused "$sys" smoke-loadgen "$target" -k || die "(f) the stand-in reached $target"
+	ok "(f) $sys/smoke-loadgen -> $target denied (reachable from $sys/smoke-other)"
+done
+# DNS to a resolver other than kube-dns: busybox nslookup, UDP 53.
+lookup=(timeout 10 nslookup example.com 1.1.1.1)
+kx "$sys" smoke-other "${lookup[@]}" >/dev/null 2>&1 ||
+	die "control: $sys/smoke-other cannot resolve via 1.1.1.1, so a refusal would prove nothing"
+! kx "$sys" smoke-loadgen "${lookup[@]}" >/dev/null 2>&1 || die "(f) the stand-in resolved via 1.1.1.1"
+ok "(f) $sys/smoke-loadgen -> DNS at 1.1.1.1 denied (works from $sys/smoke-other)"
 
-k -n "$sys" delete pod smoke-loadgen --wait=true >/dev/null
-if $created_sys; then
-	k delete namespace "$sys" --wait=true >/dev/null
-fi
+# --- (g) no egress from the variant namespace.
+for target in "${targets[@]}"; do
+	refused "$ns" smoke-egress "$target" -k || die "(g) egress from $ns reached $target"
+	ok "(g) $ns -> $target denied (reachable from $sys/smoke-other)"
+done
+# Frees its 250m (LimitRange) for the second hasher pod in (h).
+k -n "$ns" delete pod smoke-egress --wait=true >/dev/null
+
+# --- (h) a deleted pod leaves the Service's endpoints at once, not on the
+# readiness probe (3 x 2s, past cmd/service's 5s drain; DESIGN.md sec 11).
+# HPA minReplicas 2 here only.
+k -n "$ns" patch hpa hasher --type=merge -p '{"spec":{"minReplicas":2}}' >/dev/null
+# eps: one line per endpoint, "<pod> <ready> <terminating>" (an absent
+# condition prints empty).
+eps() {
+	k -n "$ns" get endpointslices -l kubernetes.io/service-name=hasher \
+		-o jsonpath='{range .items[*].endpoints[*]}{.targetRef.name} {.conditions.ready} {.conditions.terminating}{"\n"}{end}'
+}
+deadline=$((SECONDS + 180))
+until [ "$(eps | awk '$2 == "true"' | grep -c .)" -eq 2 ]; do
+	[ "$SECONDS" -lt "$deadline" ] || die "(h) no 2 ready endpoints in 180s: $(eps)"
+	sleep 2
+done
+read -r victim keep < <(eps | awk '$2 == "true" { n[++i] = $1 } END { print n[1], n[2] }')
+t0=$(date +%s%N)
+k -n "$ns" delete pod "$victim" --wait=false >/dev/null
+while :; do
+	e=$(eps)
+	ms=$((($(date +%s%N) - t0) / 1000000))
+	if awk -v v="$victim" -v k="$keep" '
+		$1 == v && $2 == "false" && $3 == "true" { gone = 1 }
+		$1 == k && $2 == "true" { kept = 1 }
+		END { exit !(gone && kept) }' <<<"$e"; then
+		break
+	fi
+	[ "$ms" -le 2000 ] || die "(h) ${ms}ms after deleting $victim the endpoints are: $e"
+done
+# The snapshot that passed must itself be within 2s.
+[ "$ms" -le 2000 ] || die "(h) $victim left the endpoints only after ${ms}ms: $e"
+ok "(h) ${ms}ms after deleting $victim: ready=false terminating=true; $keep still ready"
+
+# --- (i) deleting the namespace removes everything in it.
+k delete namespace "$ns" --wait=true --timeout=180s >/dev/null || die "(i) namespace $ns not deleted in 180s"
+! k get namespace "$ns" >/dev/null 2>&1 || die "(i) namespace $ns still exists"
+left=$(k get all,networkpolicies,limitranges,horizontalpodautoscalers -A --no-headers \
+	--field-selector "metadata.namespace=$ns") || die "(i) cannot list objects left in $ns"
+[ -z "$left" ] || die "(i) left in $ns: $left"
+ok "(i) namespace $ns and its objects are gone"
+
+k -n "$sys" delete pod smoke-loadgen smoke-other --wait=true >/dev/null
 echo "variant-smoke.sh: all checks passed"

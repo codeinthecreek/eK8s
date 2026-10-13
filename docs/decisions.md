@@ -573,32 +573,50 @@
 - Reason: a NetworkPolicy namespaceSelector matches labels, not name prefixes, so loadgen's egress policy needs a label to select variant namespaces.
 - Reverse: DESIGN.md sec 11 edit; drop the label from 10-namespace.yaml.tmpl.
 
-## 2026-10-13 · PR #30 (inferred) · Classifier Kind Negative: a 503 without one valid Retry-After is bad_status (task prompt; DESIGN.md sec 8)
+## 2026-10-13 · PR #30 · Classifier Kind Negative: a 503 without one valid Retry-After is bad_status (task prompt; DESIGN.md sec 8)
 - Decision: order transport error, any 2xx = negative_accepted (at any latency, see the "Integrity reasons win" entry), over_hang_timeout, 503 + one valid Retry-After = graceful_shed, 400 = success, else bad_status. The body is never read.
 - Rejected: reusing bare_503 / bad_retry_after for negatives (the Hash/Verify reasons); the task prompt names bad_status for "anything else".
 - Reason: neither reason is an integrity failure, so the split only changes diagnostics.
 - Reverse: route a Negative's 503 through the Hash/Verify 503 branch in Classify.
 
-## 2026-10-13 · PR #30 (inferred) · Run.Reserve returns ErrNotCanonical for a hash it cannot parse, and records nothing (DESIGN.md sec 8)
+## 2026-10-13 · PR #30 · Run.Reserve returns ErrNotCanonical for a hash it cannot parse, and records nothing (DESIGN.md sec 8)
 - Decision: same canonicalSalt check as a hash response; reserving an already-recorded salt is a no-op returning nil.
 - Rejected: panic (loadgen reserves contract negatives' hashes too if it reserves every /verify hash); recording the salt of a non-exact-params string (it could never come back as success: non_canonical_phc is checked first).
 - Reason: the caller decides whether a non-canonical reserve is a bug (match/mismatch pair) or expected (negative).
 - Reverse: change Reserve's signature (callers: loadgen only).
 
-## 2026-10-13 · PR #30 (inferred) · malformed_body is integrity only via a caller contract on Observation.Body/Err (DESIGN.md sec 9)
+## 2026-10-13 · PR #30 · malformed_body is integrity only via a caller contract on Observation.Body/Err (DESIGN.md sec 9)
 - Decision: Observation.Body must be read to a clean EOF; a read error or a size-cap cut sets Err (transport_error). Integrity(reason) then lists malformed_body unconditionally. gate/interop.go's post already does this.
 - Rejected: an Observation flag "body complete" (a second way to say what Err already says).
 - Reason: the classifier cannot see how the body was read; one rule keeps it the caller's.
 - Reverse: add the flag and make Integrity take the Observation.
 
-## 2026-10-13 · PR #30 (inferred) · Integrity reasons win over the hang-timeout (owner review; amends the PR #15 "HangTimeout bounds every bucket" entry; DESIGN.md sec 8)
+## 2026-10-13 · PR #30 · Integrity reasons win over the hang-timeout (owner review; amends the PR #15 "HangTimeout bounds every bucket" entry; DESIGN.md sec 8)
 - Decision: after a transport error, every 2xx runs the checks that can yield an integrity reason, at any latency; only if none fires does latency > HangTimeout give over_hang_timeout. HangTimeout only decides whether a passing response can be success or graceful_shed. Late hash salts are still recorded; FullVerify still runs on a late hash.
 - Rejected: latency first (the PR #15 order, and this PR's first draft).
 - Reason: a mutant could fail open, or fake results, only past HangTimeout and never be disqualified; negatives are outside every metric, so a slow fail-open costs nothing.
 - Reverse: DESIGN.md sec 8 edit; move the latency check above integrity2xx in Classify.
 
-## 2026-10-13 · PR #30 (inferred) · Loadgen's HTTP client timeout outlasts cmd/service's WriteTimeout (owner review; reverses the reviewer's note 6 decline; amends the design packet's 2 x HangTimeout client timeout; DESIGN.md sec 10)
+## 2026-10-13 · PR #30 · Loadgen's HTTP client timeout outlasts cmd/service's WriteTimeout (owner review; reverses the reviewer's note 6 decline; amends the design packet's 2 x HangTimeout client timeout; DESIGN.md sec 10)
 - Decision: client timeout > WriteTimeout (3 x HangTimeout, 6s), e.g. WriteTimeout + 1s, so every response the service can ever write is observed and classified.
 - Rejected: 2 x HangTimeout (4s).
 - Reason: a shorter timeout turns a slow fail-open or faked result, one a real client waiting longer would receive, into a transport_error instead of an integrity failure (DESIGN.md sec 8 "Integrity reasons apply at any latency").
 - Reverse: DESIGN.md sec 10 edit.
+
+## 2026-10-13 · PR #31 · loadgen ingress: no rule; the API server's proxy gets in through kindnet's root-socket bypass (design packet option A; DESIGN.md sec 11)
+- Decision: NetworkPolicy loadgen (app=loadgen): Ingress + Egress, no ingress rule. kindnet's kube-network-policies accepts traffic from root-owned node sockets ("meta skuid 0 accept") before any policy: the API server, kubelet, control plane and root hostNetwork pods, all able to exec into loadgen already. Only on loadgen's own node: holds because the cluster has one node. The control port is the only one because loadgen listens on no other. variant-smoke.sh (c) + (d) check it (deploy smoke run 38372577882).
+- Rejected: B an ipBlock of the node IP (rendered per cluster, changes nothing under kindnet, admits non-root host processes); C an app-layer token (guards against processes already trusted); D turning the bypass off (skipSkuidBypass is unexported; kindnet has no flag).
+- Reason: under kindnet no NetworkPolicy can tell the API server's proxy apart from other root traffic on the node.
+- Reverse: DESIGN.md sec 11 edit; add an ingress rule (B) or the token (C).
+
+## 2026-10-13 · PR #31 · Known limit: kindnet's policy queue fails open (DESIGN.md sec 11)
+- Decision: recorded, not fixed. kindnetd sets dataplane FailOpen: true, so its nfqueue rules carry the bypass flag: if kindnet's userspace stops reading the queue, every NetworkPolicy fails open, variant egress denial included (cross-variant pair sharing relies on it). Once per half loadgen attempts one connection its own policy must refuse (the API server's ClusterIP, 1s timeout); if it connects, the half is excluded: that canary decides. The orchestrator's kindnet DaemonSet Ready check is a cheap first look only (STATUS Next).
+- Rejected: changing it in kindnet (FailOpen is hard-coded in kindnetd's main.go); another CNI (out of scope for v1); DaemonSet Ready alone (a running but wedged kindnetd reads as Ready).
+- Reason: a fail-closed queue would also stop all pod traffic whenever kindnet restarts; the exclusion turns an unseen gap into a lost window.
+- Reverse: drop the canary and the readiness check if a fail-closed policy engine replaces kindnet's.
+
+## 2026-10-13 · PR #31 · ek8s-system smoke: variant-smoke.sh extended, stand-in from the pinned curl image (task prompt)
+- Decision: the stand-in is busybox nc (-lk -e sh) in curlimages/curl 8.22.0 answering HTTP 200 on 9090; the image has no busybox httpd. The old check "the same pod with app=loadgen removed is refused" becomes a second idle pod (smoke-other, same image and securityContext, no app=loadgen), which also serves as the unrestricted control now that app=loadgen pods have an egress policy.
+- Rejected: relabelling the stand-in (it would leave the Service and loadgen's policy mid-run); a new image or Go listener (owner: ask first).
+- Reason: one script reuses the variant the checks need; smoke-other differs from the stand-in by label and command only.
+- Reverse: restore the label-removal step in variant-smoke.sh.

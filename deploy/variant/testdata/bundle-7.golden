@@ -6,6 +6,9 @@ metadata:
     # Pod Security Admission rejects any pod in this namespace that does not
     # meet the restricted profile.
     pod-security.kubernetes.io/enforce: restricted
+    # Selects every variant namespace without naming an id: loadgen's
+    # egress NetworkPolicy (deploy/ek8s-system) admits TCP 8080 to these.
+    ek8s.io/role: variant
 ---
 # Identical resources for every variant container (DESIGN.md sec 11):
 # Burstable, CPU 250m request / 1000m limit, memory 256Mi request = limit.
@@ -121,13 +124,17 @@ spec:
               divisor: "1"
         # /readyz is the wrapper's (evolvable); /healthz is cmd/service's
         # (fixed), so liveness does not depend on the genome.
+        # 3 x 2s: a loaded pod under a 1-CPU limit is not flapped out by
+        # one slow /readyz. That reacts in about 6s, past cmd/service's 5s
+        # drain, so a terminating pod leaves the Service's endpoints on its
+        # deletion, not on this probe (DESIGN.md sec 11).
         readinessProbe:
           httpGet:
             path: /readyz
             port: http
           periodSeconds: 2
-          timeoutSeconds: 1
-          failureThreshold: 2
+          timeoutSeconds: 2
+          failureThreshold: 3
         livenessProbe:
           httpGet:
             path: /healthz

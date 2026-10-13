@@ -11,6 +11,8 @@ metrics-server/       metrics-server v0.9.0, vendored, + --kubelet-insecure-tls
 stress/               namespace ek8s-stress: stress-ng Deployment (0 replicas),
                       its dose ConfigMap, a deny-all NetworkPolicy
 stress-ci/            overlay of stress/ at CI size (500m / 512Mi, 1 CPU worker)
+ek8s-system/          namespace ek8s-system: loadgen's control Service and
+                      its NetworkPolicy (no loadgen Deployment yet)
 variant/              the per-variant bundle: templates + Go renderer
 up.sh                 create the cluster (if absent) and apply the above
 smoke.sh              infra smoke test (run after up.sh)
@@ -155,10 +157,10 @@ applied by gate Stage 5 (not yet built):
 
 | Object | What it holds |
 |--------|---------------|
-| Namespace `ek8s-v<id>` | Pod Security `restricted` |
+| Namespace `ek8s-v<id>` | Pod Security `restricted`; label `ek8s.io/role: variant` (loadgen's egress policy selects it) |
 | LimitRange | every container: CPU 250m request / 1000m limit, memory 256Mi request = limit |
 | NetworkPolicy | all pods: no egress; ingress TCP 8080 only from `ek8s-system` pods labelled `app=loadgen` |
-| Deployment `hasher` | the candidate image (`imagePullPolicy: Never`), no `replicas` field (the HPA owns it), env from the downward API, readiness `/readyz`, liveness `/healthz`, 30s grace, restricted securityContext, no service account token |
+| Deployment `hasher` | the candidate image (`imagePullPolicy: Never`), no `replicas` field (the HPA owns it), env from the downward API, readiness `/readyz` (every 2s, timeout 2s, 3 failures), liveness `/healthz`, 30s grace, restricted securityContext, no service account token |
 | Service `hasher` | port 8080: `hasher.ek8s-v<id>.svc.cluster.local:8080` |
 | HPA `hasher` | 1-2 pods at 70% of the CPU request |
 
@@ -177,15 +179,38 @@ golden files; review their diff.
 
 `variant-smoke.sh` builds generation 0's image, kind-loads it and a curl
 image (`curlimages/curl` 8.22.0 by its linux/amd64 digest), applies one bundle (id
-999999) and checks: the pod is Ready with the LimitRange's resources and
-its env; a pod in `ek8s-system` labelled `app=loadgen` gets `/healthz`
-and a `/hash` 200 through the Service; the same pod with the label
-removed is refused;
-a pod in the variant namespace reaches neither an external address nor
-the API server (each first shown reachable from `ek8s-system`); and
-deleting the namespace removes everything. It creates `ek8s-system`
-(PSA restricted) if absent and removes what it created on success; on failure it leaves both
-namespaces for inspection. CI runs it after smoke.sh.
+999999), starts a stand-in for loadgen in `ek8s-system` (labelled
+`app=loadgen`, busybox `nc` answering HTTP on the control port) and checks:
+the pod is Ready with the LimitRange's resources and its env; the stand-in
+gets `/healthz` and a `/hash` 200 through the Service by DNS name; the API
+server's service proxy reaches the stand-in's control port, and neither a
+pod in the variant namespace nor an `ek8s-system` pod without
+`app=loadgen` does; that pod is also refused by the variant; neither the
+stand-in nor a pod in the variant namespace reaches an external address or
+the API server, and the stand-in cannot use a DNS server other than
+kube-dns (each first shown reachable from the `ek8s-system` pod without
+`app=loadgen`); with the variant at 2 pods (HPA `minReplicas` raised in the
+smoke only), a deleted pod's EndpointSlice entry is `ready=false`,
+`terminating=true` within 2s while the other stays ready; and deleting the
+namespace removes everything. It needs `ek8s-system` from up.sh and
+removes what it created on success; on failure it leaves the variant
+namespace and the smoke pods for inspection. CI runs it after smoke.sh.
+
+## ek8s-system
+
+Namespace `ek8s-system` (Pod Security `restricted`), where loadgen will
+run (DESIGN.md sec 10). up.sh applies it; no loadgen Deployment yet.
+
+| Object | What it holds |
+|--------|---------------|
+| Service `loadgen` | ClusterIP, port `control` 9090 -> the pod port named `control`; reached from the host as `kubectl get --raw /api/v1/namespaces/ek8s-system/services/loadgen:control/proxy/...` |
+| NetworkPolicy `loadgen` | pods `app=loadgen`: no ingress rule; egress TCP 8080 to namespaces labelled `ek8s.io/role: variant`, DNS (UDP/TCP 53) to kube-dns only |
+
+With no ingress rule, the API server's proxy gets in only because kindnet
+never applies policy to traffic from a root-owned socket on the node. That
+covers every root process on the node (the API server, the kubelet, the
+control plane, root hostNetwork pods), all of which can already exec into
+loadgen (DESIGN.md sec 11).
 
 ## stress-ng
 
