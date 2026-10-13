@@ -572,3 +572,33 @@
 - Rejected: selecting by the ek8s-v name prefix.
 - Reason: a NetworkPolicy namespaceSelector matches labels, not name prefixes, so loadgen's egress policy needs a label to select variant namespaces.
 - Reverse: DESIGN.md sec 11 edit; drop the label from 10-namespace.yaml.tmpl.
+
+## 2026-10-13 · PR #30 (inferred) · Classifier Kind Negative: a 503 without one valid Retry-After is bad_status (task prompt; DESIGN.md sec 8)
+- Decision: order transport error, any 2xx = negative_accepted (at any latency, see the "Integrity reasons win" entry), over_hang_timeout, 503 + one valid Retry-After = graceful_shed, 400 = success, else bad_status. The body is never read.
+- Rejected: reusing bare_503 / bad_retry_after for negatives (the Hash/Verify reasons); the task prompt names bad_status for "anything else".
+- Reason: neither reason is an integrity failure, so the split only changes diagnostics.
+- Reverse: route a Negative's 503 through the Hash/Verify 503 branch in Classify.
+
+## 2026-10-13 · PR #30 (inferred) · Run.Reserve returns ErrNotCanonical for a hash it cannot parse, and records nothing (DESIGN.md sec 8)
+- Decision: same canonicalSalt check as a hash response; reserving an already-recorded salt is a no-op returning nil.
+- Rejected: panic (loadgen reserves contract negatives' hashes too if it reserves every /verify hash); recording the salt of a non-exact-params string (it could never come back as success: non_canonical_phc is checked first).
+- Reason: the caller decides whether a non-canonical reserve is a bug (match/mismatch pair) or expected (negative).
+- Reverse: change Reserve's signature (callers: loadgen only).
+
+## 2026-10-13 · PR #30 (inferred) · malformed_body is integrity only via a caller contract on Observation.Body/Err (DESIGN.md sec 9)
+- Decision: Observation.Body must be read to a clean EOF; a read error or a size-cap cut sets Err (transport_error). Integrity(reason) then lists malformed_body unconditionally. gate/interop.go's post already does this.
+- Rejected: an Observation flag "body complete" (a second way to say what Err already says).
+- Reason: the classifier cannot see how the body was read; one rule keeps it the caller's.
+- Reverse: add the flag and make Integrity take the Observation.
+
+## 2026-10-13 · PR #30 (inferred) · Integrity reasons win over the hang-timeout (owner review; amends the PR #15 "HangTimeout bounds every bucket" entry; DESIGN.md sec 8)
+- Decision: after a transport error, every 2xx runs the checks that can yield an integrity reason, at any latency; only if none fires does latency > HangTimeout give over_hang_timeout. HangTimeout only decides whether a passing response can be success or graceful_shed. Late hash salts are still recorded; FullVerify still runs on a late hash.
+- Rejected: latency first (the PR #15 order, and this PR's first draft).
+- Reason: a mutant could fail open, or fake results, only past HangTimeout and never be disqualified; negatives are outside every metric, so a slow fail-open costs nothing.
+- Reverse: DESIGN.md sec 8 edit; move the latency check above integrity2xx in Classify.
+
+## 2026-10-13 · PR #30 (inferred) · Loadgen's HTTP client timeout outlasts cmd/service's WriteTimeout (owner review; reverses the reviewer's note 6 decline; amends the design packet's 2 x HangTimeout client timeout; DESIGN.md sec 10)
+- Decision: client timeout > WriteTimeout (3 x HangTimeout, 6s), e.g. WriteTimeout + 1s, so every response the service can ever write is observed and classified.
+- Rejected: 2 x HangTimeout (4s).
+- Reason: a shorter timeout turns a slow fail-open or faked result, one a real client waiting longer would receive, into a transport_error instead of an integrity failure (DESIGN.md sec 8 "Integrity reasons apply at any latency").
+- Reverse: DESIGN.md sec 10 edit.

@@ -573,7 +573,9 @@ scoring are:
   timed out could be handed to a later request. Any integrity failure
   (a wrong or reused hash, a fake "match", a success on an invalid hash)
   disqualifies the variant: the first one confirmed on the host means
-  the variant is culled at once and never becomes a parent.
+  the variant is culled at once and never becomes a parent. It counts
+  even when the answer arrives past the time ceiling: a slow cheat is
+  still a cheat.
 - **Memorizing verify answers:** fixed by the fresh pairs above.
 - **Replaying pool hashes:** fixed by keeping the pool out of live
   traffic and noting the salt of every hash sent to `/verify`.
@@ -672,11 +674,14 @@ In broad terms, as of 2026-10-13:
   neighbour and the per-variant manifests (namespace, limits, network
   policy, Deployment, Service, autoscaler), with a small-scale smoke
   test in CI; the full-size run waits for the workstation.
+  The judge also knows the load generator's deliberately invalid
+  requests, which a variant must refuse, and which failures count as
+  cheating.
 - **Designed, not built:** the load generator (one long-lived
   deployment, fresh pairs, invalid hashes in live traffic, schedule-lag
-  checks) and the classifier changes it needs.
-- **Next:** those classifier changes, the load generator's cluster
-  setup, the load generator itself, then gate Stage 5, which needs it.
+  checks).
+- **Next:** the load generator's cluster setup, the load generator
+  itself, then gate Stage 5, which needs it.
 - **Not built yet:** gate Stage 5, the load generator, AI driver,
   orchestrator and lineage records. No
   generation has evolved yet.

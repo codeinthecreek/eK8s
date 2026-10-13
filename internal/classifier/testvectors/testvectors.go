@@ -27,7 +27,7 @@ type Pair struct {
 }
 
 // Negative is a well-formed PHC hash at non-exact parameters, for the
-// gate only (loadgen must not send them). Name is the parameter under
+// gate's Stage 2 contract checks. Name is the parameter under
 // test, e.g. "t=1". Constructed entries were built by hand (a very
 // large m cannot be computed) and differ from a canonical hash only in
 // the params segment.

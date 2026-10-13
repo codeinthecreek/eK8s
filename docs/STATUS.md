@@ -4,11 +4,11 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 *(inferred)* are guesses, not read from the repo; correct them.
 
 ## Now
+- `claude/classifier-negatives` (PR #30 *(inferred)*): internal/classifier gains Kind Negative (contract negatives; `negative_accepted`), `Run.Reserve` (ErrNotCanonical on an unparseable hash), `Integrity(reason)` (the DESIGN.md sec 9 list) and the Observation.Body/Err caller contract (a cut-short body is a transport error, never malformed_body); integrity reasons now win over the hang-timeout (DESIGN.md sec 8, amends PR #15); the Run doc comment now starts the Run at the Stage 5 burst; testvectors doc comments say gate-only.
 
 ## Next
-- internal/classifier PR: contract negatives (`negative_accepted`), `Run.Reserve`, the Run starting at the Stage 5 burst, the integrity-failure classes (DESIGN.md sec 8, 9); correct the internal/classifier/testvectors doc comments ("shared", "used by gate and loadgen") to gate-only.
 - deploy ek8s-system PR: namespace, loadgen Deployment shell (750m/256Mi Guaranteed, control Service), readiness-probe values, namespace label.
-- loadgen PR (sustained + burst, control API, salt journal and restore, lag exclusion), then gate PR4: Stage 5.
+- loadgen PR (sustained + burst, control API, salt journal and restore, lag exclusion), then gate PR4: Stage 5. The loadgen PR adds a check that loadgen never imports internal/classifier/testvectors (stated in its doc comment, not yet enforced); client timeout > WriteTimeout (DESIGN.md sec 10).
 
 ## Parked
 - Stage 4 hash_cross-talk_without_a_race seed misses at 2 CPUs: 1/30 before PR #27, 1/100 after (taskset -c 0,1); about a 1% red ci.yml run. Cause not diagnosed; also check whether a real mutant with intermittent cross-talk can slip Stage 4 the same way.

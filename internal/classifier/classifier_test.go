@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"net/http"
 	"sync"
 	"sync/atomic"
@@ -56,6 +57,9 @@ func TestClassify(t *testing.T) {
 	okVerify := Observation{Kind: Verify, Password: "pw", WantMatch: true, Status: 200, Body: []byte(`{"match":true}`)}
 	shed := func(h http.Header) Observation {
 		return Observation{Kind: Hash, Status: 503, Header: h, Body: []byte("not json")}
+	}
+	negative := func(status int, h http.Header) Observation {
+		return Observation{Kind: Negative, Password: "pw", Status: status, Header: h, Body: []byte(`{"match":true}`)}
 	}
 	with := func(o Observation, f func(*Observation)) Observation { f(&o); return o }
 
@@ -157,6 +161,39 @@ func TestClassify(t *testing.T) {
 		{name: "non-canonical never verified", o: with(okHash, func(o *Observation) { o.FullVerify = true; o.Body = hashBody(withKey("x")) }), verifier: &fakeVerifier{match: true}, wantBucket: Failed, wantReason: ReasonNonCanonicalPHC},
 		{name: "salt reused", prior: &okHash, o: okHash, wantBucket: Failed, wantReason: ReasonSaltReused},
 		{name: "verify kind ignores verifier", o: with(okVerify, func(o *Observation) { o.FullVerify = true }), verifier: &fakeVerifier{match: false}, wantBucket: Success},
+
+		// Negative, in Classify's order.
+		{name: "negative transport error", o: with(negative(400, nil), func(o *Observation) { o.Err = errors.New("reset") }), wantBucket: Failed, wantReason: ReasonTransportError},
+		{name: "negative transport error wins over 2xx", o: with(negative(200, nil), func(o *Observation) { o.Err = errors.New("reset") }), wantBucket: Failed, wantReason: ReasonTransportError},
+		{name: "negative 400 at ceiling", o: with(negative(400, nil), func(o *Observation) { o.Latency = HangTimeout }), wantBucket: Success},
+		{name: "negative 400 over ceiling", o: with(negative(400, nil), func(o *Observation) { o.Latency = HangTimeout + 1 }), wantBucket: Failed, wantReason: ReasonOverHangTimeout},
+		{name: "negative shed at ceiling", o: with(negative(503, retryAfter("1")), func(o *Observation) { o.Latency = HangTimeout }), wantBucket: GracefulShed},
+		{name: "negative shed over ceiling", o: with(negative(503, retryAfter("1")), func(o *Observation) { o.Latency = HangTimeout + 1 }), wantBucket: Failed, wantReason: ReasonOverHangTimeout},
+		{name: "negative 2xx at ceiling", o: with(negative(200, nil), func(o *Observation) { o.Latency = HangTimeout }), wantBucket: Failed, wantReason: ReasonNegativeAccepted},
+		{name: "negative 2xx over ceiling", o: with(negative(200, nil), func(o *Observation) { o.Latency = HangTimeout + 1 }), wantBucket: Failed, wantReason: ReasonNegativeAccepted},
+		{name: "negative shed delay-seconds", o: negative(503, retryAfter("1")), wantBucket: GracefulShed},
+		{name: "negative shed HTTP-date", o: negative(503, retryAfter("Fri, 02 Oct 2026 09:00:00 GMT")), wantBucket: GracefulShed},
+		{name: "negative bare 503", o: negative(503, nil), wantBucket: Failed, wantReason: ReasonBadStatus},
+		{name: "negative Retry-After twice", o: negative(503, retryAfter("1", "1")), wantBucket: Failed, wantReason: ReasonBadStatus},
+		{name: "negative Retry-After garbage", o: negative(503, retryAfter("soon")), wantBucket: Failed, wantReason: ReasonBadStatus},
+		{name: "negative Retry-After empty", o: negative(503, retryAfter("")), wantBucket: Failed, wantReason: ReasonBadStatus},
+		{name: "negative 400", o: negative(400, nil), wantBucket: Success},
+		{name: "negative 400 with Retry-After", o: negative(400, retryAfter("1")), wantBucket: Success},
+		{name: "negative 400 body ignored", o: with(negative(400, nil), func(o *Observation) { o.Body = []byte("garbage") }), wantBucket: Success},
+		{name: "negative 200", o: negative(200, nil), wantBucket: Failed, wantReason: ReasonNegativeAccepted},
+		{name: "negative 200 match false", o: with(negative(200, nil), func(o *Observation) { o.Body = []byte(`{"match":false}`) }), wantBucket: Failed, wantReason: ReasonNegativeAccepted},
+		{name: "negative 204 empty body", o: with(negative(204, nil), func(o *Observation) { o.Body = nil }), wantBucket: Failed, wantReason: ReasonNegativeAccepted},
+		{name: "negative 299", o: negative(299, nil), wantBucket: Failed, wantReason: ReasonNegativeAccepted},
+		{name: "negative 2xx with Retry-After", o: negative(200, retryAfter("1")), wantBucket: Failed, wantReason: ReasonNegativeAccepted},
+		{name: "negative 300", o: negative(300, nil), wantBucket: Failed, wantReason: ReasonBadStatus},
+		{name: "negative 199", o: negative(199, nil), wantBucket: Failed, wantReason: ReasonBadStatus},
+		{name: "negative 401", o: negative(401, nil), wantBucket: Failed, wantReason: ReasonBadStatus},
+		{name: "negative 422", o: negative(422, nil), wantBucket: Failed, wantReason: ReasonBadStatus},
+		{name: "negative 500 with Retry-After", o: negative(500, retryAfter("1")), wantBucket: Failed, wantReason: ReasonBadStatus},
+		{name: "negative status 0", o: negative(0, nil), wantBucket: Failed, wantReason: ReasonBadStatus},
+		{name: "negative ignores verifier", o: with(negative(400, nil), func(o *Observation) { o.FullVerify = true }), verifier: &fakeVerifier{match: false}, wantBucket: Success},
+		{name: "negative 2xx ignores verifier", o: with(negative(200, nil), func(o *Observation) { o.FullVerify = true; o.Body = hashBody(phc(1)) }), verifier: &fakeVerifier{match: true}, wantBucket: Failed, wantReason: ReasonNegativeAccepted},
+		{name: "negative 2xx with a hash body", prior: &okHash, o: with(negative(200, nil), func(o *Observation) { o.Body = hashBody(phc(1)) }), wantBucket: Failed, wantReason: ReasonNegativeAccepted},
 	}
 	covered := map[Reason]bool{}
 	for _, tt := range tests {
@@ -181,7 +218,7 @@ func TestClassify(t *testing.T) {
 	}
 	for _, r := range []Reason{ReasonNone, ReasonTransportError, ReasonOverHangTimeout, ReasonBadStatus, ReasonBare503,
 		ReasonBadRetryAfter, ReasonMalformedBody, ReasonWrongMatch, ReasonNonCanonicalPHC, ReasonSaltReused,
-		ReasonVerifyMismatch, ReasonVerifyError} {
+		ReasonVerifyMismatch, ReasonVerifyError, ReasonNegativeAccepted} {
 		if !covered[r] {
 			t.Errorf("no test case for reason %q", r)
 		}
@@ -228,17 +265,103 @@ func TestLateHashSaltRecorded(t *testing.T) {
 
 	// Late responses that are not 2xx canonical hash bodies record nothing.
 	r = NewRun(nil)
-	for _, o := range []Observation{
-		{Kind: Hash, Status: 503, Header: retryAfter("1"), Body: hashBody(phc(6)), Latency: HangTimeout + 1},
-		{Kind: Verify, Status: 200, Body: hashBody(phc(6)), Latency: HangTimeout + 1},
-		{Kind: Hash, Status: 200, Body: []byte(`{"hash":"` + phc(6) + `","x":1}`), Latency: HangTimeout + 1},
+	for _, tt := range []struct {
+		o          Observation
+		wantReason Reason
+	}{
+		{Observation{Kind: Hash, Status: 503, Header: retryAfter("1"), Body: hashBody(phc(6)), Latency: HangTimeout + 1}, ReasonOverHangTimeout},
+		{Observation{Kind: Verify, Status: 200, Body: hashBody(phc(6)), Latency: HangTimeout + 1}, ReasonMalformedBody},
+		{Observation{Kind: Negative, Status: 200, Body: hashBody(phc(6)), Latency: HangTimeout + 1}, ReasonNegativeAccepted},
+		{Observation{Kind: Hash, Status: 200, Body: []byte(`{"hash":"` + phc(6) + `","x":1}`), Latency: HangTimeout + 1}, ReasonMalformedBody},
 	} {
-		if _, reason := r.Classify(o); reason != ReasonOverHangTimeout {
-			t.Fatalf("late %v status %d: reason = %q, want over_hang_timeout", o.Kind, o.Status, reason)
+		if _, reason := r.Classify(tt.o); reason != tt.wantReason {
+			t.Fatalf("late %v status %d: reason = %q, want %q", tt.o.Kind, tt.o.Status, reason, tt.wantReason)
 		}
 	}
 	if b, reason := r.Classify(Observation{Kind: Hash, Status: 200, Body: hashBody(phc(6))}); b != Success {
 		t.Fatalf("on time after non-recording late responses = (%v, %q), want success", b, reason)
+	}
+}
+
+// TestIntegrityAtAnyLatency: every integrity reason fires the same at
+// exactly HangTimeout and just over it; a late response that passes
+// every integrity check is over_hang_timeout.
+func TestIntegrityAtAnyLatency(t *testing.T) {
+	okHash := Observation{Kind: Hash, Password: "pw", Status: 200, Body: hashBody(phc(1))}
+	with := func(o Observation, f func(*Observation)) Observation { f(&o); return o }
+	tests := []struct {
+		name       string
+		prior      *Observation // classified first, on time, on the same Run
+		o          Observation
+		verifier   *fakeVerifier
+		wantReason Reason
+	}{
+		{name: "negative_accepted", o: Observation{Kind: Negative, Status: 200}, wantReason: ReasonNegativeAccepted},
+		{name: "malformed_body verify", o: Observation{Kind: Verify, WantMatch: true, Status: 200, Body: []byte(`{"match":true,"x":1}`)}, wantReason: ReasonMalformedBody},
+		{name: "malformed_body hash", o: with(okHash, func(o *Observation) { o.Body = []byte(`{"hash":1}`) }), wantReason: ReasonMalformedBody},
+		{name: "wrong_match", o: Observation{Kind: Verify, WantMatch: false, Status: 200, Body: []byte(`{"match":true}`)}, wantReason: ReasonWrongMatch},
+		{name: "non_canonical_phc", o: with(okHash, func(o *Observation) { o.Body = hashBody(withKey("x")) }), wantReason: ReasonNonCanonicalPHC},
+		{name: "salt_reused", prior: &okHash, o: okHash, wantReason: ReasonSaltReused},
+		{name: "verify_mismatch", o: with(okHash, func(o *Observation) { o.FullVerify = true }), verifier: &fakeVerifier{match: false}, wantReason: ReasonVerifyMismatch},
+		{name: "verify_error", o: with(okHash, func(o *Observation) { o.FullVerify = true }), verifier: &fakeVerifier{err: errors.New("bad")}, wantReason: ReasonVerifyError},
+		// Clean 2xx responses: latency decides.
+		{name: "clean hash", o: with(okHash, func(o *Observation) { o.FullVerify = true }), verifier: &fakeVerifier{match: true}},
+		{name: "clean verify", o: Observation{Kind: Verify, WantMatch: true, Status: 200, Body: []byte(`{"match":true}`)}},
+	}
+	covered := map[Reason]bool{}
+	for _, tt := range tests {
+		covered[tt.wantReason] = true
+		for _, latency := range []time.Duration{HangTimeout, HangTimeout + 1} {
+			t.Run(fmt.Sprintf("%s at %v", tt.name, latency), func(t *testing.T) {
+				v := &fakeVerifier{}
+				if tt.verifier != nil {
+					v = &fakeVerifier{match: tt.verifier.match, err: tt.verifier.err}
+				}
+				r := NewRun(v.verify)
+				if tt.prior != nil {
+					r.Classify(*tt.prior)
+				}
+				o := tt.o
+				o.Latency = latency
+				want := tt.wantReason
+				if want == ReasonNone && latency > HangTimeout {
+					want = ReasonOverHangTimeout
+				}
+				wantBucket := Failed
+				if want == ReasonNone {
+					wantBucket = Success
+				}
+				if b, reason := r.Classify(o); b != wantBucket || reason != want {
+					t.Errorf("Classify = (%v, %q), want (%v, %q)", b, reason, wantBucket, want)
+				}
+				if o.FullVerify && v.calls.Load() != 1 {
+					t.Errorf("Verifier calls = %d, want 1", v.calls.Load())
+				}
+			})
+		}
+	}
+	for r := range covered {
+		if r != ReasonNone && !Integrity(r) {
+			t.Errorf("%q is not an integrity reason", r)
+		}
+	}
+	for _, r := range []Reason{ReasonVerifyMismatch, ReasonVerifyError, ReasonWrongMatch,
+		ReasonNonCanonicalPHC, ReasonSaltReused, ReasonNegativeAccepted, ReasonMalformedBody} {
+		if !covered[r] {
+			t.Errorf("no test case for integrity reason %q", r)
+		}
+	}
+}
+
+// TestNegativeRecordsNoSalt: a negative's 2xx body is never read, so
+// a hash in it records no salt.
+func TestNegativeRecordsNoSalt(t *testing.T) {
+	r := NewRun(nil)
+	if _, reason := r.Classify(Observation{Kind: Negative, Status: 200, Body: hashBody(phc(6))}); reason != ReasonNegativeAccepted {
+		t.Fatalf("reason = %q, want negative_accepted", reason)
+	}
+	if b, reason := r.Classify(Observation{Kind: Hash, Status: 200, Body: hashBody(phc(6))}); b != Success {
+		t.Fatalf("hash after negative = (%v, %q), want success", b, reason)
 	}
 }
 
@@ -317,9 +440,10 @@ func TestClassifyPanics(t *testing.T) {
 		r *Run
 		o Observation
 	}{
-		"zero Kind":               {NewRun(nil), Observation{Status: 200, Body: hashBody(phc(1))}},
-		"unknown Kind":            {NewRun(nil), Observation{Kind: 3, Status: 200}},
-		"FullVerify, no Verifier": {NewRun(nil), Observation{Kind: Hash, Status: 503, FullVerify: true}},
+		"zero Kind":                        {NewRun(nil), Observation{Status: 200, Body: hashBody(phc(1))}},
+		"unknown Kind":                     {NewRun(nil), Observation{Kind: Negative + 1, Status: 400}},
+		"FullVerify negative, no Verifier": {NewRun(nil), Observation{Kind: Negative, Status: 400, FullVerify: true}},
+		"FullVerify, no Verifier":          {NewRun(nil), Observation{Kind: Hash, Status: 503, FullVerify: true}},
 	}
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -348,10 +472,201 @@ func TestStrings(t *testing.T) {
 		{Bucket(9).String(), "Bucket(9)"},
 		{Hash.String(), "hash"},
 		{Verify.String(), "verify"},
+		{Negative.String(), "negative"},
 		{Kind(0).String(), "Kind(0)"},
 	} {
 		if tt.got != tt.want {
 			t.Errorf("got %q, want %q", tt.got, tt.want)
 		}
+	}
+}
+
+// TestHashVerifyUnchanged pins the Hash and Verify answers to the
+// statuses Negative treats specially, so Negative's rules cannot leak
+// into them.
+func TestHashVerifyUnchanged(t *testing.T) {
+	for _, k := range []Kind{Hash, Verify} {
+		for _, tt := range []struct {
+			status     int
+			h          http.Header
+			wantBucket Bucket
+			wantReason Reason
+		}{
+			{400, nil, Failed, ReasonBadStatus},
+			{503, nil, Failed, ReasonBare503},
+			{503, retryAfter("1", "1"), Failed, ReasonBadRetryAfter},
+			{503, retryAfter("soon"), Failed, ReasonBadRetryAfter},
+			{503, retryAfter("1"), GracefulShed, ReasonNone},
+			{200, nil, Failed, ReasonMalformedBody}, // empty body
+		} {
+			o := Observation{Kind: k, Status: tt.status, Header: tt.h}
+			if b, reason := NewRun(nil).Classify(o); b != tt.wantBucket || reason != tt.wantReason {
+				t.Errorf("%v status %d %v: Classify = (%v, %q), want (%v, %q)", k, tt.status, tt.h, b, reason, tt.wantBucket, tt.wantReason)
+			}
+		}
+	}
+	r := NewRun(nil)
+	if b, reason := r.Classify(Observation{Kind: Hash, Status: 200, Body: hashBody(phc(1))}); b != Success {
+		t.Errorf("hash 200 = (%v, %q), want success", b, reason)
+	}
+	if b, reason := r.Classify(Observation{Kind: Verify, WantMatch: false, Status: 200, Body: []byte(`{"match":false}`)}); b != Success {
+		t.Errorf("verify 200 = (%v, %q), want success", b, reason)
+	}
+}
+
+func TestReserve(t *testing.T) {
+	hash := func(saltByte byte) Observation {
+		return Observation{Kind: Hash, Status: 200, Body: hashBody(phc(saltByte))}
+	}
+
+	// A reserved salt replayed as a hash answer is caught, on time and
+	// late, and with a different key.
+	r := NewRun(nil)
+	if err := r.Reserve(phc(1)); err != nil {
+		t.Fatalf("Reserve = %v", err)
+	}
+	if b, reason := r.Classify(hash(1)); b != Failed || reason != ReasonSaltReused {
+		t.Fatalf("replay = (%v, %q), want (failed, salt_reused)", b, reason)
+	}
+	if err := r.Reserve(phc(6)); err != nil {
+		t.Fatalf("Reserve = %v", err)
+	}
+	late := hash(6)
+	late.Latency = HangTimeout + 1
+	if b, reason := r.Classify(late); b != Failed || reason != ReasonSaltReused {
+		t.Fatalf("late replay = (%v, %q), want (failed, salt_reused)", b, reason)
+	}
+	if err := r.Reserve(phc(2)); err != nil {
+		t.Fatalf("Reserve = %v", err)
+	}
+	otherKey := "$argon2id$v=19$m=19456,t=2,p=1$" + b64(bytes.Repeat([]byte{2}, 16)) + "$" + b64(make([]byte, 32))
+	if _, reason := r.Classify(Observation{Kind: Hash, Status: 200, Body: hashBody(otherKey)}); reason != ReasonSaltReused {
+		t.Fatalf("replay, other key: reason = %q, want salt_reused", reason)
+	}
+
+	// Reserving classifies nothing: a salt reserved and never replayed
+	// leaves other hashes, verifies and negatives alone, and reserving it
+	// twice is harmless.
+	r = NewRun(nil)
+	for range 2 {
+		if err := r.Reserve(phc(3)); err != nil {
+			t.Fatalf("Reserve = %v", err)
+		}
+	}
+	if b, reason := r.Classify(hash(4)); b != Success {
+		t.Fatalf("other salt = (%v, %q), want success", b, reason)
+	}
+	if b, reason := r.Classify(Observation{Kind: Verify, WantMatch: true, Status: 200, Body: []byte(`{"match":true}`)}); b != Success {
+		t.Fatalf("verify = (%v, %q), want success", b, reason)
+	}
+	if b, reason := r.Classify(Observation{Kind: Negative, Status: 400}); b != Success {
+		t.Fatalf("negative = (%v, %q), want success", b, reason)
+	}
+
+	// A salt already recorded from a hash response is reserved without
+	// error, and stays reused.
+	if err := r.Reserve(phc(4)); err != nil {
+		t.Fatalf("Reserve of a seen salt = %v", err)
+	}
+	if _, reason := r.Classify(hash(4)); reason != ReasonSaltReused {
+		t.Fatalf("after Reserve of a seen salt: reason = %q, want salt_reused", reason)
+	}
+
+	// A hash Reserve cannot parse is an error, records nothing, and
+	// never panics.
+	r = NewRun(nil)
+	for _, bad := range []string{
+		"",
+		"not-a-phc-string",
+		"$",
+		"$$$$$",
+		"$argon2id$v=19$m=19456,t=1,p=1$" + salt16 + "$" + key32, // non-exact params
+		withSalt(b64(make([]byte, 15))),
+		withKey("x"),
+		phc(5) + "$",
+		phc(5)[:len(phc(5))-10],
+	} {
+		if err := r.Reserve(bad); !errors.Is(err, ErrNotCanonical) {
+			t.Errorf("Reserve(%q) = %v, want ErrNotCanonical", bad, err)
+		}
+	}
+	// The non-exact-params string above carries salt16; it was not
+	// recorded.
+	if b, reason := r.Classify(Observation{Kind: Hash, Status: 200, Body: hashBody(withSalt(salt16))}); b != Success {
+		t.Fatalf("salt of a rejected Reserve = (%v, %q), want success", b, reason)
+	}
+}
+
+// TestConcurrentReserve must pass under -race.
+func TestConcurrentReserve(t *testing.T) {
+	const n = 64
+	r := NewRun(nil)
+	var wg sync.WaitGroup
+	for i := range n {
+		wg.Go(func() {
+			if err := r.Reserve(phc(byte(i))); err != nil {
+				t.Errorf("Reserve = %v", err)
+			}
+		})
+		wg.Go(func() { r.Classify(Observation{Kind: Hash, Status: 200, Body: hashBody(phc(byte(n + i)))}) })
+	}
+	wg.Wait()
+	for i := range 2 * n {
+		if _, reason := r.Classify(Observation{Kind: Hash, Status: 200, Body: hashBody(phc(byte(i)))}); reason != ReasonSaltReused {
+			t.Fatalf("salt %d: reason = %q, want salt_reused", i, reason)
+		}
+	}
+}
+
+func TestIntegrity(t *testing.T) {
+	want := map[Reason]bool{
+		ReasonVerifyMismatch:   true,
+		ReasonVerifyError:      true,
+		ReasonWrongMatch:       true,
+		ReasonNonCanonicalPHC:  true,
+		ReasonSaltReused:       true,
+		ReasonNegativeAccepted: true,
+		ReasonMalformedBody:    true,
+
+		ReasonNone:            false,
+		ReasonTransportError:  false,
+		ReasonOverHangTimeout: false,
+		ReasonBadStatus:       false,
+		ReasonBare503:         false,
+		ReasonBadRetryAfter:   false,
+		Reason("unknown"):     false,
+	}
+	for reason, w := range want {
+		if got := Integrity(reason); got != w {
+			t.Errorf("Integrity(%q) = %v, want %v", reason, got, w)
+		}
+	}
+}
+
+// TestBodyReadContract checks both sides of Observation.Body's contract
+// on one cut-short body: passed with Err set (as a caller whose read
+// failed must) it is an ordinary failure; passed as if read cleanly it
+// is malformed_body, an integrity failure.
+func TestBodyReadContract(t *testing.T) {
+	cut := []byte(`{"match":tr`)
+	for _, tt := range []struct {
+		name          string
+		err           error
+		wantReason    Reason
+		wantIntegrity bool
+	}{
+		{"read error set", errors.New("unexpected EOF"), ReasonTransportError, false},
+		{"clean EOF", nil, ReasonMalformedBody, true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			o := Observation{Kind: Verify, WantMatch: true, Status: 200, Body: cut, Err: tt.err}
+			b, reason := NewRun(nil).Classify(o)
+			if b != Failed || reason != tt.wantReason {
+				t.Fatalf("Classify = (%v, %q), want (failed, %q)", b, reason, tt.wantReason)
+			}
+			if got := Integrity(reason); got != tt.wantIntegrity {
+				t.Fatalf("Integrity(%q) = %v, want %v", reason, got, tt.wantIntegrity)
+			}
+		})
 	}
 }
