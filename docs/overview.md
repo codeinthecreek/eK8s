@@ -672,16 +672,18 @@ In broad terms, as of 2026-10-13:
   Stages 1-4 (section 6), all tested in CI. The cluster setup is
   written too: the kind config, metrics-server, the stress-ng noisy
   neighbour and the per-variant manifests (namespace, limits, network
-  policy, Deployment, Service, autoscaler), with a small-scale smoke
-  test in CI; the full-size run waits for the workstation.
+  policy, Deployment, Service, autoscaler) and the load generator's
+  namespace (its control Service and network policy, no load generator
+  yet), with a small-scale smoke test in CI; the full-size run waits for
+  the workstation.
   The judge also knows the load generator's deliberately invalid
   requests, which a variant must refuse, and which failures count as
   cheating.
 - **Designed, not built:** the load generator (one long-lived
   deployment, fresh pairs, invalid hashes in live traffic, schedule-lag
   checks).
-- **Next:** the load generator's cluster setup, the load generator
-  itself, then gate Stage 5, which needs it.
+- **Next:** the load generator itself, then gate Stage 5, which needs
+  it.
 - **Not built yet:** gate Stage 5, the load generator, AI driver,
   orchestrator and lineage records. No
   generation has evolved yet.

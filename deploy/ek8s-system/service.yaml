@@ -1,0 +1,20 @@
+# loadgen's control API (DESIGN.md sec 10): ClusterIP only, reached from
+# the host through the API server's service proxy,
+#   /api/v1/namespaces/ek8s-system/services/loadgen:control/proxy/
+# The port is loadgen's only listener; its NetworkPolicy admits no pod.
+apiVersion: v1
+kind: Service
+metadata:
+  name: loadgen
+  namespace: ek8s-system
+  labels:
+    app: loadgen
+spec:
+  type: ClusterIP
+  selector:
+    app: loadgen
+  ports:
+  - name: control
+    protocol: TCP
+    port: 9090
+    targetPort: control

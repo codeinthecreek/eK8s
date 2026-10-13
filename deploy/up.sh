@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Creates the ek8s kind cluster if it does not exist, loads the stress-ng
-# image into it and applies the cluster-wide infrastructure: metrics-server
-# and the stress-ng Deployment (left at 0 replicas, stress off). Safe to
+# image into it and applies the cluster-wide infrastructure: metrics-server,
+# the stress-ng Deployment (left at 0 replicas, stress off) and namespace
+# ek8s-system (loadgen's Service and NetworkPolicy, no loadgen yet). Safe to
 # re-run; a re-run resets stress-ng to off. See deploy/README.md.
 #
 # Parameters (environment; the defaults are the full-size workstation setup,
@@ -46,5 +47,6 @@ kind load docker-image "$stress_tag" --name "$cluster"
 
 kubectl --context "$ctx" apply -k metrics-server
 kubectl --context "$ctx" apply -k "$stress_kustomize"
+kubectl --context "$ctx" apply -k ek8s-system
 kubectl --context "$ctx" -n kube-system rollout status deploy/metrics-server --timeout=180s
 echo "up.sh: cluster $cluster ready (context $ctx)"

@@ -6,3 +6,6 @@ metadata:
     # Pod Security Admission rejects any pod in this namespace that does not
     # meet the restricted profile.
     pod-security.kubernetes.io/enforce: restricted
+    # Selects every variant namespace without naming an id: loadgen's
+    # egress NetworkPolicy (deploy/ek8s-system) admits TCP 8080 to these.
+    ek8s.io/role: variant

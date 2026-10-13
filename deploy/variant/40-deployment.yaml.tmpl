@@ -62,13 +62,17 @@ spec:
               divisor: "1"
         # /readyz is the wrapper's (evolvable); /healthz is cmd/service's
         # (fixed), so liveness does not depend on the genome.
+        # 3 x 2s: a loaded pod under a 1-CPU limit is not flapped out by
+        # one slow /readyz. That reacts in about 6s, past cmd/service's 5s
+        # drain, so a terminating pod leaves the Service's endpoints on its
+        # deletion, not on this probe (DESIGN.md sec 11).
         readinessProbe:
           httpGet:
             path: /readyz
             port: http
           periodSeconds: 2
-          timeoutSeconds: 1
-          failureThreshold: 2
+          timeoutSeconds: 2
+          failureThreshold: 3
         livenessProbe:
           httpGet:
             path: /healthz

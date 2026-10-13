@@ -1,0 +1,11 @@
+# Namespace ek8s-system, where loadgen runs (DESIGN.md sec 10): the
+# namespace, loadgen's control Service and its NetworkPolicy. No loadgen
+# Deployment yet; the loadgen PR adds it, with a container port named
+# control.
+# Apply with: kubectl --context kind-ek8s apply -k deploy/ek8s-system
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- namespace.yaml
+- service.yaml
+- networkpolicy.yaml

@@ -1,10 +1,12 @@
 name: deploy smoke
 
 # Brings up the kind cluster at CI size and runs deploy/smoke.sh, then
-# deploy/variant-smoke.sh (one variant bundle: readiness, ingress from
-# loadgen only, no egress, namespace deletion). It proves the mechanics
-# (pinned images, kustomizations, metrics-server, stress-ng on and off, the
-# variant bundle), not the full-size numbers: those need the workstation
+# deploy/variant-smoke.sh (one variant bundle and a loadgen stand-in:
+# readiness, ingress from loadgen only, the control port through the API
+# server's proxy only, loadgen's and the variant's egress, endpoints of a
+# terminating pod, namespace deletion). It proves the mechanics (pinned
+# images, kustomizations, metrics-server, stress-ng on and off, the
+# variant bundle, ek8s-system), not the full-size numbers: those need the workstation
 # (docs/STATUS.md, Parked). workflow_dispatch only works once this file is
 # on the default branch.
 on:
@@ -88,6 +90,8 @@ jobs:
             done
           k -n ek8s-v999999 logs deploy/hasher --tail=50 || true
           k get networkpolicies,limitranges,hpa -A || true
+          k -n ek8s-v999999 get endpointslices -o yaml || true
+          k -n ek8s-system get services,endpointslices -o wide || true
           k get events -A --sort-by=.lastTimestamp | tail -n 50 || true
       - name: Delete cluster
         if: always()

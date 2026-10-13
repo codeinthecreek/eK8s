@@ -148,6 +148,8 @@ func TestRenderShape(t *testing.T) {
 		"variant: ek8s-0123456789abcdef\n",
 		"image: ek8s-wrapper:0123456789ab\n",
 		"pod-security.kubernetes.io/enforce: restricted\n",
+		// loadgen's egress policy (deploy/ek8s-system) selects on it.
+		"ek8s.io/role: variant\n",
 	} {
 		if !strings.Contains(string(out), want) {
 			t.Errorf("bundle lacks %q", want)
