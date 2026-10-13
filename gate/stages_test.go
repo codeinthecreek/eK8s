@@ -300,6 +300,7 @@ func TestNewPodName(t *testing.T) {
 	const n = 2000
 	re := regexp.MustCompile(`^hasher-([456789bcdf]{1,10})-[bcdfghjklmnpqrstvwxz2456789]{5}$`)
 	ten := 0
+	suffixChars := map[byte]bool{}
 	for range n {
 		name := newPodName()
 		m := re.FindStringSubmatch(name)
@@ -309,6 +310,14 @@ func TestNewPodName(t *testing.T) {
 		if len(m[1]) == 10 {
 			ten++
 		}
+		for i := len(name) - 5; i < len(name); i++ {
+			suffixChars[name[i]] = true
+		}
+	}
+	// The suffix draws from the whole alphabet: 10000 draws miss one of
+	// 27 characters with probability under 1e-150.
+	if len(suffixChars) != len(podNameAlphabet) {
+		t.Errorf("suffixes use %d of %d alphabet characters", len(suffixChars), len(podNameAlphabet))
 	}
 	// ~767 expected per 1000; the bounds are over 7 standard deviations
 	// out, so the test does not flake.
