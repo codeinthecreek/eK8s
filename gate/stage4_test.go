@@ -21,7 +21,8 @@ import (
 )
 
 // TestStage4Failures: each mutant passes Stages 1-3 (it misbehaves only
-// under concurrency) and must fail exactly at failCheck. Skipped under
+// under concurrency) and must fail exactly at failCheck; a seed with an
+// empty failCheck must pass every stage. Skipped under
 // -race: the candidate's race build is a separate process either way,
 // and CI's plain go test step runs these.
 func TestStage4Failures(t *testing.T) {
@@ -61,6 +62,9 @@ func TestStage4Failures(t *testing.T) {
 		}()
 	}
 }`
+		// 400 under concurrency unless GOMAXPROCS is the gate's raceProcs,
+		// so the race boot's env must reach the candidate.
+		procsCheck   = "\n\t\tif s.concurrent.Load() && runtime.GOMAXPROCS(0) != max(runtime.NumCPU(), 4) {\n\t\t\twriteError(w, http.StatusBadRequest, \"unexpected GOMAXPROCS\")\n\t\t\treturn\n\t\t}"
 		hashRequired = "writeError(w, http.StatusBadRequest, \"hash is required\")\n\t\t\treturn\n\t\t}"
 		// 1ms instead of 500ms, so a request that finds every slot taken
 		// is shed for certain; Stage 2's one request at a time never is.
@@ -120,6 +124,16 @@ func TestStage4Failures(t *testing.T) {
 			{"tunables.go", "acquireWait = classifier.HangTimeout / 4", fastShed},
 			{"server.go", "writeError(w, http.StatusServiceUnavailable, \"overloaded, retry later\")", "writeError(w, http.StatusBadRequest, \"overloaded, retry later\")"},
 		}, "concurrency", "status 400, want 200"},
+		// Positive: the race boot's GOMAXPROCS reaches the candidate, so
+		// it behaves like gen 0. Deterministic only on hosts with fewer
+		// than 4 CPUs (CI's 2-CPU runners), where GOMAXPROCS differs from
+		// NumCPU only if the gate sets it; a no-op on 4 or more CPUs.
+		{"race boot sets GOMAXPROCS", []edit1{
+			{"server.go", "\"strconv\"", "\"strconv\"\n\t\"sync/atomic\""},
+			{"server.go", slotsLine, slotsLine + "\n\tinflight atomic.Int64\n\tconcurrent atomic.Bool"},
+			{"server.go", hashEntry, hashEntry + concurrent + procsCheck},
+			{"server.go", verifyEntry, verifyEntry + concurrent + procsCheck},
+		}, "", ""},
 		{"bare 503", []edit1{
 			{"tunables.go", "acquireWait = classifier.HangTimeout / 4", fastShed},
 			{"server.go", "w.Header().Set(\"Retry-After\", strconv.Itoa(retryAfterSeconds))", "_ = strconv.Itoa(retryAfterSeconds)"},
@@ -132,6 +146,12 @@ func TestStage4Failures(t *testing.T) {
 				edit(t, dir, e.file, replace(e.old, e.new))
 			}
 			rep := run(t, dir)
+			if tt.failCheck == "" {
+				if !rep.Passed() {
+					t.Fatalf("failed: %+v", rep.Results)
+				}
+				return
+			}
 			if rep.Passed() || len(rep.Results) == 0 {
 				t.Fatalf("passed: %+v", rep.Results)
 			}

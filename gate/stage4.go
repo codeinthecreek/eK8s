@@ -224,13 +224,14 @@ func runStage4(ctx context.Context, r *Report, tc toolchain, tree, repo, work, r
 	if err := os.Mkdir(dir, 0o700); err != nil {
 		return false, err
 	}
+	env := raceEnv()
 	probe := filepath.Join(dir, "probe")
 	if ok, out, err := goBuild(ctx, tc, repo, probePkg, probe, true); err != nil {
 		return false, fmt.Errorf("race build %s: %w", probePkg, err)
 	} else if !ok {
 		return false, fmt.Errorf("race build %s (needs gcc and a static libc): %s", probePkg, out)
 	}
-	if err := preflight(ctx, probe, relay, dir, raceEnv()...); err != nil {
+	if err := preflight(ctx, probe, relay, dir, env...); err != nil {
 		return false, fmt.Errorf("race %w", err)
 	}
 
@@ -243,7 +244,7 @@ func runStage4(ctx context.Context, r *Report, tc toolchain, tree, repo, work, r
 		return false, nil
 	}
 	label := newLabel()
-	sb, problem, err := bootBare(ctx, "candidate", service, relay, dir, label, raceEnv()...)
+	sb, problem, err := bootBare(ctx, "candidate", service, relay, dir, label, env...)
 	if err != nil {
 		return false, err
 	}
