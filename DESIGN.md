@@ -688,9 +688,10 @@ selects anything. Telemetry is attributed by namespace.
 
 **Variant pods have no egress.** A per-namespace NetworkPolicy denies all
 egress and admits ingress only on TCP 8080 from loadgen's pods in
-`ek8s-system` (kind's built-in kindnet enforces NetworkPolicy; that it
-enforces egress is proven by the variant smoke test in deploy/ PR (2), and
-is not verified before then). A wrapper
+`ek8s-system` (kind's built-in kindnet enforces NetworkPolicy, egress
+included: deploy/variant-smoke.sh, run in CI, fails unless a pod in a
+variant namespace is refused an external address, the API server's
+ClusterIP and the node address it serves on). A wrapper
 can read files with `net/http` (section 7, Stage 1 known limit) but cannot
 send them anywhere.
 
