@@ -1,0 +1,24 @@
+# Identical resources for every variant container (DESIGN.md sec 11):
+# Burstable, CPU 250m request / 1000m limit, memory 256Mi request = limit.
+# min and max bound any stated value to the same range, so a container
+# asking for more or less is rejected at admission.
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: variant-resources
+  namespace: {{.Namespace}}
+spec:
+  limits:
+  - type: Container
+    defaultRequest:
+      cpu: 250m
+      memory: 256Mi
+    default:
+      cpu: 1000m
+      memory: 256Mi
+    min:
+      cpu: 250m
+      memory: 256Mi
+    max:
+      cpu: 1000m
+      memory: 256Mi

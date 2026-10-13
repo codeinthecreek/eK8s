@@ -8,11 +8,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/codeinthecreek/eK8s/deploy/variant"
 	"github.com/codeinthecreek/eK8s/internal/classifier/testvectors"
 	"github.com/codeinthecreek/eK8s/internal/hashcore"
 )
@@ -259,19 +261,68 @@ func TestCheckVariant(t *testing.T) {
 		values []string
 		ok     bool
 	}{
-		{[]string{"gate-1"}, true},
+		{[]string{"ek8s-1"}, true},
 		{nil, false},
-		{[]string{"gate-2"}, false},
-		{[]string{"gate-1", "gate-1"}, false},
-		{[]string{"gate-1", "x"}, false},
+		{[]string{"ek8s-2"}, false},
+		{[]string{"ek8s-1", "ek8s-1"}, false},
+		{[]string{"ek8s-1", "x"}, false},
 	} {
 		h := http.Header{}
 		for _, v := range tt.values {
 			h.Add(variantHeader, v)
 		}
-		if got := checkVariant(h, "gate-1") == ""; got != tt.ok {
+		if got := checkVariant(h, "ek8s-1") == ""; got != tt.ok {
 			t.Errorf("%q: ok=%v, want %v", tt.values, got, tt.ok)
 		}
+	}
+}
+
+// TestNewLabelShape: the gate's label is one the variant bundle accepts,
+// so gate and cluster labels share one shape (DESIGN.md sec 5).
+func TestNewLabelShape(t *testing.T) {
+	a, b := newLabel(), newLabel()
+	if a == b {
+		t.Errorf("two labels are equal: %q", a)
+	}
+	for _, l := range []string{a, b} {
+		p := variant.Params{ID: "1", Label: l, Image: "ek8s-wrapper:0123456789ab"}
+		if err := p.Validate(); err != nil {
+			t.Errorf("newLabel() = %q: %v", l, err)
+		}
+	}
+}
+
+// TestNewPodName: the hostname has a Deployment pod's shape. The hash
+// part is a uint32's decimal digits through SafeEncodeString, which maps
+// '0'..'9' (bytes 48..57, mod 27) to "456789bcdf"; its length follows a
+// uint32's digit count: 10 with probability (2^32 - 10^9) / 2^32 ~ 0.767.
+func TestNewPodName(t *testing.T) {
+	const n = 2000
+	re := regexp.MustCompile(`^hasher-([456789bcdf]{1,10})-[bcdfghjklmnpqrstvwxz2456789]{5}$`)
+	ten := 0
+	suffixChars := map[byte]bool{}
+	for range n {
+		name := newPodName()
+		m := re.FindStringSubmatch(name)
+		if m == nil {
+			t.Fatalf("newPodName() = %q", name)
+		}
+		if len(m[1]) == 10 {
+			ten++
+		}
+		for i := len(name) - 5; i < len(name); i++ {
+			suffixChars[name[i]] = true
+		}
+	}
+	// The suffix draws from the whole alphabet: 10000 draws miss one of
+	// 27 characters with probability under 1e-150.
+	if len(suffixChars) != len(podNameAlphabet) {
+		t.Errorf("suffixes use %d of %d alphabet characters", len(suffixChars), len(podNameAlphabet))
+	}
+	// ~767 expected per 1000; the bounds are over 7 standard deviations
+	// out, so the test does not flake.
+	if ten < n*690/1000 || ten > n*840/1000 {
+		t.Errorf("%d of %d hash parts have 10 characters, want ~76.7%%", ten, n)
 	}
 }
 

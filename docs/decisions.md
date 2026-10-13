@@ -463,13 +463,48 @@
 - Reason: a change to another workflow says nothing about Go code; ci.yml still re-runs when ci.yml itself changes, and weekly and by hand as before.
 - Reverse: restore '.github/workflows/**' in both paths lists of .github/workflows/ci.yml.
 
-## 2026-10-13 · PR #27 (inferred) · Stage 4 race boot: GOMAXPROCS = max(NumCPU, 4) via bwrap --setenv (amends the PR #25 Stage 4 load entry; answer packet O2)
+## 2026-10-13 · PR #27 · Stage 4 race boot: GOMAXPROCS = max(NumCPU, 4) via bwrap --setenv (amends the PR #25 Stage 4 load entry; answer packet O2)
 - Rejected: O1 HTTP keep-alives (the answer packet's measurements did not show them closing the miss); O3 re-seeding the racy tests (it hides in-slot races instead of catching them); O4 more load; O5 accepting the flake.
 - Reason: on a 2-CPU host gen 0 had 2 slots, so the seeded in-slot races needed two holders at once and were missed (CI run 38318638860). N is unchanged (2 x NumCPU in [8, 64]), still at least twice gen 0's slots up to 32 CPUs: 1-4 CPUs give N 8 and 4 slots, 8 CPUs N 16 and 8 slots. The probe gets the same env.
 - Reverse: drop GOMAXPROCS from raceEnv in gate/stage4.go; DESIGN.md sec 7 Stage 4 edit.
 
-## 2026-10-13 · PR #27 (inferred) · Known gap: in-slot races need concurrent holders
+## 2026-10-13 · PR #27 · Known gap: in-slot races need concurrent holders
 - Decision: (a) the race detector orders every operation on a chan struct{} semaphore through one sync object, so one holder's release happens-before the next's acquire and an in-slot race is seen only between holders running at once; (b) a wrapper whose capacity is not derived from GOMAXPROCS (e.g. memory-limit sizing, 0 in the bare boot today) can still have 1 slot in the gate; (c) mitigated, not closed, by the GOMAXPROCS floor above.
 - Rejected: changing gen 0 to chan byte (per-slot sync objects).
 - Reason: mutants control the wrapper, so gen 0's semaphore type binds nothing.
 - Reverse: n/a (a limit); revisit with the EK8S_*_LIMIT bare-boot item (docs/STATUS.md Parked).
+
+## 2026-10-13 · PR #28 · Variant bundle: go:embed templates rendered by package deploy/variant, values checked against fixed shapes
+- Decision: six *.yaml.tmpl in file-name order, text/template with missingkey=error; id canonical decimal (no leading zeros, at most 18 digits, so 7 and 07 cannot name two namespaces), label ^ek8s-[0-9a-f]{16}$, image ^ek8s-wrapper:[0-9a-f]{12}$; golden files; a CLI (cmd/render) for CI and hand runs.
+- Rejected: kustomize overlays (need a per-variant directory or kubectl edits at run time); escaping values instead of rejecting them.
+- Reason: Stage 5 and the orchestrator get one stdlib entry point; a value of a fixed shape cannot add YAML structure.
+- Reverse: delete deploy/variant/ and apply hand-written manifests.
+
+## 2026-10-13 · PR #28 · Variant pod spec details (design packet Q4)
+- Decision: pod label variant=<label> read into EK8S_VARIANT by fieldRef; EK8S_CPU_LIMIT_MILLIS / EK8S_MEM_LIMIT_BYTES by resourceFieldRef (divisor 1m / 1); resources only from the LimitRange (min/max bound stated values); readiness /readyz every 2s (timeout 1s, 2 failures), liveness /healthz (cmd/service, not the genome) every 10s (timeout 5s, 3 failures); Service port 8080.
+- Rejected: resources in the Deployment too (two places to keep equal); liveness on /readyz (a shedding wrapper would be restarted).
+- Reason: readiness reacts within ~4s, under cmd/service's 5s drain; liveness tolerates a slow /healthz under a 1-CPU limit with hashes in flight. All starting values (DESIGN.md sec 15).
+- Reverse: edit deploy/variant/40-deployment.yaml.tmpl and 20-limitrange.yaml.tmpl, then go test -update.
+
+## 2026-10-13 · PR #28 · Variant smoke test: deploy/variant-smoke.sh in deploy.yml, curlimages/curl 8.22.0 by digest, positive controls
+- Decision: fixed id 999999; ek8s-system created (PSA restricted) if absent; (c) removes app=loadgen from (b)'s pod and allows 30s for the policy to follow; curl pods run as 65532 with sleep and kubectl exec; a refusal is curl exit 7 or 28 only, and every egress target (1.1.1.1:80, the kubernetes ClusterIP:443, its endpoint) is first reached from ek8s-system; the image is curlimages/curl 8.22.0 (the curl project's own image, newest tag, published 2026-09-02) by its linux/amd64 manifest digest sha256:43366cd60f226c7655181a0f7e85c468a41d182fdd2dc2c1c3b872a2b9d05d7a (index sha256:58adaa4e...; both read from Docker Hub's registry API), kind-loaded as ek8s-curl:43366cd60f22.
+- Rejected: the multi-arch index digest (owner review: kind load of a partly pulled index can fail; stress-ng's pin is an OCI index and has loaded fine so far); busybox wget (no exit code that tells a refusal from an HTTP error); targets by DNS name (DNS egress is denied too, so a failed lookup proves nothing).
+- Reason: each check fails the job unless its claim holds, and the controls keep a broken network from passing as "denied".
+- Reverse: drop the variant-smoke.sh step from deploy.yml.
+
+## 2026-10-13 · PR #28 · Variant smoke runs in deploy.yml on pull requests, not a workflow_dispatch-only workflow (amends design packet Q8 B)
+- Rejected: Q8 B's separate dispatch-only workflow (as STATUS.md Next had it).
+- Reason: the owner's PR (2) task prompt put it in deploy.yml; the cluster is already up there, and the check that proves egress denial reruns on every change that could break it (deploy/**, cmd/service/**, internal/wrapper/**, deploy.yml).
+- Reverse: move the variant-smoke.sh step to a workflow with only workflow_dispatch.
+
+## 2026-10-13 · PR #28 · kindnet enforces egress: Q5's open condition met (DESIGN.md sec 11)
+- Decision: treat egress denial as verified; DESIGN.md sec 11 says so. Evidence: deploy smoke run 38356331140, check (d): 1.1.1.1:80, 10.96.0.1:443 (API ClusterIP) and 172.18.0.2:6443 (node, API endpoint) each answered from ek8s-system and were refused from ek8s-v999999, each after the full 5s curl timeout (the ok lines are 5.3s apart), so packets were dropped.
+- Rejected: Calico/Cilium (not needed now).
+- Reason: the PR #26 Q5 entry made this run the proof; the smoke step keeps proving it on every deploy/ change.
+- Reverse: n/a (a finding); if a later kind release stops enforcing egress, the smoke run fails and Q5 reopens.
+
+## 2026-10-13 · PR #28 · Pod names: the gate draws hasher-<hash>-<5> as Kubernetes does; smoke check (a) accepts a 1-10 character hash
+- Decision: newPodName's middle part is a random uint32's decimal digits through SafeEncodeString (k8s.io/apimachinery/pkg/util/rand alphanums, checked against its source; ComputeHash in pkg/controller), the suffix 5 uniform characters (rejection sampling, as rand.String is uniform).
+- Rejected: a fixed 10 characters (a Deployment pod's hash is 10 characters for only ~77% of templates, so a short hostname proved "cluster", and check (a) would fail ~23% of runs).
+- Reason: closes the pod-name tell instead of parking it (owner review).
+- Reverse: restore the 15-byte draw in gate/boot.go newPodName; {1,10} -> {10} in variant-smoke.sh.

@@ -1,0 +1,83 @@
+# The variant's pods. No replicas field: the HPA owns the count, and an
+# apply never resets it (creation starts at 1 = minReplicas). Named hasher
+# so pod names have the gate sandbox's hostname shape, hasher-<hash>-<5>
+# (the hash is 10 characters for most templates, fewer for some).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hasher
+  namespace: {{.Namespace}}
+  labels:
+    app: hasher
+    role: hasher
+spec:
+  selector:
+    matchLabels:
+      app: hasher
+  template:
+    metadata:
+      labels:
+        app: hasher
+        role: hasher # inventory only; selects nothing (DESIGN.md sec 11)
+        variant: {{.Label}}
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      # cmd/service: 5s readiness drain + 20s shutdown, under this.
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: hasher
+        # Built and kind-loaded by the orchestrator (gate Stage 1's image);
+        # the node never pulls.
+        image: {{.Image}}
+        imagePullPolicy: Never
+        ports:
+        - name: http
+          containerPort: 8080
+          protocol: TCP
+        # Downward API only (DESIGN.md sec 5). Resources come from the
+        # LimitRange; the limits read here are the ones it set.
+        env:
+        - name: EK8S_VARIANT
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.labels['variant']
+        - name: EK8S_CPU_LIMIT_MILLIS
+          valueFrom:
+            resourceFieldRef:
+              containerName: hasher
+              resource: limits.cpu
+              divisor: 1m
+        - name: EK8S_MEM_LIMIT_BYTES
+          valueFrom:
+            resourceFieldRef:
+              containerName: hasher
+              resource: limits.memory
+              divisor: "1"
+        # /readyz is the wrapper's (evolvable); /healthz is cmd/service's
+        # (fixed), so liveness does not depend on the genome.
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: http
+          periodSeconds: 2
+          timeoutSeconds: 1
+          failureThreshold: 2
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: http
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: [ALL]

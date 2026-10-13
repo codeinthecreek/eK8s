@@ -1,14 +1,19 @@
 name: deploy smoke
 
-# Brings up the kind cluster at CI size and runs deploy/smoke.sh. It proves
-# the mechanics (pinned images, kustomizations, metrics-server, stress-ng on
-# and off), not the full-size numbers: those need the workstation
+# Brings up the kind cluster at CI size and runs deploy/smoke.sh, then
+# deploy/variant-smoke.sh (one variant bundle: readiness, ingress from
+# loadgen only, no egress, namespace deletion). It proves the mechanics
+# (pinned images, kustomizations, metrics-server, stress-ng on and off, the
+# variant bundle), not the full-size numbers: those need the workstation
 # (docs/STATUS.md, Parked). workflow_dispatch only works once this file is
 # on the default branch.
 on:
   pull_request:
     paths:
       - 'deploy/**'
+      # variant-smoke.sh deploys generation 0's image built from these.
+      - 'cmd/service/**'
+      - 'internal/wrapper/**'
       - '.github/workflows/deploy.yml'
   workflow_dispatch:
 
@@ -41,6 +46,11 @@ jobs:
             echo "::error::/sys/fs/cgroup is $fs, not cgroup2fs: the kind v1.37.0 node needs cgroup v2"
             exit 1
           fi
+      # variant-smoke.sh builds generation 0's image and runs the renderer.
+      # Same pin as ci.yml (see the comment there).
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.26.9'
       - name: Install kind and kubectl (checksum-verified)
         run: |
           curl -fsSLo kind "https://github.com/kubernetes-sigs/kind/releases/download/${KIND_VERSION}/kind-linux-amd64"
@@ -53,6 +63,7 @@ jobs:
           kubectl version --client
       - run: deploy/up.sh
       - run: deploy/smoke.sh
+      - run: deploy/variant-smoke.sh
       - name: Dump cluster state
         if: failure()
         run: |
@@ -60,7 +71,7 @@ jobs:
           k get pods -A -o wide || true
           k describe node || true
           # Every pod in the namespaces this PR deploys into, with events.
-          for ns in ek8s-stress kube-system; do
+          for ns in ek8s-stress kube-system ek8s-system ek8s-v999999; do
             echo "=== pods in $ns"
             k -n "$ns" describe pods || true
           done
@@ -69,12 +80,14 @@ jobs:
           k get pods -A --no-headers \
             -o jsonpath='{range .items[*]}{.metadata.namespace}{" "}{.metadata.name}{" "}{.status.containerStatuses[*].ready}{"\n"}{end}' 2>/dev/null |
             while read -r ns name ready; do
-              case "$ns" in ek8s-stress|kube-system) continue ;; esac
+              case "$ns" in ek8s-stress|kube-system|ek8s-system|ek8s-v999999) continue ;; esac
               if [ -z "$ready" ] || [[ " $ready " == *" false "* ]]; then
                 echo "--- $ns/$name (ready: ${ready:-none})"
                 k -n "$ns" describe pod "$name" || true
               fi
             done
+          k -n ek8s-v999999 logs deploy/hasher --tail=50 || true
+          k get networkpolicies,limitranges,hpa -A || true
           k get events -A --sort-by=.lastTimestamp | tail -n 50 || true
       - name: Delete cluster
         if: always()

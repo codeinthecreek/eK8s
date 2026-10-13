@@ -11,13 +11,11 @@ metrics-server/       metrics-server v0.9.0, vendored, + --kubelet-insecure-tls
 stress/               namespace ek8s-stress: stress-ng Deployment (0 replicas),
                       its dose ConfigMap, a deny-all NetworkPolicy
 stress-ci/            overlay of stress/ at CI size (500m / 512Mi, 1 CPU worker)
+variant/              the per-variant bundle: templates + Go renderer
 up.sh                 create the cluster (if absent) and apply the above
 smoke.sh              infra smoke test (run after up.sh)
+variant-smoke.sh      variant bundle smoke test (run after up.sh)
 ```
-
-The per-variant bundle (namespace `ek8s-v<id>`, LimitRange, Deployment
-`hasher`, Service, HPA, NetworkPolicy) comes in a later PR, rendered by
-Go from templates and applied by gate Stage 5.
 
 ## Cluster
 
@@ -138,15 +136,56 @@ Paths are relative to deploy/. The reserved value must equal the kind
 config's kubeReserved + systemReserved CPU; the stress minimum must sit
 below the stress-ng CPU limit (3 CPU full size, 500m CI size).
 
-CI (`.github/workflows/deploy.yml`) runs up.sh then smoke.sh at CI size on
+CI (`.github/workflows/deploy.yml`) runs up.sh, smoke.sh and
+variant-smoke.sh at CI size on
 every pull request touching deploy/ or the workflow; the repo is private, so
 its ubuntu-latest runner has 2 CPU / 8 GB, too small for the full-size
 reservation and stress dose. On failure it dumps `kubectl get pods -A`,
 `kubectl describe node` and the failing pods' events. It proves the
 mechanics (pinned images, kustomizations, PSA, metrics-server, stress-ng on
-and off), not the full-size numbers; those need a workstation run.
+and off, the variant bundle), not the full-size numbers; those need a workstation run.
 `workflow_dispatch` (manual runs) works only once the workflow is on the
 default branch.
+
+## Variant bundle
+
+Each variant lives in its own namespace, `ek8s-v<id>` (DESIGN.md sec 11),
+rendered from `variant/*.yaml.tmpl` by package `deploy/variant` and
+applied by gate Stage 5 (not yet built):
+
+| Object | What it holds |
+|--------|---------------|
+| Namespace `ek8s-v<id>` | Pod Security `restricted` |
+| LimitRange | every container: CPU 250m request / 1000m limit, memory 256Mi request = limit |
+| NetworkPolicy | all pods: no egress; ingress TCP 8080 only from `ek8s-system` pods labelled `app=loadgen` |
+| Deployment `hasher` | the candidate image (`imagePullPolicy: Never`), no `replicas` field (the HPA owns it), env from the downward API, readiness `/readyz`, liveness `/healthz`, 30s grace, restricted securityContext, no service account token |
+| Service `hasher` | port 8080: `hasher.ek8s-v<id>.svc.cluster.local:8080` |
+| HPA `hasher` | 1-2 pods at 70% of the CPU request |
+
+The renderer takes only a decimal id, a label `ek8s-<16 hex>` (random per
+deployment, DESIGN.md sec 5) and an image `ek8s-wrapper:<12 hex>` (the
+gate's tag), and rejects anything else. By hand:
+
+```
+go run ./deploy/variant/cmd/render -id 1 -label ek8s-0123456789abcdef \
+  -image ek8s-wrapper:0123456789ab | kubectl --context kind-ek8s apply -f -
+kubectl --context kind-ek8s delete namespace ek8s-v1   # removes it all
+```
+
+After a template change, `go test ./deploy/variant -update` rewrites the
+golden files; review their diff.
+
+`variant-smoke.sh` builds generation 0's image, kind-loads it and a curl
+image (`curlimages/curl` 8.22.0 by its linux/amd64 digest), applies one bundle (id
+999999) and checks: the pod is Ready with the LimitRange's resources and
+its env; a pod in `ek8s-system` labelled `app=loadgen` gets `/healthz`
+and a `/hash` 200 through the Service; the same pod with the label
+removed is refused;
+a pod in the variant namespace reaches neither an external address nor
+the API server (each first shown reachable from `ek8s-system`); and
+deleting the namespace removes everything. It creates `ek8s-system`
+(PSA restricted) if absent and removes what it created on success; on failure it leaves both
+namespaces for inspection. CI runs it after smoke.sh.
 
 ## stress-ng
 
