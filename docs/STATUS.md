@@ -4,7 +4,6 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 *(inferred)* are guesses, not read from the repo; correct them.
 
 ## Now
-- `claude/classifier-negatives` (PR #30 *(inferred)*): internal/classifier gains Kind Negative (contract negatives; `negative_accepted`), `Run.Reserve` (ErrNotCanonical on an unparseable hash), `Integrity(reason)` (the DESIGN.md sec 9 list) and the Observation.Body/Err caller contract (a cut-short body is a transport error, never malformed_body); integrity reasons now win over the hang-timeout (DESIGN.md sec 8, amends PR #15); the Run doc comment now starts the Run at the Stage 5 burst; testvectors doc comments say gate-only.
 
 ## Next
 - deploy ek8s-system PR: namespace, loadgen Deployment shell (750m/256Mi Guaranteed, control Service), readiness-probe values, namespace label.
@@ -23,6 +22,7 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 - CI: unpin go-version 1.26.9 back to '1.26.x' in ci.yml and deploy.yml once actions/go-versions' manifest lists >= 1.26.9 (docs/decisions.md, PR #18 entry).
 
 ## Recent
+- #30 internal/classifier contract negatives: Kind Negative (`negative_accepted`), `Run.Reserve` (ErrNotCanonical on an unparseable hash), `Integrity(reason)` (the DESIGN.md sec 9 list) and the Observation.Body/Err caller contract; integrity reasons win over the hang-timeout (DESIGN.md sec 8, amends PR #15); the Run starts at the Stage 5 burst; testvectors doc comments say gate-only (2026-10-13)
 - #29 Loadgen design packet recorded (docs-only, owner-approved): DESIGN.md sec 5, 7, 8, 9, 10, 11, 15 and eleven decisions.md entries (Q1-Q8, O1, O2, O5); the deploy PR carries the readiness-probe values (Q7) and the ek8s.io/role: variant namespace label (O5) (2026-10-13)
 - #28 deploy/ PR (2) of 2, the per-variant bundle: deploy/variant/*.yaml.tmpl (Namespace PSA restricted, LimitRange 250m/1000m CPU and 256Mi, NetworkPolicy deny egress + ingress 8080 from ek8s-system app=loadgen, Deployment hasher, Service, HPA 1-2 at 70%) rendered by package deploy/variant (shape checks, golden files, cmd/render); gate label prefix gate- -> ek8s- and pod names drawn as Kubernetes does; deploy/variant-smoke.sh in deploy.yml proves egress denial (deploy smoke run 38356331140: 1.1.1.1:80, the API server ClusterIP and the node address refused); DESIGN.md sec 11 egress sentence updated (2026-10-13)
 - #27 Gate fix for the Stage 4 seed flake (answer packet O2): the race boot sets GOMAXPROCS = max(NumCPU, 4) via bwrap --setenv, N unchanged; a positive Stage 4 seed guards the env wiring; DESIGN.md sec 7 Stage 4 Mechanics; decisions entries (O2, known gap: in-slot races need concurrent holders); the hash_cross-talk seed's residual 2-CPU miss Parked (2026-10-13)
