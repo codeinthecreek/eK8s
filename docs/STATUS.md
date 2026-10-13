@@ -4,7 +4,6 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 *(inferred)* are guesses, not read from the repo; correct them.
 
 ## Now
-- `claude/loadgen-design-decisions` (PR #29 *(inferred)*): docs-only, records the loadgen design packet (2026-10-13, owner-approved): DESIGN.md sec 5, 7, 8, 9, 10, 11, 15 and eleven decisions.md entries (Q1-Q8, O1, O2, O5). Nothing is built yet; the deploy PR carries the readiness-probe values (Q7) and the ek8s.io/role: variant namespace label (O5).
 
 ## Next
 - internal/classifier PR: contract negatives (`negative_accepted`), `Run.Reserve`, the Run starting at the Stage 5 burst, the integrity-failure classes (DESIGN.md sec 8, 9); correct the internal/classifier/testvectors doc comments ("shared", "used by gate and loadgen") to gate-only.
@@ -24,6 +23,7 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 - CI: unpin go-version 1.26.9 back to '1.26.x' in ci.yml and deploy.yml once actions/go-versions' manifest lists >= 1.26.9 (docs/decisions.md, PR #18 entry).
 
 ## Recent
+- #29 Loadgen design packet recorded (docs-only, owner-approved): DESIGN.md sec 5, 7, 8, 9, 10, 11, 15 and eleven decisions.md entries (Q1-Q8, O1, O2, O5); the deploy PR carries the readiness-probe values (Q7) and the ek8s.io/role: variant namespace label (O5) (2026-10-13)
 - #28 deploy/ PR (2) of 2, the per-variant bundle: deploy/variant/*.yaml.tmpl (Namespace PSA restricted, LimitRange 250m/1000m CPU and 256Mi, NetworkPolicy deny egress + ingress 8080 from ek8s-system app=loadgen, Deployment hasher, Service, HPA 1-2 at 70%) rendered by package deploy/variant (shape checks, golden files, cmd/render); gate label prefix gate- -> ek8s- and pod names drawn as Kubernetes does; deploy/variant-smoke.sh in deploy.yml proves egress denial (deploy smoke run 38356331140: 1.1.1.1:80, the API server ClusterIP and the node address refused); DESIGN.md sec 11 egress sentence updated (2026-10-13)
 - #27 Gate fix for the Stage 4 seed flake (answer packet O2): the race boot sets GOMAXPROCS = max(NumCPU, 4) via bwrap --setenv, N unchanged; a positive Stage 4 seed guards the env wiring; DESIGN.md sec 7 Stage 4 Mechanics; decisions entries (O2, known gap: in-slot races need concurrent holders); the hash_cross-talk seed's residual 2-CPU miss Parked (2026-10-13)
 - #26 deploy/ PR (1) of 2, cluster infra: kind config (kind v0.33.0, node v1.37.0 by digest, 1 CPU / 2Gi reserved), metrics-server v0.9.0 vendored, stress-ng by digest (0 <-> 1 replicas, dose ConfigMap), up.sh, smoke.sh, deploy/README host setup; DESIGN.md sec 5, 7, 10, 11 edits; CI-size kind smoke workflow (deploy.yml), merge gate run 38318638954; ci.yml path filter narrowed to its own file (2026-10-13)

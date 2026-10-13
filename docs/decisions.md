@@ -509,65 +509,65 @@
 - Reason: closes the pod-name tell instead of parking it (owner review).
 - Reverse: restore the 15-byte draw in gate/boot.go newPodName; {1,10} -> {10} in variant-smoke.sh.
 
-## 2026-10-13 · PR #29 (inferred) · Loadgen is one long-lived Deployment in ek8s-system; salts restored after a restart (design packet Q1 A+(i); DESIGN.md sec 10)
+## 2026-10-13 · PR #29 · Loadgen is one long-lived Deployment in ek8s-system; salts restored after a restart (design packet Q1 A+(i); DESIGN.md sec 10)
 - Decision: the orchestrator PUTs each live variant's salts back on a new boot_id (window excluded for all variants; sends to a variant blocked until restored); loadgen also journals salts to an emptyDir.
 - Rejected: a Job per observation window (Run state persisted and restored every window, scheduling jitter at window start, two pods' requests at once during a burst); per-variant loadgen pods (4-5 Guaranteed pods do not fit the sec 2 budget, no pair sharing).
 - Reason: a restart would empty every Run, so a mutant could replay hashes from before it; the journal covers a container restart, the PUT a pod recreation.
 - Reverse: DESIGN.md sec 10 edit; drop the control API's restore call.
 
-## 2026-10-13 · PR #29 (inferred) · A variant's classifier Run starts at its Stage 5 burst, not at promotion (design packet O2; amends the PR #15 salt-reuse entry; DESIGN.md sec 7, sec 8)
+## 2026-10-13 · PR #29 · A variant's classifier Run starts at its Stage 5 burst, not at promotion (design packet O2; amends the PR #15 salt-reuse entry; DESIGN.md sec 7, sec 8)
 - Rejected: the PR #15 entry's "Stage 5's burst uses its own Run" (a mutant could replay a burst hash once live).
 - Reason: the burst is the variant's first traffic, so salts from it must count; the Run continues through promotion to cull.
 - Reverse: DESIGN.md sec 8 edit; start a separate Run at promotion.
 
-## 2026-10-13 · PR #29 (inferred) · Loadgen control API: separate port, ClusterIP Service, reached via the API-server service proxy; no API credentials (design packet Q2 A; DESIGN.md sec 10)
+## 2026-10-13 · PR #29 · Loadgen control API: separate port, ClusterIP Service, reached via the API-server service proxy; no API credentials (design packet Q2 A; DESIGN.md sec 10)
 - Decision: owner approves this new in-cluster listener (CLAUDE.md: ask before exposing network services). Records carry wall-clock time (phase attribution) and monotonic time (lag, latency).
 - Rejected: kubectl exec subcommands (exec streams need their own framing and reconnects); a ConfigMap/CR plus pod logs (loadgen needs a token and watch RBAC; log rotation and restarts lose records silently); kubectl port-forward (host listener, SPDY tunnel drops under load); a host port (sec 10: none published); a ServiceAccount for loadgen.
 - Reason: the gate and orchestrator stay on the host and already reach the cluster through the API server.
 - Reverse: DESIGN.md sec 10 edit.
 
-## 2026-10-13 · PR #29 (inferred) · Loadgen sizing: Guaranteed 750m / 256Mi, shared pool (design packet Q3 A; DESIGN.md sec 10)
+## 2026-10-13 · PR #29 · Loadgen sizing: Guaranteed 750m / 256Mi, shared pool (design packet Q3 A; DESIGN.md sec 10)
 - Decision: Argon2 FullVerify runs off the send path, token-bucket capped; the static CPU manager only if the workstation run excludes more than about 5% of halves for lag.
 - Rejected: the static CPU manager up front.
 - Reason: about 0.95 CPU of requests is left after control plane, metrics-server, stress-ng 3 and 8 variant pods at 250m (estimate; the workstation run measures it). The static CPU manager also makes stress-ng's integer 3 CPUs exclusive, so it would stop time-sharing with variants unless moved to 2900m (reopens the PR #26 Q7 entry), and 1 more exclusive CPU exceeds 7 allocatable.
 - Reverse: DESIGN.md sec 10 edit; edit the loadgen Deployment's resources.
 
-## 2026-10-13 · PR #29 (inferred) · Global exclusion on loadgen lag (design packet Q4 A; DESIGN.md sec 10, sec 11, sec 15)
+## 2026-10-13 · PR #29 · Global exclusion on loadgen lag (design packet Q4 A; DESIGN.md sec 10, sec 11, sec 15)
 - Decision: a half is excluded for all variants on lag p99 > 10 ms, any lag > 100 ms, a skipped send or a ring gap (starting guesses); after 3 consecutive excluded halves the orchestrator flags and halts.
 - Rejected: CFS throttling as a trigger (a diagnostic only: throttling that delays no send is harmless); per-variant exclusion (breaks probation's same-window comparison, sec 11); measuring latency from intended send time (charges loadgen's own stalls to the variant).
 - Reason: loadgen is one shared process, so a stall hits every stream equally.
 - Reverse: DESIGN.md sec 10 edit; change the thresholds in the orchestrator.
 
-## 2026-10-13 · PR #29 (inferred) · Loadgen draws every verify pair fresh; the pool is gate-only; contract negatives are in live traffic (design packet Q5 C; DESIGN.md sec 5, 7, 8, 10)
+## 2026-10-13 · PR #29 · Loadgen draws every verify pair fresh; the pool is gate-only; contract negatives are in live traffic (design packet Q5 C; DESIGN.md sec 5, 7, 8, 10)
 - Decision: match = hashcore.Hash of a fresh password (each pair once per variant); mismatch = random canonical PHC at exact params + fresh password; Run.Reserve on every hash sent to /verify; /hash passwords crypto/rand, 1-1024 bytes; mix 50/48/2; negatives (both classes) in sustained traffic and >= 5% of the burst.
 - Rejected: pool pairs in live traffic (memoizable, replayable); Stage 2 as the only negative check (a gate-detecting mutant fails open outside it); pairs from the variant's own /hash output (the STATUS Parked suggestion): the mutant produced h for p, so it can cache h -> p at hash time and answer without Argon2.
 - Reason: closes the Parked verify-caching, pool-replay and fail-open items. Negatives pass as 400 or graceful_shed, fail as negative_accepted on any 2xx, and are outside success_rate, p95 and cpu_per_success.
 - Reverse: DESIGN.md sec 5/7/8/10 edit; restore the pool import in loadgen.
 
-## 2026-10-13 · PR #29 (inferred) · The first confirmed integrity failure disqualifies a variant (design packet Q6 A; DESIGN.md sec 9, sec 11)
+## 2026-10-13 · PR #29 · The first confirmed integrity failure disqualifies a variant (design packet Q6 A; DESIGN.md sec 9, sec 11)
 - Decision: re-checked on the host with hashcore; cull at once, never a parent; malformed_body counts only when the body was read to a clean EOF.
 - Rejected: scoring an integrity failure as one failed request; a threshold of k failures or a rate (tolerates cheating at a low rate; no benign source to tolerate).
 - Reason: a mutant can relabel undelivered Argon2 output as later hashes; sampled FullVerify catches it rarely, so one catch is enough evidence.
 - Reverse: DESIGN.md sec 9 edit; fold the classes into `failed`.
 
-## 2026-10-13 · PR #29 (inferred) · Readiness probe timeoutSeconds 2, failureThreshold 3, period 2s; probe Events are diagnostics only (design packet Q7 B; amends the PR #28 pod-spec entry; DESIGN.md sec 11)
+## 2026-10-13 · PR #29 · Readiness probe timeoutSeconds 2, failureThreshold 3, period 2s; probe Events are diagnostics only (design packet Q7 B; amends the PR #28 pod-spec entry; DESIGN.md sec 11)
 - Decision: the template change lands in the deploy PR; probe Events never exclude a window. The PR #28 reason "readiness reacts within ~4s, under cmd/service's 5s drain" no longer holds: 3 x 2s is about 6s, past the drain. Caveat: removal of a terminating pod then relies on pod deletion dropping it from endpoints (Kubernetes behaviour, not yet checked; the deploy PR should check it).
 - Rejected: exclusion on probe-timeout Events (gameable: /readyz is evolvable, so a genome could turn bad windows into excluded ones); readiness on /healthz (removes the genome's readiness lever); timeout 1s / threshold 2.
 - Reason: under stress-ng and a 1000m CFS quota a healthy /readyz can exceed 1s, pulling a pod for reasons the genome does not control. Gen 0's /readyz is constant, so the workstation acceptance check is zero readiness failures for gen 0 at 4 x 2 pods, stress on, rate r, over >= 3 windows.
 - Reverse: edit 40-deployment.yaml.tmpl, then go test -update.
 
-## 2026-10-13 · PR #29 (inferred) · Stream rate r = 0.5 x C0, frozen per run (design packet Q8 A; DESIGN.md sec 9, sec 10)
+## 2026-10-13 · PR #29 · Stream rate r = 0.5 x C0, frozen per run (design packet Q8 A; DESIGN.md sec 9, sec 10)
 - Decision: C0 = highest rate at which gen 0 on a single pod (HPA min = max = 1, no stress) sheds <= 1% with p95 <= HangTimeout/4; a new r means a new run (one run = one comparability epoch; archived scores compare only within their run; a later run may seed from archived genomes, not their scores); provisional r from a workstation Argon2 benchmark; CI smoke r = 2.
 - Rejected: changing r within a run (fixed-bound scores are comparable only at one r, DESIGN.md sec 9).
 - Reason: the factor 0.5 and the shed/p95 bounds are starting guesses (sec 15); the workstation run measures C0.
 - Reverse: DESIGN.md sec 10 edit.
 
-## 2026-10-13 · PR #29 (inferred) · Loadgen disables HTTP keep-alives (design packet O1; DESIGN.md sec 10)
+## 2026-10-13 · PR #29 · Loadgen disables HTTP keep-alives (design packet O1; DESIGN.md sec 10)
 - Rejected: pooled keep-alive connections.
 - Reason: kube-proxy balances per connection, so keep-alive pins a stream to one replica and HPA's second pod and readiness changes act only on new connections.
 - Reverse: DESIGN.md sec 10 edit; drop DisableKeepAlives from loadgen's transport.
 
-## 2026-10-13 · PR #29 (inferred) · Variant namespaces get the label ek8s.io/role: variant (design packet O5; DESIGN.md sec 11)
+## 2026-10-13 · PR #29 · Variant namespaces get the label ek8s.io/role: variant (design packet O5; DESIGN.md sec 11)
 - Decision: lands in the deploy PR's namespace template; selects the class of variant namespaces without carrying the id.
 - Rejected: selecting by the ek8s-v name prefix.
 - Reason: a NetworkPolicy namespaceSelector matches labels, not name prefixes, so loadgen's egress policy needs a label to select variant namespaces.
