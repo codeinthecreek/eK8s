@@ -603,19 +603,19 @@
 - Reason: a shorter timeout turns a slow fail-open or faked result, one a real client waiting longer would receive, into a transport_error instead of an integrity failure (DESIGN.md sec 8 "Integrity reasons apply at any latency").
 - Reverse: DESIGN.md sec 10 edit.
 
-## 2026-10-13 · PR #31 (inferred) · loadgen ingress: no rule; the API server's proxy gets in through kindnet's root-socket bypass (design packet option A; DESIGN.md sec 11)
-- Decision: NetworkPolicy loadgen (app=loadgen): Ingress + Egress, no ingress rule. kindnet's kube-network-policies accepts traffic from root-owned node sockets ("meta skuid 0 accept") before any policy: the API server, kubelet, control plane and root hostNetwork pods, all able to exec into loadgen already. Only on loadgen's own node: holds because the cluster has one node. The control port is the only one because loadgen listens on no other. variant-smoke.sh (c) + (d) check it.
+## 2026-10-13 · PR #31 · loadgen ingress: no rule; the API server's proxy gets in through kindnet's root-socket bypass (design packet option A; DESIGN.md sec 11)
+- Decision: NetworkPolicy loadgen (app=loadgen): Ingress + Egress, no ingress rule. kindnet's kube-network-policies accepts traffic from root-owned node sockets ("meta skuid 0 accept") before any policy: the API server, kubelet, control plane and root hostNetwork pods, all able to exec into loadgen already. Only on loadgen's own node: holds because the cluster has one node. The control port is the only one because loadgen listens on no other. variant-smoke.sh (c) + (d) check it (deploy smoke run 38372577882).
 - Rejected: B an ipBlock of the node IP (rendered per cluster, changes nothing under kindnet, admits non-root host processes); C an app-layer token (guards against processes already trusted); D turning the bypass off (skipSkuidBypass is unexported; kindnet has no flag).
 - Reason: under kindnet no NetworkPolicy can tell the API server's proxy apart from other root traffic on the node.
 - Reverse: DESIGN.md sec 11 edit; add an ingress rule (B) or the token (C).
 
-## 2026-10-13 · PR #31 (inferred) · Known limit: kindnet's policy queue fails open (DESIGN.md sec 11)
-- Decision: recorded, not fixed. kindnetd sets dataplane FailOpen: true, so its nfqueue rules carry the bypass flag: if kindnet's userspace stops reading the queue, every NetworkPolicy fails open, variant egress denial included (cross-variant pair sharing relies on it). The orchestrator will exclude a half when the kindnet DaemonSet is not Ready (STATUS Next).
-- Rejected: changing it in kindnet (FailOpen is hard-coded in kindnetd's main.go); another CNI (out of scope for v1).
+## 2026-10-13 · PR #31 · Known limit: kindnet's policy queue fails open (DESIGN.md sec 11)
+- Decision: recorded, not fixed. kindnetd sets dataplane FailOpen: true, so its nfqueue rules carry the bypass flag: if kindnet's userspace stops reading the queue, every NetworkPolicy fails open, variant egress denial included (cross-variant pair sharing relies on it). Once per half loadgen attempts one connection its own policy must refuse (the API server's ClusterIP, 1s timeout); if it connects, the half is excluded: that canary decides. The orchestrator's kindnet DaemonSet Ready check is a cheap first look only (STATUS Next).
+- Rejected: changing it in kindnet (FailOpen is hard-coded in kindnetd's main.go); another CNI (out of scope for v1); DaemonSet Ready alone (a running but wedged kindnetd reads as Ready).
 - Reason: a fail-closed queue would also stop all pod traffic whenever kindnet restarts; the exclusion turns an unseen gap into a lost window.
-- Reverse: drop the readiness check if a fail-closed policy engine replaces kindnet's.
+- Reverse: drop the canary and the readiness check if a fail-closed policy engine replaces kindnet's.
 
-## 2026-10-13 · PR #31 (inferred) · ek8s-system smoke: variant-smoke.sh extended, stand-in from the pinned curl image (task prompt)
+## 2026-10-13 · PR #31 · ek8s-system smoke: variant-smoke.sh extended, stand-in from the pinned curl image (task prompt)
 - Decision: the stand-in is busybox nc (-lk -e sh) in curlimages/curl 8.22.0 answering HTTP 200 on 9090; the image has no busybox httpd. The old check "the same pod with app=loadgen removed is refused" becomes a second idle pod (smoke-other, same image and securityContext, no app=loadgen), which also serves as the unrestricted control now that app=loadgen pods have an egress policy.
 - Rejected: relabelling the stand-in (it would leave the Service and loadgen's policy mid-run); a new image or Go listener (owner: ask first).
 - Reason: one script reuses the variant the checks need; smoke-other differs from the stand-in by label and command only.

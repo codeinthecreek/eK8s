@@ -810,6 +810,33 @@ ClusterIP and the node address it serves on). A wrapper
 can read files with `net/http` (section 7, Stage 1 known limit) but cannot
 send them anywhere.
 
+**loadgen's pods take no ingress from any pod.** Their NetworkPolicy
+(deploy/ek8s-system) has no ingress rule, and allows egress only to TCP
+8080 in namespaces labelled `ek8s.io/role: variant` and DNS to kube-dns.
+The API server's service proxy still reaches the control port, because
+kindnet never applies policy to traffic from a root-owned socket on the
+node. No policy can single the proxy out, so control-port ingress is
+"node root processes only": the API server, the kubelet, the control plane
+and root hostNetwork pods, all of which can already exec into loadgen.
+The bypass covers only packets made on loadgen's own node, which holds
+because the cluster has one node. The control port is the only one
+reachable because loadgen listens on no other, not because of the policy.
+deploy/variant-smoke.sh, run in CI, fails unless the proxy reaches a
+stand-in on the control port, a variant pod and an `ek8s-system` pod
+without `app=loadgen` are refused there, and the stand-in reaches a
+variant by Service DNS but not an external address, an outside DNS server
+or the API server.
+
+**Known limit: kindnet's policy enforcement fails open.** kindnet runs
+its policy queue FailOpen: if kindnet's userspace stops reading the
+queue, packets pass unchecked, so every NetworkPolicy fails open. That
+includes variant egress denial, which cross-variant pair sharing relies
+on. So once per half loadgen attempts one connection its own policy must
+refuse (the API server's ClusterIP, 1s timeout); if it connects,
+enforcement is off and the half is excluded. The orchestrator also checks
+the kindnet DaemonSet is Ready, as a cheap first look; Ready alone does
+not show the queue is being read.
+
 **Stress state is owned by the orchestrator.** It scales the stress-ng
 Deployment on for each stress half and off for each baseline half, and on
 before calling gate Stage 5 (section 7), marking that window excluded from
@@ -827,9 +854,10 @@ behaviour is part of what is scored.
 timeout can flap a loaded variant out of its own Service; 3 failures at a
 2s period react in about 6s, past `cmd/service`'s 5s drain delay, so the
 probe no longer sees the drain's 503 in time to be what removes a
-terminating pod from rotation (that relies on the pod's deletion
-removing it from the Service's endpoints, which is Kubernetes behaviour
-not yet checked in the smoke tests).
+terminating pod from rotation. The pod's deletion does that instead:
+deploy/variant-smoke.sh, run in CI, fails unless a deleted pod's
+EndpointSlice entry turns `ready=false`, `terminating=true` within 2s
+while its sibling stays ready.
 
 **Readiness dodging punishes itself.** A variant that pulls all its pods
 from rotation empties its own Service, and its own traffic fails. Within
