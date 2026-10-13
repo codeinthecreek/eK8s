@@ -473,3 +473,9 @@
 - Rejected: changing gen 0 to chan byte (per-slot sync objects).
 - Reason: mutants control the wrapper, so gen 0's semaphore type binds nothing.
 - Reverse: n/a (a limit); revisit with the EK8S_*_LIMIT bare-boot item (docs/STATUS.md Parked).
+
+## 2026-10-13 · PR #28 (inferred) · Pod names: the gate draws hasher-<hash>-<5> as Kubernetes does; smoke check (a) accepts a 1-10 character hash
+- Decision: newPodName's middle part is a random uint32's decimal digits through SafeEncodeString (k8s.io/apimachinery/pkg/util/rand alphanums, checked against its source; ComputeHash in pkg/controller), the suffix 5 uniform characters (rejection sampling, as rand.String is uniform).
+- Rejected: a fixed 10 characters (a Deployment pod's hash is 10 characters for only ~77% of templates, so a short hostname proved "cluster", and check (a) would fail ~23% of runs).
+- Reason: closes the pod-name tell instead of parking it (owner review).
+- Reverse: restore the 15-byte draw in gate/boot.go newPodName; {1,10} -> {10} in variant-smoke.sh.

@@ -505,9 +505,9 @@ func TestCheckOutcomesListCap(t *testing.T) {
 // TestBwrapArgsEnv: Stage 4's env pairs become --setenv after
 // EK8S_VARIANT, and the binary is still the only thing bound.
 func TestBwrapArgsEnv(t *testing.T) {
-	args := strings.Join(bwrapArgs("/b", "gate-x", "h", raceEnv()...), " ")
+	args := strings.Join(bwrapArgs("/b", "ek8s-x", "h", raceEnv()...), " ")
 	procs := strconv.Itoa(raceProcs(runtime.NumCPU()))
-	if !strings.Contains(args, "--setenv EK8S_VARIANT gate-x --setenv GORACE "+goRace+" --setenv GOMAXPROCS "+procs+" --uid") {
+	if !strings.Contains(args, "--setenv EK8S_VARIANT ek8s-x --setenv GORACE "+goRace+" --setenv GOMAXPROCS "+procs+" --uid") {
 		t.Fatalf("argv %q", args)
 	}
 	if strings.Count(args, "-bind") != 1 {

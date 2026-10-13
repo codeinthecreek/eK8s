@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -15,6 +16,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -34,29 +36,44 @@ const (
 const sandboxUID = "65532"
 
 // newLabel returns a fresh per-run X-EK8s-Variant value, so a stale
-// listener cannot answer for the candidate (DESIGN.md sec 5).
+// listener cannot answer for the candidate. It has the cluster's shape,
+// ek8s-<16 hex> (deploy/variant), so the label is no gate tell
+// (DESIGN.md sec 5).
 func newLabel() string {
 	b := make([]byte, 8)
 	rand.Read(b) // never returns an error; crashes the program on failure
-	return "gate-" + hex.EncodeToString(b)
+	return "ek8s-" + hex.EncodeToString(b)
 }
 
-// podNameAlphabet is the alphabet Kubernetes uses for generated name
-// suffixes (no vowels, no 0/1/3).
+// podNameAlphabet is the alphabet Kubernetes uses for generated names
+// (k8s.io/apimachinery/pkg/util/rand alphanums: no vowels, no 0/1/3).
 const podNameAlphabet = "bcdfghjklmnpqrstvwxz2456789"
 
 // newPodName returns a fresh Deployment-pod-like hostname,
-// hasher-<10>-<5>, for the sandbox: a fixed gate hostname would let a
+// hasher-<hash>-<5>, for the sandbox: a fixed gate hostname would let a
 // candidate read it via http.Dir("/proc") and behave only in the gate.
-// This removes only that tell; others remain (docs/STATUS.md, Parked).
-// The prefix assumes deploy/'s Deployment is named hasher.
+// It is drawn as a Deployment pod's name is: the middle part is a
+// pod-template-hash, a uint32's decimal digits each mapped through
+// SafeEncodeString (so 10 characters for ~77% of names, 1-9 otherwise),
+// and the suffix is 5 uniform characters (rand.String). This removes only
+// that tell; others remain (docs/STATUS.md, Parked). The prefix assumes
+// deploy/'s Deployment is named hasher.
 func newPodName() string {
-	b := make([]byte, 15)
-	rand.Read(b)
-	for i := range b {
-		b[i] = podNameAlphabet[int(b[i])%len(podNameAlphabet)]
+	var b [4]byte
+	rand.Read(b[:])
+	hash := []byte(strconv.FormatUint(uint64(binary.LittleEndian.Uint32(b[:])), 10))
+	for i, c := range hash {
+		hash[i] = podNameAlphabet[int(c)%len(podNameAlphabet)] // SafeEncodeString
 	}
-	return "hasher-" + string(b[:10]) + "-" + string(b[10:])
+	suffix := make([]byte, 0, 5)
+	for len(suffix) < 5 {
+		rand.Read(b[:1])
+		// Reject the top 256 % 27 values so every character is equally likely.
+		if int(b[0]) < 256-256%len(podNameAlphabet) {
+			suffix = append(suffix, podNameAlphabet[int(b[0])%len(podNameAlphabet)])
+		}
+	}
+	return "hasher-" + string(hash) + "-" + string(suffix)
 }
 
 // raceTags are Stage 4's race build tags: the pure-Go resolver and user
