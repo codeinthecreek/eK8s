@@ -13,7 +13,7 @@ below.
 Bash is for read-only commands only:
 - `git diff`, `git log`, `git show`, `git status`, `git merge-base`
 - `go build ./...`, `go vet ./...`, `go test ./...` (add `-run`, `-race`
-  or `-count=1` as needed)
+  or `-count=N` as needed)
 - `gofmt -l .`
 
 Nothing else: no `gofmt -w`, `go mod tidy`, `go generate`, `go get`, no
@@ -74,6 +74,14 @@ guess from file names.
     that it holds on every exit path. In Go, Pdeathsig is tied to the OS
     thread that started the child, so it can fire while the parent process
     is still running; on its own it is not a process-lifetime coupling.
+12. Tests of probabilistic checks, and seeds or negative tests for them
+    (randomized inputs, timing, concurrency, retries), must be run at a
+    repeat count proportionate to the reliability they claim; the default
+    is `go test -count=20 -run <name>`. Run each such test the change adds
+    or touches at that count; any failure or flake is must-fix. (In PR #25,
+    two negative tests passed at -count=1 but failed about 1 run in 20: the
+    seeded defect they rely on only shows when requests happen to
+    interleave, and it did not always trigger.)
 
 Also run `go build ./...`, `go vet ./...`, `go test ./...` and
 `gofmt -l .`; any failure or `gofmt -l` output is a must-fix finding.

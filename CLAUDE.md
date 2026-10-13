@@ -41,10 +41,11 @@ Applies to every session in this repo.
   (g) confirmation that `docs/STATUS.md` was updated in this PR.
 - One logical change per commit; the message explains why, not what.
 - Every PR updates `docs/STATUS.md` (Now/Next/Parked/Recent) in the
-  same PR.
+  same PR; a PR that changes what is built also updates the status
+  section of docs/overview.md.
 - A PR that edits DESIGN.md or the generation-0 wrapper (internal/wrapper/)
-  also checks docs/overview.md and fixes anything it now contradicts, in
-  the same PR.
+  also checks docs/overview.md and README.md and fixes anything it now
+  contradicts, in the same PR.
 - At the start of every PR, reconcile `docs/STATUS.md` and
   `docs/decisions.md` with `git log origin/main`: move merged items from
   Now to Recent with their real PR numbers, and replace "(inferred)" PR

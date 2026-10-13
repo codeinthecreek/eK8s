@@ -381,33 +381,84 @@
 - Reason: one logical change per commit; the bundling recurred in PRs #22 and #23.
 - Reverse: drop the "own commit, first" clause from CLAUDE.md's reconcile bullet.
 
-## 2026-10-12 · PR #25 *(inferred)* · Stage 4 race build: static link, -tags netgo,osusergo, same bwrap sandbox (packet Q1 A)
+## 2026-10-12 · PR #25 · Stage 4 race build: static link, -tags netgo,osusergo, same bwrap sandbox (packet Q1 A)
 - Rejected: a dynamic build with ld.so and libc --ro-bind'ed (per-distro paths, more in the sandbox); static without the tags (getaddrinfo static-link warning).
 - Reason: the bwrap argv binds only the binary, so a dynamic race build fails "execvp /service: No such file or directory"; -linkmode=external -extldflags=-static boots and reports races there, as root and unprivileged. The race go list carries the same -tags (raceFlags). Needs gcc plus libc.a.
 - Reverse: drop raceLinkFlags/raceTags in gate/boot.go and bind the libs in bwrapArgs; DESIGN.md sec 7 Stages 1 and 4 edit.
 
-## 2026-10-12 · PR #25 *(inferred)* · Race report: GORACE halt_on_error=1 exitcode=66, exit status primary, full-output marker scan (packet Q2 A)
+## 2026-10-12 · PR #25 · Race report: GORACE halt_on_error=1 exitcode=66, exit status primary, full-output marker scan (packet Q2 A)
 - Rejected: scanning only the 64 KiB cappedBuffer (a candidate can log past it); the exit code alone.
 - Reason: halt_on_error ends the process at the first report with 66, passed through by bwrap, and no allowlisted import can exit with a chosen code; raceWatch scans every byte (overlap of len(marker)-1), keeps an 8 KiB tail; the Detail is at most 4 KiB. Checked after the load plus a 1s grace; teardown stays SIGKILL.
 - Reverse: edit goRace and raceWatch in gate/stage4.go.
 
-## 2026-10-12 · PR #25 *(inferred)* · Stage 4 load: N = 2 x NumCPU in [8, 64], fixed 1s+jitter retry, 15 sends, transport errors retried (packet Q4)
+## 2026-10-12 · PR #25 · Stage 4 load: N = 2 x NumCPU in [8, 64], fixed 1s+jitter retry, 15 sends, transport errors retried (packet Q4)
 - Rejected: fixed N=32 (an unbounded-concurrency mutant hits cmd/service's 6s WriteTimeout on a 4-CPU host); honouring Retry-After (a mutant could stall the gate); failing at once on a transport error.
 - Reason: constant per-CPU load and gen 0 sheds on any host; a shed or transport error is no evidence either way, but every request must get a final answer within 15 sends and 120s. A bare 503 is final and fails (graceful_shed minus HangTimeout).
 - Reverse: edit the constants and sendWithRetry in gate/stage4.go; DESIGN.md sec 7 Stage 4 edit.
 
-## 2026-10-12 · PR #25 *(inferred)* · Stage 4 order: stop the Stage 2 process, race-build and boot the probe (gate fault), then the candidate (packet Q5 B)
+## 2026-10-12 · PR #25 · Stage 4 order: stop the Stage 2 process, race-build and boot the probe (gate fault), then the candidate (packet Q5 B)
 - Rejected: relying on the Stage 1 preflight only (a missing gcc or libc.a would read as a candidate race-build failure); a docker sub-check of the race binary (never deployed).
 - Reason: as in the PR #21 preflight, only gate code runs in the probe, so a failure there is the host's. sandbox.stop is now idempotent (sync.Once), so Run's deferred stop is safe after the explicit one.
 - Reverse: drop the probe build and preflight call in runStage4.
 
-## 2026-10-12 · PR #25 *(inferred)* · Known gap: a wrapper can tell Stage 4 from its build info (A1)
+## 2026-10-12 · PR #25 · Known gap: a wrapper can tell Stage 4 from its build info (A1)
 - Decision: no mitigation in this PR; recorded in docs/STATUS.md Parked (gate detectability).
 - Rejected: stripping or faking build info (it would change the deployed binary too, or diverge the two builds further).
 - Reason: `go version -m` differs only in `-race=true`, `-tags=netgo,osusergo` and `CGO_ENABLED=1` (-ldflags not recorded), readable via runtime/debug.ReadBuildInfo (allowlisted); GORACE is readable from /proc/self/environ via http.Dir. A mutant could synchronize only under -race.
 - Reverse: n/a (a limit); revisit with the gate-detectability item.
 
-## 2026-10-12 · PR #25 *(inferred)* · Stage 4 fails a candidate that exits after the load (owner review)
+## 2026-10-12 · PR #25 · Stage 4 fails a candidate that exits after the load (owner review)
 - Rejected: catching exits only through failed requests during the load.
 - Reason: a mutant that answers everything and then exits (e.g. a panic in a goroutine) left no failed request; a crash under concurrency is a broken wrapper. Exit 66 stays a race-report; any other exit by the end of the load and the 1s grace fails concurrency. Gap: an exit later than that grace is not seen.
 - Reverse: drop the sb.exited select after checkOutcomes in runStage4; DESIGN.md sec 7 Stage 4 edit.
+
+## 2026-10-12 · PR #26 · README carries no status, only a pointer; overview.md's status section is tied to the STATUS.md rule
+- Rejected: keeping README's status sentence and triggering its update on "changes what is built" too.
+- Reason: README went stale after #25 (a gate PR that touched neither DESIGN.md nor the wrapper), and the sync packet's diff list omitted README.md.
+- Reverse: restore the status sentence and the "(planned)" layout markers; drop the README.md and overview-status clauses from CLAUDE.md.
+
+## 2026-10-12 · PR #26 · kind cluster: kind v0.33.0, one node, v1.37.0 by digest, name ek8s, 1 CPU / 2Gi reserved, no host ports (design packet Q1)
+- Rejected: node v1.36.4 (closer to metrics-server's build deps, not a support statement); no reservation (allocatable = whole host); host loadgen via NodePort extraPortMappings (fixed port pool; the default listenAddress is 0.0.0.0).
+- Reason: v1.37.0 is kind's tested default and inside metrics-server 0.9.x's 1.34+; kubeReserved + systemReserved 500m/1Gi each schedule pod requests against DESIGN.md sec 2's budget; loadgen runs in-cluster (DESIGN.md sec 10 edit), so nothing is published on the host.
+- Reverse: edit deploy/kind/cluster.yaml (image, kubeadmConfigPatches) and recreate the cluster; DESIGN.md sec 10 edit for loadgen's location.
+
+## 2026-10-12 · PR #26 · metrics-server v0.9.0 vendored, image by digest, --kubelet-insecure-tls (Q6)
+- Rejected: the Helm chart (a new host tool); serverTLSBootstrap plus approving kubelet-serving CSRs on every cluster create.
+- Reason: components.yaml is the unmodified release asset (sha256 in its kustomization); the digest comes from the k8s.io image promoter manifest; kind's kubelet cert is not signed by the cluster CA, acceptable with the API server on loopback only. HPA ships with the variant bundle in PR (2).
+- Reverse: replace deploy/metrics-server/ and drop the patch.
+
+## 2026-10-12 · PR #26 · stress-ng: upstream image by digest, kind-loaded under a digest tag; 0 <-> 1 replicas; dose in a ConfigMap; Guaranteed 3 CPU / 2Gi (Q7)
+- Rejected: building FROM a distro base with apt (base pull plus apt network at build); a static build; an always-on pod driven by kubectl exec; a Job per stress half.
+- Reason: colinianking/stress-ng@sha256:f59a28ca... is stress-ng 0.22.01; up.sh tags it ek8s-stress-ng:<12 hex> because kind load takes a tagged local image; pull Never, so the node never pulls. Runs as 65532 with a read-only root and an emptyDir /tmp (--temp-path), checked with docker. A small CPU request would make a weak neighbour.
+- Reverse: edit deploy/stress/ and up.sh's stress_src/stress_tag.
+
+## 2026-10-12 · PR #26 · The orchestrator owns stress state; Stage 5 requires stress-ng Running, else gate fault (Q7; DESIGN.md sec 7, sec 11)
+- Rejected: Stage 5 turning stress on itself; Stage 5 waiting for a stress half.
+- Reason: one owner for stress state; the orchestrator turns it on and marks the window excluded (sec 7 already excludes Stage 5 windows) before calling Stage 5. Anything but Running says nothing about the candidate.
+- Reverse: DESIGN.md sec 7 Stage 5 and sec 11 edits.
+
+## 2026-10-12 · PR #26 · Variant pods have no egress: NetworkPolicy deny-all egress, ingress 8080 from ek8s-system app=loadgen only (Q5; DESIGN.md sec 11)
+- Updates the PR #18 net/http known-limit entry: pods no longer "keep bridge/pod egress" once PR (2) ships the policy; the container in the gate's docker sub-check still does.
+- Rejected: Calico/Cilium (kind calls third-party CNIs unsupported); accepting egress.
+- Reason: kindnet enforces NetworkPolicy since kind v0.24.0; egress enforcement is not stated in kube-network-policies' docs, so PR (2)'s smoke test must fail if egress is not denied.
+- Reverse: DESIGN.md sec 11 edit; drop the NetworkPolicy template.
+
+## 2026-10-12 · PR #26 · Variant resources: Burstable 250m/1000m CPU, 256Mi request = limit; HPA maxReplicas 2 (Q3; DESIGN.md sec 11)
+- Rejected: Guaranteed 1 CPU (8 pods request 8 cores > ~7 allocatable, so scale-outs go Pending); Guaranteed 500m (GOMAXPROCS rounds a limit under 2 up to 2, so throttling dominates); maxReplicas 3.
+- Reason: 4 variants x 2 pods = 8 pods: 2 cores requested, 2 GiB, 8 cores of limits (overcommit is the contention scored). 256Mi / 1 CPU equals the gate's docker sub-check. Implemented in PR (2)'s templates.
+- Reverse: DESIGN.md sec 11 edit; edit the LimitRange and HPA templates.
+
+## 2026-10-12 · PR #26 · Variant label "ek8s-<16 hex>", random per deployment, in gate and cluster (Q4; DESIGN.md sec 5)
+- Rejected: the gate's "gate-<16 hex>" (a gate tell); a label carrying the variant id.
+- Reason: one shape everywhere removes the label as a gate tell; the label -> ek8s-v<id> mapping lives in the orchestrator and lineage. PR (2) changes the gate's prefix (one line in gate/boot.go's newLabel).
+- Reverse: DESIGN.md sec 5 edit; revert newLabel's prefix.
+
+## 2026-10-12 · PR #26 · Merge gate for deploy/ PR (1): CI-size kind smoke run, not the workstation run
+- Rejected: waiting for the owner's workstation (away for over a week).
+- Reason: kind cannot run in the cloud container (cgroup v1, runc denied oom_score_adj), and CI's 2-CPU runner cannot hold the full-size reservation and stress dose; CI at CI size (cluster-ci.yaml, stress-ci overlay, EK8S_* parameters defaulting to full size) proves the mechanics but not the numbers, so the full-size run, budget numbers and host userns checks stay Parked, required before the first real orchestrator run.
+- Reverse: drop .github/workflows/deploy.yml and the CI-size files; restore the local run as the merge gate.
+
+## 2026-10-12 · PR #26 · CI (ci.yml) path filter: its own file, not all of .github/workflows/** (amends the PR #12 CI paths entry)
+- Rejected: keeping '.github/workflows/**' (every deploy.yml-only change ran the Go suite and its flaky Stage 4 seeds, as on this PR).
+- Reason: a change to another workflow says nothing about Go code; ci.yml still re-runs when ci.yml itself changes, and weekly and by hand as before.
+- Reverse: restore '.github/workflows/**' in both paths lists of .github/workflows/ci.yml.

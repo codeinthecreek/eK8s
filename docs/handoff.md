@@ -57,6 +57,10 @@ since #N"); "no packet" in the task prompt opts out.
   saying docs/STATUS.md was updated in this PR, and uncommitted/unpushed
   state. (a) maps to Task/stat/Feedback and (b) to the `(inferred)`
   lines. Design packets carry only the items that apply.
+- A `Verify:` line for a test of a probabilistic check, or a seed or
+  negative test for one (randomized inputs, timing, concurrency,
+  retries), carries its `-count` (default `-count=20`), and the packet
+  states the count the test was validated at.
 
 ## Chat side
 
@@ -162,7 +166,7 @@ keeps #2 from matching #21), and use that commit as <sha>. Header:
 - `git log --oneline <sha>..origin/main`
 - docs/STATUS.md in full.
 - docs/decisions.md entries added or changed since <sha>, quoted in full.
-- `git diff <sha> origin/main -- DESIGN.md CLAUDE.md docs/handoff.md docs/overview.md`
+- `git diff <sha> origin/main -- DESIGN.md CLAUDE.md README.md docs/handoff.md docs/overview.md`
 - If that diff is over about 400 lines: per-file line counts plus the
   changed section headings, with the rest listed under `Omitted:`.
 - Never include Go code.

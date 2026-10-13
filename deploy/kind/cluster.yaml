@@ -1,0 +1,26 @@
+# The ek8s kind cluster: one node, which is the whole substrate (DESIGN.md
+# sec 2, sec 3). Created by deploy/up.sh with kind v0.33.0.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: ek8s
+networking:
+  # kind's default, written out: the API server listens on loopback only.
+  apiServerAddress: "127.0.0.1"
+# No extraPortMappings: loadgen runs in the cluster (namespace ek8s-system)
+# and reaches variants by Service DNS, so nothing is published on the host.
+nodes:
+- role: control-plane
+  # kind v0.33.0's default node image, pinned by digest as its release
+  # notes require. Kubernetes 1.35+ needs a cgroup v2 host.
+  image: kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5
+  kubeadmConfigPatches:
+  - |
+    kind: KubeletConfiguration
+    # Takes ~1 CPU and ~2Gi out of node allocatable, so pod requests are
+    # scheduled against DESIGN.md sec 2's budget, not the whole host.
+    kubeReserved:
+      cpu: "500m"
+      memory: "1Gi"
+    systemReserved:
+      cpu: "500m"
+      memory: "1Gi"

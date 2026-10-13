@@ -668,12 +668,14 @@ In broad terms, as of 2026-10-12:
 - **Built:** the *thing being evolved* and the *rulebook for judging
   it*. That is the generation-0 service, the locked hashing core, the
   shared judge (classifier) and the known-answer test pool, plus gate
-  Stages 1-4 (section 6), all tested in CI.
-- **Next:** the cluster setup and load generator, then gate Stage 5,
-  which needs both.
-- **Not built yet:** gate Stage 5, the load generator, cluster
-  setup, AI driver, orchestrator and lineage records. No generation
-  has evolved yet.
+  Stages 1-4 (section 6), all tested in CI. The base cluster setup
+  is written too (the kind config, metrics-server and the stress-ng
+  noisy neighbour), checked by a smoke test run by hand, not in CI.
+- **Next:** the per-variant cluster manifests, the load generator,
+  then gate Stage 5, which needs both.
+- **Not built yet:** the per-variant manifests, gate Stage 5, the load
+  generator, AI driver, orchestrator and lineage records. No
+  generation has evolved yet.
 
 The reasons behind individual implementation choices are logged in
 [decisions.md](decisions.md).

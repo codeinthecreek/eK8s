@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ek8s-stress
+  labels:
+    # Pod Security Admission rejects any pod in this namespace that does not
+    # meet the restricted profile.
+    pod-security.kubernetes.io/enforce: restricted
