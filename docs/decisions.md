@@ -498,7 +498,7 @@
 - Reverse: move the variant-smoke.sh step to a workflow with only workflow_dispatch.
 
 ## 2026-10-13 · PR #28 · kindnet enforces egress: Q5's open condition met (DESIGN.md sec 11)
-- Evidence: deploy smoke run 38356331140, check (d): 1.1.1.1:80, 10.96.0.1:443 (API ClusterIP) and 172.18.0.2:6443 (node, API endpoint) each timed out from ek8s-v999999 and answered from ek8s-system.
+- Decision: treat egress denial as verified; DESIGN.md sec 11 says so. Evidence: deploy smoke run 38356331140, check (d): 1.1.1.1:80, 10.96.0.1:443 (API ClusterIP) and 172.18.0.2:6443 (node, API endpoint) each answered from ek8s-system and were refused from ek8s-v999999, each after the full 5s curl timeout (the ok lines are 5.3s apart), so packets were dropped.
 - Rejected: Calico/Cilium (not needed now).
 - Reason: the PR #26 Q5 entry made this run the proof; the smoke step keeps proving it on every deploy/ change.
 - Reverse: n/a (a finding); if a later kind release stops enforcing egress, the smoke run fails and Q5 reopens.
