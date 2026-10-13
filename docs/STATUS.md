@@ -4,7 +4,7 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 *(inferred)* are guesses, not read from the repo; correct them.
 
 ## Now
-- `claude/deploy` (PR #26): deploy/ PR (1) of 2, cluster infra: kind config (cluster ek8s, kind v0.33.0, node v1.37.0 by digest, 1 CPU / 2Gi reserved), metrics-server v0.9.0 vendored with --kubelet-insecure-tls, stress-ng (upstream image by digest, kind-loaded, 0 <-> 1 replicas, dose ConfigMap), up.sh, infra smoke.sh, deploy/README host setup (AppArmor bwrap userns profile, sysctl fallback); DESIGN.md sec 5, 7, 10, 11 edits from the deploy/ design packet. Plus a CI-size kind smoke workflow (.github/workflows/deploy.yml; cluster-ci.yaml, stress-ci overlay, up.sh/smoke.sh size parameters). Merge gate met: deploy smoke run 38318638954 passed (owner away from the workstation; full-size checks are Parked, pending workstation). ci.yml was red twice on 93fc1cb from the Stage 4 seed flake (green on 337ab70; flake Parked); ci.yml no longer runs on deploy.yml-only changes.
+- (nothing in flight)
 
 ## Next
 - Gate fix for the Stage 4 seed flake (Parked), design packet first.
@@ -26,6 +26,7 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 - CI: unpin go-version 1.26.9 back to '1.26.x' once actions/go-versions' manifest lists >= 1.26.9 (docs/decisions.md, PR #18 entry).
 
 ## Recent
+- #26 deploy/ PR (1) of 2, cluster infra: kind config (kind v0.33.0, node v1.37.0 by digest, 1 CPU / 2Gi reserved), metrics-server v0.9.0 vendored, stress-ng by digest (0 <-> 1 replicas, dose ConfigMap), up.sh, smoke.sh, deploy/README host setup; DESIGN.md sec 5, 7, 10, 11 edits; CI-size kind smoke workflow (deploy.yml), merge gate run 38318638954; ci.yml path filter narrowed to its own file (2026-10-13)
 - #25 Gate PR3 of 4: Stage 4 concurrency safety (static race build in the same bwrap sandbox after a race probe preflight, N = 2 x NumCPU concurrent requests with bounded retries, race report by exit status plus output scan, cross-talk via the Stage 2 Run; fails a candidate that exits by the end of the load) (2026-10-12)
 - #24 Reviewer checklist gains limit-boundary and child-process-lifetime items; handoff.md Feedback rule covers any owner reply carrying feedback, conditions or an approval with changes (2026-10-12)
 - #23 Packets are the default end-of-task output (CLAUDE.md, docs/handoff.md); packet header gains origin/main and the last merged PR; new Sync packet type and a Chat side staleness check; the start-of-PR reconcile goes in its own commit (2026-10-12)
