@@ -363,7 +363,7 @@ Scores use fixed absolute scales, not "relative to the others".
 That way a score from generation 5 can be compared fairly with one
 from generation 50.
 
-## 8. How answers are checked: salts and the test pool
+## 8. How answers are checked: salts and known answers
 
 The judge has to know whether each answer is *correct*, not just
 fast. How it does that differs between the two endpoints, and the
@@ -444,29 +444,27 @@ brand-new random salt. With 16 random bytes, an accidental repeat is
 effectively impossible. So a repeated salt is strong evidence that the
 wrapper replayed a stored result instead of calling Argon2.
 
-### Checking /verify: the known-answer pool
+### Checking /verify: fresh known answers
 
 `/verify` is different. To judge a "match: true" reply as right or
-wrong, the judge must already know the true answer. That is what the
-precomputed test pool provides:
+wrong, the judge must already know the true answer. The load generator
+builds each request itself, so it knows:
 
-- known password/hash pairs that should match
-- deliberate mismatches that should be rejected
+- a *match* pair: a fresh password and a hash of it, made with the real
+  hashing core just for this request
+- a *mismatch* pair: a fresh password and a random, well-formed hash
+  that cannot belong to it
 
-The pool is generated once, using the real hashing core.
+Nothing repeats for a variant. A fixed pool of pairs would let a
+variant memorize "this pair -> match" and skip Argon2, so the pool is
+used only by the gate. The load generator also notes the salt of every
+hash it sends to `/verify`, so a variant that remembers one and replays
+it as a `/hash` answer is caught as a repeated salt.
 
-A verify answer never changes for a given pair. So if pool pairs recur
-during a long observation window, a variant could memorize
-"this pair -> match" and skip Argon2. A bigger pool would only delay
-this, not prevent it. Each entry costs about 100 ms of CPU to
-precompute, and a variant running for a whole window would still see
-repeats.
-
-The proposed fix is to also send `/verify` requests built from hashes
-the variant itself just returned from `/hash`. The load generator
-knows which password it sent, so it knows the right answer, and those
-pairs are endlessly fresh. This is one of the open loopholes listed in
-section 9 and is not designed in detail yet.
+A small share of live traffic (and at least 5% of the Stage 5 burst) is
+deliberately invalid: a malformed hash, or a well-formed one with the
+wrong settings. The only acceptable answers are a 400 or a polite
+"busy"; any success is a failure.
 
 ## 9. Why so much anti-cheating, if the core is locked away?
 
@@ -536,8 +534,8 @@ then win in exactly the contention half, which is where fitness is
 decided (the worse of the two halves). This is why Stage 5 fully
 checks every response under contention, and why the live contention
 half is judged as strictly as the normal half. A variant could also
-cheat only when it can tell it is *not* being tested; that gap is
-still open (see "Loopholes still open" below).
+cheat only when it can tell it is *not* being tested; invalid hashes
+in live traffic close that gap (see "Loopholes" below).
 
 **4. One surviving cheat poisons the whole run.** It would become the
 best-ever variant and be picked as a parent again and again, so its
@@ -549,8 +547,8 @@ bypass.
 
 | Cheat | Why it would score well | What catches it |
 |-------|-------------------------|-----------------|
-| Always answer "match" on /verify | no Argon2, instant | the judge checks answers against known pairs, including deliberate mismatches |
-| Turn a core error into "match" (fail open) | looks robust | gate Stage 2 sends bad and wrong-strength hashes; the answer must be 400 (at the gate only: see "Loopholes still open") |
+| Always answer "match" on /verify | no Argon2, instant | the judge checks answers against pairs it built itself, including deliberate mismatches |
+| Turn a core error into "match" (fail open) | looks robust | gate Stage 2 sends bad and wrong-strength hashes; the answer must be 400; the same invalid hashes are sent live and in Stage 5 (see "Loopholes") |
 | Return a made-up hash string | no Argon2 | format and strength checks on every response; full verification of every response in Stage 5, and a sample when live |
 | Re-send earlier hashes | no Argon2 | salt reuse is tracked for the variant's whole live life |
 | Bring its own, weaker Argon2 | faster | Stage 1 library allowlist; Stage 3 exact strength check |
@@ -565,31 +563,26 @@ response: format, strength and salt reuse. Full verification runs on a
 sample. That is why salt-reuse tracking spans a variant's whole life:
 it catches replayed hashes without paying for a full check each time.
 
-### Loopholes still open, parked for later
+### Loopholes: decided, not yet built
 
-Four remaining loopholes are tracked in [STATUS.md](STATUS.md). The
-first three are noted for when the load generator and scoring are
-built:
+The four loopholes tracked earlier now have a decided fix in
+[DESIGN.md](../DESIGN.md); none is built until the load generator and
+scoring are:
 
 - **Reusing undelivered work:** a hash computed for a request that
-  timed out could be handed to a later request. The proposed fix is to
-  treat any integrity failure as disqualifying, not just one bad
-  request.
-- **Memorizing verify answers:** the test pool is finite, so a variant
-  could cache answers. The proposed fix is for the load generator to
-  also verify hashes the variant itself just produced.
-- **Replaying pool hashes:** a variant could answer `/hash` with a
-  remembered hash from the pool. The proposed fix is to never send pool
-  passwords to `/hash`, or to pre-register the pool's salts with the
-  judge.
+  timed out could be handed to a later request. Any integrity failure
+  (a wrong or reused hash, a fake "match", a success on an invalid hash)
+  disqualifies the variant: the first one confirmed on the host means
+  the variant is culled at once and never becomes a parent.
+- **Memorizing verify answers:** fixed by the fresh pairs above.
+- **Replaying pool hashes:** fixed by keeping the pool out of live
+  traffic and noting the salt of every hash sent to `/verify`.
 - **Behaving differently outside the gate:** a candidate can find
   small clues that it is running inside the gate (for example, no
-  resource limits, or the sandbox's process list). It could then return a
+  resource limits, or the sandbox's process list). It could return a
   clean 400 for bad hashes during the gate, but turn core errors into
-  "match" once live. Stage 5 and the live load never send bad hashes,
-  so nothing would catch it. The proposed fix is to also send
-  deliberately invalid hashes during Stage 5 and in a sample of live
-  traffic, expecting 400.
+  "match" once live. Fixed by sending invalid hashes in live traffic and
+  in Stage 5, so such a candidate fails there as well.
 
 ## 10. Cluster layout
 
@@ -614,6 +607,9 @@ built:
 - A variant's pods are meant to have no outbound connections (a network
   policy denies all egress) and to accept traffic only from the load
   generator; a CI smoke test checks this.
+- One load generator, running for the whole run, serves every
+  variant's stream; it sits outside the variants' namespaces and holds no
+  cluster credentials.
 - Each variant gets its own fixed-rate traffic stream. There is no
   shared load balancer splitting traffic, so variants never compete
   for requests, only for the node's resources.
@@ -670,13 +666,17 @@ In broad terms, as of 2026-10-13:
 
 - **Built:** the *thing being evolved* and the *rulebook for judging
   it*. That is the generation-0 service, the locked hashing core, the
-  shared judge (classifier) and the known-answer test pool, plus gate
+  shared judge (classifier) and the gate's known-answer test pool, plus gate
   Stages 1-4 (section 6), all tested in CI. The cluster setup is
   written too: the kind config, metrics-server, the stress-ng noisy
   neighbour and the per-variant manifests (namespace, limits, network
   policy, Deployment, Service, autoscaler), with a small-scale smoke
   test in CI; the full-size run waits for the workstation.
-- **Next:** the load generator, then gate Stage 5, which needs it.
+- **Designed, not built:** the load generator (one long-lived
+  deployment, fresh pairs, invalid hashes in live traffic, schedule-lag
+  checks) and the classifier changes it needs.
+- **Next:** those classifier changes, the load generator's cluster
+  setup, the load generator itself, then gate Stage 5, which needs it.
 - **Not built yet:** gate Stage 5, the load generator, AI driver,
   orchestrator and lineage records. No
   generation has evolved yet.

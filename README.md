@@ -43,7 +43,7 @@ container registry.
 cmd/service/          fixed entrypoint: routes, health, shutdown
 internal/hashcore/    fixed Argon2id core; never visible to mutation
 internal/classifier/  shared success/shed/failed judge + time ceiling
-  testvectors/        known password/hash pairs (gate, loadgen only)
+  testvectors/        known password/hash pairs (gate only)
 internal/wrapper/     the evolvable layer: concurrency, backpressure
 gate/                 five-stage correctness gate
 loadgen/              open-loop load generator

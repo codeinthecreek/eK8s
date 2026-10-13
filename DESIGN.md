@@ -122,13 +122,17 @@ repo/
                           # constant. Imported read-only by wrapper, gate,
                           # loadgen, and orchestrator. Never in mutation
                           # scope.
-    testvectors/         # the shared test-vector pool (precomputed,
-                          # embedded). Imported by gate and loadgen only;
-                          # never by wrapper.
+    testvectors/         # the gate's test-vector pool (precomputed,
+                          # embedded). Imported by gate only; never by
+                          # wrapper or loadgen (loadgen draws its pairs
+                          # fresh, sec 10).
   gate/                  # correctness gate, five ordered stages.
   loadgen/               # open-loop load generator (sec 10): per-variant
-                          # sustained streams + Stage 5 burst mode.
-                          # Imports internal/classifier.
+                          # sustained streams + Stage 5 burst mode, one
+                          # long-lived Deployment. Imports
+                          # internal/classifier and internal/hashcore
+                          # (fresh verify pairs, full verification); neither
+                          # is ever in the mutation driver's sandbox.
   deploy/                # kind cluster config, k8s manifests, stress-ng.
   driver/                # mutation driver wrapping claude -p.
   orchestrator/          # population manager, selection, scoring loop.
@@ -150,16 +154,20 @@ read-only, to enforce the same ceiling in its own request-timeout
 behavior; it is never copied into the mutation driver's sandbox (section
 12), and the mutation driver never sees or edits it.
 
-The shared test-vector pool (sections 7 and 10) lives in the
+The gate's test-vector pool (section 7) lives in the
 internal/classifier/testvectors/ subpackage, as precomputed data
 generated once by a small tool that uses internal/hashcore/.
 internal/wrapper/ never imports the subpackage (the Stage 1 allowlist,
 section 7, forbids it), and internal/classifier/ itself never imports
-internal/hashcore/. The pool also holds a small gate-only negative set,
-not used by loadgen: well-formed PHC strings at non-exact parameters
-(section 7, Stage 2 contract conformance), generated with the reference
-library -- except very-large-`m` entries, which are hand-constructed,
-since computing one would allocate that memory. A hand-constructed entry
+internal/hashcore/. Loadgen never imports it either: a finite pool lets a
+mutant memoize (password, hash) -> match, or replay a pool hash as a
+`/hash` answer, so loadgen draws every pair fresh (section 10). The pool
+also holds a small negative set: well-formed PHC strings at non-exact
+parameters (section 7, Stage 2 contract conformance), generated with the
+reference library -- except very-large-`m` entries, which are
+hand-constructed, since computing one would allocate that memory. Loadgen
+builds its own contract negatives (section 10) to the same shape rules. A
+hand-constructed entry
 differs from a valid hash only in the parameter under test: the
 `$argon2id$v=19$` prefix, the other parameters at their exact values, a
 16-byte salt and a 32-byte key, both in the library's own encoding
@@ -314,10 +322,10 @@ assertions, all zero-tolerance. Stage 2 talks HTTP to the process Stage 1 booted
 request at a time; every response must carry `X-EK8s-Variant` equal to
 that run's label (section 5).
 
-**Interoperability**: four assertions. The `RealHash` pair uses the shared
-password/hash test-vector pool (also used by the load generator, section
-10, so gate-time and run-time correctness share one definition of
-"correct"). The `MutantHash` pair uses fresh random passwords (`NoMatch`:
+**Interoperability**: four assertions. The `RealHash` pair uses the gate's
+password/hash test-vector pool (section 5; gate-time and run-time
+correctness share the classifier's ground-truth rule, section 8, not a
+pool). The `MutantHash` pair uses fresh random passwords (`NoMatch`:
 a different fresh one), so the gate never sends a pool password to
 `/hash` and a mutant has no pool pair to replay. Every 2xx response goes
 through one classifier run (section 8), hash responses fully verified,
@@ -347,10 +355,10 @@ never 2xx:
    negative set (section 5). This is the fail-open case: all four interop
    assertions use correct-params hashes, so hashcore's Verify never errors
    there, and a wrapper that turns a Verify error into a match would
-   otherwise pass them, Stage 3, Stage 5 and fitness. This closes the
-   fail-open bypass at the gate only: a wrapper that detects the gate can
-   fail open outside it, and Stage 5 and fitness never send non-exact
-   parameter hashes, a gap tracked in docs/STATUS.md (Parked).
+   otherwise pass them, Stage 3, Stage 5 and fitness. A wrapper that detects the
+   gate could still fail open outside it, so loadgen sends the same
+   classes of contract negative in sustained traffic and in the Stage 5
+   burst (sections 8, 10).
 3. `/verify` with an empty hash; `/hash` and `/verify` with an empty or
    missing password.
 4. `/hash` and `/verify` with a password over 1024 bytes.
@@ -443,8 +451,13 @@ Procedure:
 - Point a short, bounded load-generator burst (tens of seconds, not the
   multi-minute observation-window duration -- Stage 5 only needs a
   boolean pass/fail, not statistical confidence) directly at the
-  candidate's own Service. No live stream targets it, so this traffic
-  never mixes with anything currently live.
+  candidate's own Service, started through the long-lived loadgen's
+  control API (section 10). No live stream targets it, so this traffic
+  never mixes with anything currently live. The variant's classifier Run
+  starts with the burst and continues through promotion to cull (section
+  8). Contract negatives (section 8) are at least 5% of the burst, every
+  negative class (hashcore's `ErrUnsupportedParams` and
+  `ErrMalformedHash`) at least once.
 - The existing stress-ng Deployment provides contention (kind is
   single-node, so contention is a global resource -- no second stress-ng
   instance needed). The orchestrator owns stress state (section 11): it
@@ -456,9 +469,10 @@ Procedure:
 1. Pod health: `restartCount == 0` and no container status reason of
    `OOMKilled`, `CrashLoopBackOff`, or `Error`.
 2. Every observed response classifies as `success` or `graceful_shed` via
-   the shared three-bucket classifier (section 8) -- never `failed`.
-   Every hash response in the burst is fully verified (section 8), not
-   sampled.
+   the shared three-bucket classifier (section 8) -- never `failed`; a
+   contract negative passes as a 400 or a `graceful_shed`, and any 2xx
+   to one is `negative_accepted`, a failure. Every hash response in the
+   burst is fully verified (section 8), not sampled.
 
 Pass iff both hold. On pass, there is no shared Service to relabel into:
 **the variant stays in the namespace Stage 5 created** and becomes live
@@ -494,9 +508,20 @@ internal/classifier/ (section 5).
   `Retry-After` contract, a malformed response (including a 2xx body that
   is not exactly the contract object below).
 
+**Contract negatives** are loadgen's deliberate bad `/verify` requests
+(section 10): a malformed hash string (hashcore's `ErrMalformedHash`
+class) and a well-formed hash at non-exact parameters
+(`ErrUnsupportedParams`). A negative passes as a 400 within the
+hang-timeout or as a `graceful_shed`; any 2xx to one is
+`negative_accepted` (the fail-open case, section 7 Stage 2), and
+anything else is `failed`. Negatives are outside `success_rate`, p95 and
+`cpu_per_success` (section 9).
+
 For `verify` calls specifically, "success" additionally requires the
-*objectively correct* accept/reject determination against the shared
-test-vector pool's ground truth -- a fast, well-formed response that
+*objectively correct* accept/reject determination against the pair's
+known ground truth (section 10: a match pair is a loadgen-fresh hash of
+a fresh password, a mismatch pair a random canonical PHC at the exact
+parameters with a fresh password) -- a fast, well-formed response that
 returns "valid" for a should-reject pair is a `failed` classification
 regardless of latency, not a success. (This closes a specification-gaming
 risk: without ground-truth checking, a mutant could shed queue pressure
@@ -509,11 +534,14 @@ stress-active half where the fitness signal is most trusted.)
 ceiling; a well-formed PHC string; exactly the section 6 parameters; a
 salt not repeated within the variant's live lifetime; and it verifies
 against the password sent. "Live lifetime" means one classifier run from
-promotion to cull, not one per observation window, so a mutant cannot
-cache hash strings from an earlier window and replay them later to skip
-Argon2 (only sampled full verification would catch that). Stage 5's burst
-uses its own run. Salts from 2xx hash responses that arrive after the
-hang-timeout are recorded too, so a late hash cannot be replayed on time.
+the variant's Stage 5 burst to cull, not one per observation window, so a
+mutant cannot cache hash strings from an earlier window, or from its
+burst, and replay them later to skip Argon2 (only sampled full
+verification would catch that). Salts from 2xx hash responses that
+arrive after the hang-timeout are recorded too, so a late hash cannot be
+replayed on time. The Run also reserves (`Run.Reserve`) the salt of
+every hash loadgen sends to `/verify`, so a mutant that remembers one and
+replays it as a `/hash` answer is caught as a repeated salt.
 Structural checks (format, parameters, salt reuse) apply to every
 response. Full verification is mandatory for every Stage 5 response; in
 the sustained observation window it is applied to a sample, since a full
@@ -552,7 +580,8 @@ stress-active):
   generation (section 10) -- not a mean, since mean hides the tail
   behavior the evolvable wrapper is meant to affect.
 - `cpu_per_success` -- pod CPU-seconds (from metrics-server) divided by
-  count of successful responses. Since the fixed core's cost is constant
+  count of successful responses. Contract negatives (section 8) are
+  outside all three metrics. Since the fixed core's cost is constant
   across genomes, differences here are almost entirely wrapper overhead
   (goroutine scheduling, queueing, concurrency-control bookkeeping) -- a
   clean signal for exactly what is being evolved.
@@ -562,6 +591,16 @@ stress-active):
 `failed` -- otherwise a wrapper that evolves a genuinely good
 load-shedding strategy is penalized the same as one that simply falls
 over, which works against the resilience premise of the project.
+
+**Integrity failures disqualify.** `verify_mismatch`, `verify_error`,
+`wrong_match`, `non_canonical_phc`, `salt_reused`, `negative_accepted`,
+and a `malformed_body` 2xx are not one failed request but evidence the
+wrapper is faking results (for example, relabelling undelivered Argon2
+output from timed-out clients as later hashes). The first one, once
+re-checked on the host with hashcore, disqualifies the variant: it is
+culled at once and is never a parent (section 11). `malformed_body`
+counts only when the body was read to a clean EOF; a body cut short by a
+timeout or reset is an ordinary `failed`.
 
 **Normalization: fixed absolute bounds, not against the live population.**
 This is a non-negotiable design choice, not a simplification. It is
@@ -575,6 +614,11 @@ requirement (comparability across time):
 2. Tournament selection (section 11) draws parents from an archive that
    spans the whole run's history, not just the current live set -- the
    same cross-time comparability requirement applies.
+
+Likewise the per-variant stream rate `r` is frozen for a run (section
+10): a new `r` means a new run, and one run is one comparability epoch.
+Archived scores are compared only within their run; a later run may seed
+from archived genomes but not from their scores.
 
 A served-share term (a variant's fraction of total traffic served) was
 considered and rejected: it is population-relative by construction, which
@@ -627,15 +671,31 @@ directly against its current source if wanted, since its `Result` struct
 may discard headers by default to keep memory bounded.) Lives in
 `loadgen/` (section 5).
 
-**Request mix -- must include deliberate mismatches, not only valid
-credentials.** A shared test-vector pool (also used by gate Stage 2,
-section 7) of valid password+hash pairs, plus the same passwords paired
-with a different hash to force a should-reject case. Sending only
-matching pairs to `verify` would never exercise the rejection path under
-load, and is the specification-gaming gap described in section 8.
+**Request mix -- must include deliberate mismatches and contract
+negatives.** 50% `/hash`, 48% `/verify`, 2% contract negatives (starting
+guesses, section 15). There is no shared pool: loadgen builds every pair
+fresh, so a mutant has nothing finite to memoize or replay.
+- `/verify` match pair: `hashcore.Hash` of a fresh password, each pair
+  sent once per variant.
+- `/verify` mismatch pair: a random canonical PHC string at the exact
+  parameters with a fresh password. Sending only matching pairs would
+  never exercise the rejection path under load, the specification-gaming
+  gap described in section 8.
+- Contract negatives (section 8): `/verify` with a malformed hash and with
+  a well-formed hash at non-exact parameters, both classes in sustained
+  traffic. They are at least 5% of the Stage 5 burst, every class at least
+  once. They pass as 400 or `graceful_shed`; a 2xx is `negative_accepted`.
+  Because they are in live traffic too, a wrapper that detects the gate
+  and fails open only outside it is caught (the PR #6 fail-open bypass).
+- Every hash sent to `/verify` is reserved in the variant's classifier Run
+  (`Run.Reserve`, section 8).
 
-**Hash-call payloads:** randomly generated passwords of varying length per
-request, not a fixed repeated test vector.
+**Hash-call payloads:** passwords from `crypto/rand`, 1-1024 bytes, a
+fresh one per request, never a fixed repeated test vector.
+
+**Loadgen's own Argon2 work** (generating match pairs, full verification
+of hash responses) runs off the send path, so it cannot delay a send;
+full verification is also capped by a token bucket.
 
 **Two operating modes, one generator component:**
 - Sustained mode, for the multi-minute observation window (baseline +
@@ -647,12 +707,52 @@ request, not a fixed repeated test vector.
   that plus stress-ng.
 - A short, bounded-count burst for the Stage 5 gate probe.
 Same request-mix logic and classifier in both; only duration and target
-rate differ.
+rate differ. A variant's classifier Run starts at its Stage 5 burst and
+continues through promotion to cull (section 8).
 
-**Runs in the cluster**, in namespace `ek8s-system`, and reaches each
-variant by Service DNS (section 11). No host ports are published; the
-gate and orchestrator stay on the host and drive the cluster through the
-API server on loopback.
+**The rate `r`** is `0.5 x C0`. C0 is the highest rate at which generation
+0 on a single pod (HPA `minReplicas` = `maxReplicas` = 1, no stress)
+sheds at most 1% with p95 at most `HangTimeout`/4. It is measured once,
+and frozen for the run; a new `r` means a new run, and one run is one
+comparability epoch (section 9). Until C0 is measured, a provisional `r` comes from a
+workstation Argon2 benchmark; the CI smoke run uses `r` = 2.
+
+**Schedule lag and global exclusion.** Every send records its intended and
+actual send time. A scoring half is excluded for all variants (loadgen is
+one shared process) when lag p99 exceeds 10 ms, any lag exceeds 100 ms, a
+send is skipped, or the record ring has a gap (records overwritten before
+the orchestrator read them). The thresholds are starting guesses (section
+15). CFS throttling of loadgen is logged as a diagnostic, not a trigger.
+After 3 consecutive excluded halves the orchestrator flags the run and
+halts. Records carry wall-clock time (which phase a response belongs to)
+and monotonic time (lag, latency).
+
+**Runs in the cluster**, as one long-lived Deployment in namespace
+`ek8s-system` serving every variant's stream and every Stage 5 burst.
+Guaranteed QoS, 750m CPU / 256Mi, in the shared pool; the static CPU
+manager is used only if the workstation run excludes more than about 5%
+of halves for lag. It reaches each variant by Service DNS (section 11)
+with HTTP keep-alives disabled, so every request opens its own
+connection: kube-proxy balances per connection, so a kept-alive stream
+would pin to one replica, and HPA's second pod and readiness changes
+would act only on new connections. No host ports are published; the gate and orchestrator stay on
+the host and drive the cluster through the API server on loopback.
+
+**Control API.** A listener on a separate port behind a ClusterIP Service,
+reached from the host through the API server's service proxy. Loadgen
+holds no Kubernetes API credentials. Through it the orchestrator and gate
+add and remove targets, start a burst, read records and verdicts, read
+`boot_id`, and restore salts. The owner approved this in-cluster listener
+(2026-10-13).
+
+**Restart safety.** A variant's salts live in loadgen's memory, and each
+recorded salt is also appended to a journal on an `emptyDir` (it survives
+a container restart, not a pod recreation). The orchestrator keeps a copy
+of every live variant's salts, read through the control API. When it sees
+a new `boot_id` it restores them with a PUT; that window is excluded for
+all variants, and loadgen sends nothing to a variant until its restore
+completes. Otherwise a restart would empty the Runs and a mutant could
+replay hashes from before it.
 
 ## 11. Orchestrator
 
@@ -668,12 +768,14 @@ fitness scoring (section 9) is what does the ranking.
 
 **Namespace lifecycle:**
 - **Created** by gate Stage 5, when the candidate is deployed for its
-  gate probe.
+  gate probe, labelled `ek8s.io/role: variant`.
 - **Stage 5 fail:** the namespace is deleted (cascading everything in
   it).
 - **Stage 5 pass:** nothing changes in the cluster. The orchestrator marks
   the variant live and adds `<svc>.ek8s-v<id>.svc.cluster.local` to the
-  load generator's target list. The pod is still warm; no redeploy.
+  load generator's target list (through its control API, section 10). The
+  pod is still warm; no redeploy, and its classifier Run carries on from
+  the burst.
 - **Culled after scoring:** the namespace is deleted.
 
 **Why the original relabel-in-place design was dropped:** it could never
@@ -699,6 +801,22 @@ send them anywhere.
 Deployment on for each stress half and off for each baseline half, and on
 before calling gate Stage 5 (section 7), marking that window excluded from
 scoring.
+
+**Excluded windows.** The orchestrator marks a window excluded from
+scoring for a stress change, a Stage 5 probe, a gate build, a loadgen
+restore (section 10), or a loadgen exclusion trigger (lag, a skipped
+send, a ring gap). Probe Events (readiness failures, restarts) are
+diagnostics only, never a reason to exclude: a variant's own readiness
+behaviour is part of what is scored.
+
+**Readiness probe.** `/readyz` every 2s, `timeoutSeconds` 2,
+`failureThreshold` 3. Under a 1-CPU limit with hashes in flight a 1s
+timeout can flap a loaded variant out of its own Service; 3 failures at a
+2s period react in about 6s, past `cmd/service`'s 5s drain delay, so the
+probe no longer sees the drain's 503 in time to be what removes a
+terminating pod from rotation (that relies on the pod's deletion
+removing it from the Service's endpoints, which is Kubernetes behaviour
+not yet checked in the smoke tests).
 
 **Readiness dodging punishes itself.** A variant that pulls all its pods
 from rotation empties its own Service, and its own traffic fails. Within
@@ -728,7 +846,10 @@ probation is the binding case for the section 2 budget).
 6. **Observe**: one full observation window (baseline + stress-active
    halves), same shape as any live variant's.
 7. **Score & cull**: score all currently-live variants together on that
-   window's data, cull the lowest scorer back to 3.
+   window's data, cull the lowest scorer back to 3. A variant with a
+   confirmed integrity failure (section 9) is culled at once, whenever it
+   happens, and is never a parent; if that already restores the cap, the
+   window ends with no further cull.
 8. **Log**: lineage record for this attempt regardless of outcome.
 9. Repeat from 1, using the (possibly unchanged) best as a candidate
    parent alongside the rest of the archive.
@@ -769,6 +890,8 @@ all):
   **oldest** entry -- plain recency, no genotype-distance computation.
 - Exception: the single best-scoring candidate ever produced is never
   evicted by the FIFO rule.
+- A variant disqualified for an integrity failure (section 9) is archived
+  with its record but is not eligible as a parent.
 
 **Known, accepted limitation:** an archived variant's fitness score was
 measured under whatever live conditions existed at the time -- not
@@ -972,6 +1095,11 @@ independent of whether the stagnation logic is itself working correctly.
 - Exact numeric starting points (fitness component weights, normalization
   bounds, stress-ng dosing, per-pod resource limits, FIFO archive cap,
   stagnation soft/hard thresholds, usage ceiling, per-variant stream rate
-  `r`, sustained-mode hash verification sample rate) are all explicitly
+  `r` and the 0.5 x C0 factor, sustained-mode hash verification sample
+  rate, the 50/48/2 request mix and the match:mismatch split, the Stage 5
+  negative share (5%), loadgen's 750m/256Mi sizing and its full-verification
+  token-bucket rate, the lag thresholds (p99 10 ms, any 100 ms), the 5%
+  lag-exclusion trigger for the static CPU manager, 3 consecutive excluded
+  halves, readiness-probe timings) are all explicitly
   starting guesses pending real telemetry, not derived values -- expect to
   tune all of them once the loop is running.
