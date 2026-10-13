@@ -102,7 +102,7 @@ func TestPoolMultiByte(t *testing.T) {
 }
 
 // TestPoolVerify runs every pair through the fixed core. Not skipped
-// under -short: the pool is the ground truth for gate and loadgen.
+// under -short: the pool is the gate's ground truth.
 // Skipped under -race only.
 func TestPoolVerify(t *testing.T) {
 	if raceEnabled {

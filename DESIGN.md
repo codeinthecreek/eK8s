@@ -508,12 +508,19 @@ internal/classifier/ (section 5).
   `Retry-After` contract, a malformed response (including a 2xx body that
   is not exactly the contract object below).
 
+**Integrity reasons apply at any latency.** After a transport error, the
+checks that can yield an integrity reason (section 9) run on every 2xx
+response whatever its latency, and win over the hang-timeout: a late
+fail-open or faked result is still a bypass. For a response that passes
+them, the hang-timeout decides only whether it can be `success` (or
+`graceful_shed`) rather than `failed`.
+
 **Contract negatives** are loadgen's deliberate bad `/verify` requests
 (section 10): a malformed hash string (hashcore's `ErrMalformedHash`
 class) and a well-formed hash at non-exact parameters
 (`ErrUnsupportedParams`). A negative passes as a 400 within the
-hang-timeout or as a `graceful_shed`; any 2xx to one is
-`negative_accepted` (the fail-open case, section 7 Stage 2), and
+hang-timeout or as a `graceful_shed`; any 2xx to one, at any latency,
+is `negative_accepted` (the fail-open case, section 7 Stage 2), and
 anything else is `failed`. Negatives are outside `success_rate`, p95 and
 `cpu_per_success` (section 9).
 
@@ -735,7 +742,13 @@ of halves for lag. It reaches each variant by Service DNS (section 11)
 with HTTP keep-alives disabled, so every request opens its own
 connection: kube-proxy balances per connection, so a kept-alive stream
 would pin to one replica, and HPA's second pod and readiness changes
-would act only on new connections. No host ports are published; the gate and orchestrator stay on
+would act only on new connections. Its HTTP client timeout is longer
+than cmd/service's fixed `WriteTimeout` (3 x `HangTimeout`, 6s), e.g.
+`WriteTimeout` + 1s, so every response the service can ever write is
+observed and classified: a shorter timeout would turn a slow fail-open
+or faked result, one a real client waiting longer would receive, into a
+`transport_error` instead of an integrity failure (section 8, "Integrity
+reasons apply at any latency"). No host ports are published; the gate and orchestrator stay on
 the host and drive the cluster through the API server on loopback.
 
 **Control API.** A listener on a separate port behind a ClusterIP Service,
