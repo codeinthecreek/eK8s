@@ -1,0 +1,182 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ek8s-v7
+  labels:
+    # Pod Security Admission rejects any pod in this namespace that does not
+    # meet the restricted profile.
+    pod-security.kubernetes.io/enforce: restricted
+---
+# Identical resources for every variant container (DESIGN.md sec 11):
+# Burstable, CPU 250m request / 1000m limit, memory 256Mi request = limit.
+# min and max bound any stated value to the same range, so a container
+# asking for more or less is rejected at admission.
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: variant-resources
+  namespace: ek8s-v7
+spec:
+  limits:
+  - type: Container
+    defaultRequest:
+      cpu: 250m
+      memory: 256Mi
+    default:
+      cpu: 1000m
+      memory: 256Mi
+    min:
+      cpu: 250m
+      memory: 256Mi
+    max:
+      cpu: 1000m
+      memory: 256Mi
+---
+# Variant pods have no egress, and take ingress only on TCP 8080 from
+# loadgen's pods in ek8s-system (DESIGN.md sec 11). podSelector {} covers
+# every pod in the namespace, not only hasher's.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: variant
+  namespace: ek8s-v7
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: ek8s-system
+      podSelector:
+        matchLabels:
+          app: loadgen
+    ports:
+    - protocol: TCP
+      port: 8080
+---
+# The variant's pods. No replicas field: the HPA owns the count, and an
+# apply never resets it (creation starts at 1 = minReplicas). Named hasher
+# so pod names have the gate sandbox's hostname shape, hasher-<hash>-<5>
+# (the hash is 10 characters for most templates, fewer for some).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hasher
+  namespace: ek8s-v7
+  labels:
+    app: hasher
+    role: hasher
+spec:
+  selector:
+    matchLabels:
+      app: hasher
+  template:
+    metadata:
+      labels:
+        app: hasher
+        role: hasher # inventory only; selects nothing (DESIGN.md sec 11)
+        variant: ek8s-0123456789abcdef
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      # cmd/service: 5s readiness drain + 20s shutdown, under this.
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: hasher
+        # Built and kind-loaded by the orchestrator (gate Stage 1's image);
+        # the node never pulls.
+        image: ek8s-wrapper:0123456789ab
+        imagePullPolicy: Never
+        ports:
+        - name: http
+          containerPort: 8080
+          protocol: TCP
+        # Downward API only (DESIGN.md sec 5). Resources come from the
+        # LimitRange; the limits read here are the ones it set.
+        env:
+        - name: EK8S_VARIANT
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.labels['variant']
+        - name: EK8S_CPU_LIMIT_MILLIS
+          valueFrom:
+            resourceFieldRef:
+              containerName: hasher
+              resource: limits.cpu
+              divisor: 1m
+        - name: EK8S_MEM_LIMIT_BYTES
+          valueFrom:
+            resourceFieldRef:
+              containerName: hasher
+              resource: limits.memory
+              divisor: "1"
+        # /readyz is the wrapper's (evolvable); /healthz is cmd/service's
+        # (fixed), so liveness does not depend on the genome.
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: http
+          periodSeconds: 2
+          timeoutSeconds: 1
+          failureThreshold: 2
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: http
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: [ALL]
+---
+# loadgen's target: hasher.ek8s-v7.svc.cluster.local:8080
+# (DESIGN.md sec 10, sec 11).
+apiVersion: v1
+kind: Service
+metadata:
+  name: hasher
+  namespace: ek8s-v7
+  labels:
+    app: hasher
+spec:
+  selector:
+    app: hasher
+  ports:
+  - name: http
+    protocol: TCP
+    port: 8080
+    targetPort: http
+---
+# Elastic capacity within the variant (DESIGN.md sec 11): 1-2 pods, 70% of
+# the 250m CPU request. metrics-server is cluster infra (deploy/up.sh).
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: hasher
+  namespace: ek8s-v7
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: hasher
+  minReplicas: 1
+  maxReplicas: 2
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
