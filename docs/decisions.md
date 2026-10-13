@@ -492,6 +492,11 @@
 - Reason: each check fails the job unless its claim holds, and the controls keep a broken network from passing as "denied".
 - Reverse: drop the variant-smoke.sh step from deploy.yml.
 
+## 2026-10-13 · PR #28 · Variant smoke runs in deploy.yml on pull requests, not a workflow_dispatch-only workflow (amends design packet Q8 B)
+- Rejected: Q8 B's separate dispatch-only workflow (as STATUS.md Next had it).
+- Reason: the owner's PR (2) task prompt put it in deploy.yml; the cluster is already up there, and the check that proves egress denial reruns on every change that could break it (deploy/**, cmd/service/**, internal/wrapper/**, deploy.yml).
+- Reverse: move the variant-smoke.sh step to a workflow with only workflow_dispatch.
+
 ## 2026-10-13 · PR #28 · kindnet enforces egress: Q5's open condition met (DESIGN.md sec 11)
 - Evidence: deploy smoke run 38356331140, check (d): 1.1.1.1:80, 10.96.0.1:443 (API ClusterIP) and 172.18.0.2:6443 (node, API endpoint) each timed out from ek8s-v999999 and answered from ek8s-system.
 - Rejected: Calico/Cilium (not needed now).
