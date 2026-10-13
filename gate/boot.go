@@ -159,7 +159,7 @@ type sandbox struct {
 // unshare or clone without syscall, os/exec or unsafe, all outside the
 // import allowlist). The resource limits stay unset (0, unconstrained)
 // until deploy/ fixes the LimitRange values. env holds extra NAME, value
-// pairs for the sandboxed binary (Stage 4's GORACE).
+// pairs for the sandboxed binary (Stage 4's GORACE and GOMAXPROCS).
 func bwrapArgs(binary, label, hostname string, env ...string) []string {
 	args := []string{
 		"--unshare-all", "--unshare-user",

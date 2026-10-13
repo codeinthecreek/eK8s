@@ -462,3 +462,14 @@
 - Rejected: keeping '.github/workflows/**' (every deploy.yml-only change ran the Go suite and its flaky Stage 4 seeds, as on this PR).
 - Reason: a change to another workflow says nothing about Go code; ci.yml still re-runs when ci.yml itself changes, and weekly and by hand as before.
 - Reverse: restore '.github/workflows/**' in both paths lists of .github/workflows/ci.yml.
+
+## 2026-10-13 · PR #27 (inferred) · Stage 4 race boot: GOMAXPROCS = max(NumCPU, 4) via bwrap --setenv (amends the PR #25 Stage 4 load entry; answer packet O2)
+- Rejected: O1 HTTP keep-alives (the answer packet's measurements did not show them closing the miss); O3 re-seeding the racy tests (it hides in-slot races instead of catching them); O4 more load; O5 accepting the flake.
+- Reason: on a 2-CPU host gen 0 had 2 slots, so the seeded in-slot races needed two holders at once and were missed (CI run 38318638860). N is unchanged (2 x NumCPU in [8, 64]), still at least twice gen 0's slots up to 32 CPUs: 1-4 CPUs give N 8 and 4 slots, 8 CPUs N 16 and 8 slots. The probe gets the same env.
+- Reverse: drop GOMAXPROCS from raceEnv in gate/stage4.go; DESIGN.md sec 7 Stage 4 edit.
+
+## 2026-10-13 · PR #27 (inferred) · Known gap: in-slot races need concurrent holders
+- Decision: (a) the race detector orders every operation on a chan struct{} semaphore through one sync object, so one holder's release happens-before the next's acquire and an in-slot race is seen only between holders running at once; (b) a wrapper whose capacity is not derived from GOMAXPROCS (e.g. memory-limit sizing, 0 in the bare boot today) can still have 1 slot in the gate; (c) mitigated, not closed, by the GOMAXPROCS floor above.
+- Rejected: changing gen 0 to chan byte (per-slot sync objects).
+- Reason: mutants control the wrapper, so gen 0's semaphore type binds nothing.
+- Reverse: n/a (a limit); revisit with the EK8S_*_LIMIT bare-boot item (docs/STATUS.md Parked).
