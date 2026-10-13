@@ -583,8 +583,8 @@ built:
   passwords to `/hash`, or to pre-register the pool's salts with the
   judge.
 - **Behaving differently outside the gate:** a candidate can find
-  small clues that it is running inside the gate (for example, a
-  test-run label and no resource limits). It could then return a
+  small clues that it is running inside the gate (for example, no
+  resource limits, or the sandbox's process list). It could then return a
   clean 400 for bad hashes during the gate, but turn core errors into
   "match" once live. Stage 5 and the live load never send bad hashes,
   so nothing would catch it. The proposed fix is to also send
@@ -611,6 +611,9 @@ built:
 ```
 
 - Each variant gets its own namespace and identical resource limits.
+- A variant's pods are meant to have no outbound connections (a network
+  policy denies all egress) and to accept traffic only from the load
+  generator; a CI smoke test checks this.
 - Each variant gets its own fixed-rate traffic stream. There is no
   shared load balancer splitting traffic, so variants never compete
   for requests, only for the node's resources.
@@ -663,18 +666,19 @@ to 9 exist.
 For the current state, always check [STATUS.md](STATUS.md). Every
 change updates it; this page is not updated that often.
 
-In broad terms, as of 2026-10-12:
+In broad terms, as of 2026-10-13:
 
 - **Built:** the *thing being evolved* and the *rulebook for judging
   it*. That is the generation-0 service, the locked hashing core, the
   shared judge (classifier) and the known-answer test pool, plus gate
-  Stages 1-4 (section 6), all tested in CI. The base cluster setup
-  is written too (the kind config, metrics-server and the stress-ng
-  noisy neighbour), checked by a smoke test run by hand, not in CI.
-- **Next:** the per-variant cluster manifests, the load generator,
-  then gate Stage 5, which needs both.
-- **Not built yet:** the per-variant manifests, gate Stage 5, the load
-  generator, AI driver, orchestrator and lineage records. No
+  Stages 1-4 (section 6), all tested in CI. The cluster setup is
+  written too: the kind config, metrics-server, the stress-ng noisy
+  neighbour and the per-variant manifests (namespace, limits, network
+  policy, Deployment, Service, autoscaler), with a small-scale smoke
+  test in CI; the full-size run waits for the workstation.
+- **Next:** the load generator, then gate Stage 5, which needs it.
+- **Not built yet:** gate Stage 5, the load generator, AI driver,
+  orchestrator and lineage records. No
   generation has evolved yet.
 
 The reasons behind individual implementation choices are logged in

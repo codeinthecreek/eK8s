@@ -4,10 +4,10 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 *(inferred)* are guesses, not read from the repo; correct them.
 
 ## Now
-- (nothing in flight)
+- `claude/deploy-variant` (PR #28 *(inferred)*): deploy/ PR (2), the per-variant bundle: deploy/variant/*.yaml.tmpl (Namespace PSA restricted, LimitRange 250m/1000m CPU and 256Mi, NetworkPolicy deny egress + ingress 8080 from ek8s-system app=loadgen, Deployment hasher, Service, HPA 1-2 at 70%) rendered by package deploy/variant (shape checks on id, label, image, both sides tested; golden files; cmd/render); gate label prefix gate- -> ek8s- and pod names drawn as Kubernetes does (pod-template-hash length 1-10); deploy/variant-smoke.sh in deploy.yml (checks (a)-(e)); decisions entries (renderer, pod spec, smoke). Pending: the deploy smoke run; DESIGN.md sec 11's egress sentence is updated only once check (d) passes.
 
 ## Next
-- deploy/ PR (2), review packet: per-variant bundle (Namespace with PSA restricted, LimitRange 250m/1000m CPU and 256Mi, NetworkPolicy deny egress + ingress 8080 from ek8s-system app=loadgen, Deployment `hasher` to match newPodName's prefix, Service, HPA max 2) rendered by a stdlib text/template renderer that rejects a non-numeric id, a label not matching ek8s-<16 hex> and an image not matching ek8s-wrapper:[0-9a-f]{12} (both sides tested); go test golden files; egress smoke test that fails if egress is not denied; gate label prefix gate- -> ek8s- (DESIGN.md sec 5); a workflow_dispatch-only kind smoke workflow (design packet Q8 B). Then loadgen (sustained + burst, in-cluster in ek8s-system), then gate PR4: Stage 5.
+- loadgen (sustained + burst, in-cluster in ek8s-system; creates the namespace for real), then gate PR4: Stage 5.
 
 ## Parked
 - Stage 4 hash_cross-talk_without_a_race seed misses at 2 CPUs: 1/30 before PR #27, 1/100 after (taskset -c 0,1); about a 1% red ci.yml run. Cause not diagnosed; also check whether a real mutant with intermittent cross-talk can slip Stage 4 the same way.
@@ -22,7 +22,7 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 - Fitness CPU-seconds source: metrics.k8s.io gives a usage rate, while DESIGN.md sec 9 wants cumulative pod CPU-seconds; settle in the fitness design (kubelet /metrics/resource or cgroup counters).
 - loadgen PR: Guaranteed QoS with dedicated CPU, and record schedule lag (intended vs actual send time), so loadgen's own stalls are visible and those windows excluded.
 - HPA at 70% of a 250m request pins variants at maxReplicas under load; revisit with the observation-window design (also the default 300s scale-down stabilisation).
-- CI: unpin go-version 1.26.9 back to '1.26.x' once actions/go-versions' manifest lists >= 1.26.9 (docs/decisions.md, PR #18 entry).
+- CI: unpin go-version 1.26.9 back to '1.26.x' in ci.yml and deploy.yml once actions/go-versions' manifest lists >= 1.26.9 (docs/decisions.md, PR #18 entry).
 
 ## Recent
 - #27 Gate fix for the Stage 4 seed flake (answer packet O2): the race boot sets GOMAXPROCS = max(NumCPU, 4) via bwrap --setenv, N unchanged; a positive Stage 4 seed guards the env wiring; DESIGN.md sec 7 Stage 4 Mechanics; decisions entries (O2, known gap: in-slot races need concurrent holders); the hash_cross-talk seed's residual 2-CPU miss Parked (2026-10-13)
