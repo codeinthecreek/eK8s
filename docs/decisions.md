@@ -444,7 +444,7 @@
 - Reverse: DESIGN.md sec 11 edit; drop the NetworkPolicy template.
 
 ## 2026-10-12 · PR #26 · Variant resources: Burstable 250m/1000m CPU, 256Mi request = limit; HPA maxReplicas 2 (Q3; DESIGN.md sec 11)
-- Rejected: Guaranteed 1 CPU (8 pods request 8 cores > ~7 allocatable, so scale-outs go Pending); Guaranteed 500m (GOMAXPROCS rounds a limit under 2 up to 2, so throttling dominates); maxReplicas 3.
+- Rejected: Guaranteed 1 CPU (8 pods request 8 cores > ~7 allocatable, so scale-outs go Pending); Guaranteed 500m (GOMAXPROCS rounds a limit under 2 up to 2, so throttling dominates; go doc runtime.GOMAXPROCS, go1.26.9: never less than 2 unless the CPU count or affinity mask is below 2); maxReplicas 3.
 - Reason: 4 variants x 2 pods = 8 pods: 2 cores requested, 2 GiB, 8 cores of limits (overcommit is the contention scored). 256Mi / 1 CPU equals the gate's docker sub-check. Implemented in PR (2)'s templates.
 - Reverse: DESIGN.md sec 11 edit; edit the LimitRange and HPA templates.
 
