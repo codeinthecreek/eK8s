@@ -388,14 +388,21 @@ Mechanics:
   bound; it needs gcc and a static libc (libc6-dev, glibc-static). Before
   it, the gate's probe is race-built and booted the same way; any failure
   there is a gate fault. The Stage 2 process is stopped first.
-- `GORACE="halt_on_error=1 exitcode=66 atexit_sleep_ms=0"` (via bwrap
-  `--setenv`): the first race report ends the process with status 66. A
+- `GORACE="halt_on_error=1 exitcode=66 atexit_sleep_ms=0"` and
+  `GOMAXPROCS` = max(the gate host's CPUs, 4) (both via bwrap
+  `--setenv`). GOMAXPROCS has a floor of 4 so that a wrapper sizing its
+  concurrency from it (generation 0's slots) has several requests in
+  flight at once even on a 1- or 2-CPU host: the race detector orders
+  every operation on a `chan struct{}` semaphore through one sync
+  object, so it sees a race inside the slot only between holders that
+  run at once. The first race report ends the process with status 66. A
   report is that exit status, or "WARNING: DATA RACE" anywhere in the
   output, scanned in full (a candidate can log to stderr, so no prefix cap
   hides it). Checked once the load ends (or the process exits) and a 1s
   grace has passed.
-- N = 2 x the gate host's CPUs, clamped to [8, 64]: above generation 0's
-  one slot per CPU, so it sheds on any host, at a constant per-CPU load.
+- N = 2 x the gate host's CPUs, clamped to [8, 64]: at least twice
+  generation 0's slots (one per GOMAXPROCS, so 4 at 1-4 CPUs) up to 32
+  CPUs, so it sheds there, at a constant per-CPU load from 4 to 32 CPUs.
   Half `/hash` with fresh passwords (never pool ones), half `/verify`
   with pool pairs (distinct passwords, alternately match and mismatch),
   interleaved and released together.

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -53,6 +54,10 @@ const (
 	goRace       = "halt_on_error=1 exitcode=66 atexit_sleep_ms=0"
 	raceExitCode = 66
 
+	// minRaceProcs is the floor on the race boot's GOMAXPROCS
+	// (raceProcs).
+	minRaceProcs = 4
+
 	// raceMarker starts every race report; raceTailBytes of output are
 	// kept for the excerpt; the race-report Detail is at most
 	// raceDetailBytes.
@@ -65,11 +70,25 @@ const (
 )
 
 // concurrentRequests is N for a gate host with numCPU CPUs: twice the
-// CPU count, so gen 0 (one slot per CPU) sheds on any host while the
-// per-CPU load, and so the race build's latency, stays the same,
-// clamped to [minConcurrent, maxConcurrent].
+// CPU count, so gen 0 (one slot per GOMAXPROCS, raceProcs) sheds on
+// hosts up to 32 CPUs while the per-CPU load, and so the race build's
+// latency, stays the same, clamped to [minConcurrent, maxConcurrent].
 func concurrentRequests(numCPU int) int {
 	return min(max(2*numCPU, minConcurrent), maxConcurrent)
+}
+
+// raceProcs is the race boot's GOMAXPROCS for a gate host with numCPU
+// CPUs: at least minRaceProcs, so a wrapper that sizes its concurrency
+// from GOMAXPROCS (gen 0's slots) has several holders in flight at once
+// even on a 1- or 2-CPU host. The race detector only sees a race between
+// two holders of a chan struct{} semaphore when both run at once: it
+// orders every send and receive on that channel through one sync object,
+// so one holder's release happens-before the next holder's acquire.
+func raceProcs(numCPU int) int { return max(numCPU, minRaceProcs) }
+
+// raceEnv is the race boot's extra environment: GORACE and GOMAXPROCS.
+func raceEnv() []string {
+	return []string{"GORACE", goRace, "GOMAXPROCS", strconv.Itoa(raceProcs(runtime.NumCPU()))}
 }
 
 // raceRequest is one of Stage 4's concurrent requests.
@@ -211,7 +230,7 @@ func runStage4(ctx context.Context, r *Report, tc toolchain, tree, repo, work, r
 	} else if !ok {
 		return false, fmt.Errorf("race build %s (needs gcc and a static libc): %s", probePkg, out)
 	}
-	if err := preflight(ctx, probe, relay, dir, "GORACE", goRace); err != nil {
+	if err := preflight(ctx, probe, relay, dir, raceEnv()...); err != nil {
 		return false, fmt.Errorf("race %w", err)
 	}
 
@@ -224,7 +243,7 @@ func runStage4(ctx context.Context, r *Report, tc toolchain, tree, repo, work, r
 		return false, nil
 	}
 	label := newLabel()
-	sb, problem, err := bootBare(ctx, "candidate", service, relay, dir, label, "GORACE", goRace)
+	sb, problem, err := bootBare(ctx, "candidate", service, relay, dir, label, raceEnv()...)
 	if err != nil {
 		return false, err
 	}

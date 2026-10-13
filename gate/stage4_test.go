@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -148,6 +149,16 @@ func TestConcurrentRequests(t *testing.T) {
 	} {
 		if got := concurrentRequests(tt.cpus); got != tt.want {
 			t.Errorf("concurrentRequests(%d) = %d, want %d", tt.cpus, got, tt.want)
+		}
+	}
+}
+
+func TestRaceProcs(t *testing.T) {
+	for _, tt := range []struct{ cpus, want int }{
+		{1, 4}, {2, 4}, {4, 4}, {5, 5}, {8, 8}, {64, 64},
+	} {
+		if got := raceProcs(tt.cpus); got != tt.want {
+			t.Errorf("raceProcs(%d) = %d, want %d", tt.cpus, got, tt.want)
 		}
 	}
 }
@@ -471,11 +482,12 @@ func TestCheckOutcomesListCap(t *testing.T) {
 	}
 }
 
-// TestBwrapArgsEnv: extra env pairs become --setenv after EK8S_VARIANT,
-// and the binary is still the only thing bound.
+// TestBwrapArgsEnv: Stage 4's env pairs become --setenv after
+// EK8S_VARIANT, and the binary is still the only thing bound.
 func TestBwrapArgsEnv(t *testing.T) {
-	args := strings.Join(bwrapArgs("/b", "gate-x", "h", "GORACE", goRace), " ")
-	if !strings.Contains(args, "--setenv EK8S_VARIANT gate-x --setenv GORACE "+goRace+" --uid") {
+	args := strings.Join(bwrapArgs("/b", "gate-x", "h", raceEnv()...), " ")
+	procs := strconv.Itoa(raceProcs(runtime.NumCPU()))
+	if !strings.Contains(args, "--setenv EK8S_VARIANT gate-x --setenv GORACE "+goRace+" --setenv GOMAXPROCS "+procs+" --uid") {
 		t.Fatalf("argv %q", args)
 	}
 	if strings.Count(args, "-bind") != 1 {
