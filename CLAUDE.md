@@ -97,7 +97,8 @@ lineage/            SQLite (structured) + JSONL (raw claude -p transcripts).
 docs/               overview.md (plain-language introduction; DESIGN.md is
                     authoritative), decisions.md (implementation decision
                     log), STATUS.md (resume point), handoff.md (packet
-                    formats for the planning chat).
+                    formats for the planning chat), workflow/ (the
+                    project-independent method; templates, not loaded).
 ```
 
 ## Build / test

@@ -51,7 +51,8 @@ deploy/               kind config, manifests, stress-ng
 driver/               sandboxed claude -p mutation driver
 orchestrator/         population, selection, scoring loop
 lineage/              SQLite records + raw transcripts
-docs/                 overview, decisions, status, handoff formats
+docs/                 overview, decisions, status, handoff formats,
+                      workflow/ (project-independent method)
 ```
 
 ## Build and test
