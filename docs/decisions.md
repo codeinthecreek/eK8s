@@ -621,18 +621,18 @@
 - Reason: one script reuses the variant the checks need; smoke-other differs from the stand-in by label and command only.
 - Reverse: restore the label-removal step in variant-smoke.sh.
 
-## 2026-10-14 · PR #32 (inferred) · Workflow docs start in docs/workflow/ for later extraction; templates are named *.template.md
+## 2026-10-14 · PR #32 · Workflow docs start in docs/workflow/ for later extraction; templates are named *.template.md
 - Decision: docs/workflow/ holds WORKFLOW.md, chat-instructions.md and templates/*.template.md, linking only within the folder. eK8s's own CLAUDE.md, docs/handoff.md and .claude/agents/reviewer.md stay unchanged. Subdirectory CLAUDE.md files load lazily when Claude touches that subdirectory (code.claude.com/docs/en/memory), and the subagent docs (code.claude.com/docs/en/sub-agents) list the locations subagents load from (managed settings, --agents, .claude/agents/, ~/.claude/agents/, plugin agents/ directories), none of which is docs/, so the .template.md names keep Claude Code from auto-loading them.
 - Rejected: a separate repo now (nothing to extract from until the folder settles); templates named CLAUDE.md / reviewer.md in place.
 - Reason: the method is product-independent; moving a self-contained folder later is one commit.
 - Reverse: delete docs/workflow/ and the workflow/ mentions in CLAUDE.md and README.md layouts.
 
-## 2026-10-14 · PR #32 (inferred) · chat-instructions.md carries method rules only
+## 2026-10-14 · PR #32 · chat-instructions.md carries method rules only
 - Rejected: also carrying the owner's formatting preferences for shell commands and replies.
 - Reason: those are personal, differ per owner, and belong in the owner's account preferences; the method must work for any owner who pastes the block in.
 - Reverse: add a preferences section to docs/workflow/chat-instructions.md.
 
-## 2026-10-14 · PR #32 (inferred) · Every Code prompt carries a Model/Effort/Why line
+## 2026-10-14 · PR #32 · Every Code prompt carries a Model/Effort/Why line
 - Decision: `Model: <x> | Effort: <y> | Why: <one line>` starts each prompt the chat drafts; Haiku/low for information and mechanical edits, Sonnet/medium for judgement on a settled design, Opus/high for design packets and security-relevant work (docs/workflow/WORKFLOW.md sec 7).
 - Rejected: one model and effort for the whole project.
 - Reason: usage windows are hit even on a small project; matching model and effort to the prompt is the cheapest saving.
