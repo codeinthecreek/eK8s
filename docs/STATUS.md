@@ -4,8 +4,10 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 *(inferred)* are guesses, not read from the repo; correct them.
 
 ## Now
+- `claude/workflow-templates` (PR #32 *(inferred)*): docs/workflow/, the project-independent chat/Code workflow for later extraction: five *.template.md templates (CLAUDE, STATUS, decisions, handoff, reviewer), WORKFLOW.md, chat-instructions.md; eK8s's own CLAUDE.md, docs/handoff.md and reviewer.md are unchanged; docs-only.
 
 ## Next
+- Extract docs/workflow/ into its own repo (links inside it are relative and stay within the folder); then decide whether eK8s's own CLAUDE.md, handoff.md and reviewer.md are regenerated from the templates (docs/decisions.md, PR #32 *(inferred)* entry).
 - loadgen PR (its Deployment in ek8s-system: 750m/256Mi Guaranteed, label app=loadgen, its only listener the container port named control (9090), which deploy/ek8s-system/service.yaml targets; no other listener (pprof, metrics), since every root process on the node reaches any loadgen port: add a check for it; sustained + burst, control API, salt journal and restore, lag exclusion, per-half policy canary (DESIGN.md sec 11)), then gate PR4: Stage 5. The loadgen PR adds a check that loadgen never imports internal/classifier/testvectors (stated in its doc comment, not yet enforced); client timeout > WriteTimeout (DESIGN.md sec 10).
 - Orchestrator: before each half, check the kindnet DaemonSet (kube-system) is Ready, as a cheap first look only; the deciding signal is loadgen's per-half policy canary: a connection that should have been refused excludes the half, counting toward the 3-consecutive halt (kindnet runs its policy queue FailOpen; DESIGN.md sec 11; docs/decisions.md, PR #31 entry).
 
