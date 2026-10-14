@@ -29,7 +29,7 @@ Applies to every session in this repo.
   entry pointing to it.
 - Log each non-trivial decision in `docs/decisions.md`: date, PR,
   decision, rejected alternative, reason, how to reverse. Max 5 lines per
-  entry.
+  entry, not counting the `Origin:` line.
 - End every task with the packet its next step needs (`docs/handoff.md`,
   "Which packet"); the packet carries items (a)-(g) and there is no
   separate prose report. If the task prompt says "no packet", end with
@@ -63,6 +63,8 @@ Applies to every session in this repo.
   findings (re-run it only if a fix was non-trivial) and record every
   finding's disposition (fixed / declined / deferred), in the packet's
   `Self-review:` section when there is one (`docs/handoff.md`).
+  Its over-engineering findings are advisory, never must-fix; a review
+  packet lists each added guard and its threat under `Added complexity:`.
   Docs-only changes may skip it. One review per packet, not per edit,
   to keep usage down.
 

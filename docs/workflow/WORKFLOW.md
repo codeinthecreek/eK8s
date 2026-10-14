@@ -53,9 +53,11 @@ Three files, each with one job:
   decision-log entry pointing at it.
 - docs/decisions.md logs implementation-level decisions, oldest first.
   Heading: `## YYYY-MM-DD - PR #N - decision in one line`. Lines:
-  Rejected, Reason, Reverse (always), optionally `Decision:` first,
-  Revisit, `Note:`, `Follow-up:`. Max 5 lines per entry. Entries are
-  written before the PR exists, so the number starts as `PR #N (inferred)`.
+  Rejected, Reason, Reverse, `Origin:` last (always; owner, chat or Code,
+  whoever first proposed the choice), optionally `Decision:` first,
+  Revisit, `Note:`, `Follow-up:`. Max 5 lines per entry, Origin not
+  counted. Entries are written before the PR exists, so the number starts
+  as `PR #N (inferred)`.
   Format: [templates/decisions.template.md](templates/decisions.template.md).
 - docs/STATUS.md is the resume point after a gap, kept current by Code in
   every PR so the chat reads it instead of reconstructing state from
@@ -112,10 +114,17 @@ approval packet, Code runs a read-only reviewer subagent once on the
 final tree, giving it the task prompt and the base SHA. The reviewer
 returns a numbered findings list and never edits. Code fixes must-fix
 findings and records each finding's disposition (fixed / declined /
-deferred) in the packet's `Self-review:` section. Docs-only changes skip
-it. One run per packet, not per edit, to keep usage down. The point: the
-chat cannot read the repo, so every finding it makes costs a relay round
-trip, and most are checkable in-repo.
+deferred) in the packet's `Self-review:` section. Over-engineering
+findings (an added guard: what concrete threat does it answer?) are
+advisory, never must-fix. A review packet also lists each guard the
+change adds, with its threat, under `Added complexity:`; a hypothetical
+threat's guard is parked, not built, unless the owner asks or it bears
+on a non-negotiable, which goes to the owner as a question while the
+guard stays in the change. A risk the design doc lists as an accepted
+limit is never grounds for a guard beyond the mitigation it names. Docs-only changes skip the reviewer. One run
+per packet, not per edit, to keep usage down. The point: the chat cannot
+read the repo, so every finding it makes costs a relay round trip, and
+most are checkable in-repo.
 
 Measuring it: each `Feedback:` line in the next packet (tagged by Code)
 on a self-reviewed change ends with a tag.
@@ -170,7 +179,9 @@ with their reasons.
   is chosen with `/model`. Defaults vary by model, so an explicit setting is only
   needed to depart from the default. Re-check the page: these names move.
 - Review. Packet `Feedback:` lines close the loop; an approval with
-  changes counts as feedback.
+  changes counts as feedback. In a review packet, read Intent and
+  Constraints touched before the diff; challenge any Added complexity
+  line marked hypothetical.
 - Verify or flag. On tool behaviour, flags and versions, the chat checks
   the current docs or says it is unsure, rather than answering from memory.
 
@@ -249,7 +260,7 @@ Files: C = CLAUDE, D = decisions, H = handoff, R = reviewer.
 | OVERVIEW_DOCS | C | docs rechecked when the design changes | docs/overview.md and README.md |
 | OVERVIEW_TRIGGER_PATHS | C | non-design paths that also trigger that recheck | the generation-0 wrapper (internal/wrapper/) |
 | PROBABILISTIC_TEST_EXAMPLE | R | optional past example appended to checklist item 10 | (In PR #25, two negative tests passed at -count=1 but failed about 1 run in 20: the seeded defect they rely on only shows when requests happen to interleave ... |
-| PROJECT_CHECKLIST | R | checklist items 11 on, one per past `[missed]` | 5. For gate, classifier, loadgen, wrapper or fitness code: ways a mutant could game the check, i.e. pass it while doing less work or skipping Argon2 (caching, replaying, ... |
+| PROJECT_CHECKLIST | R | checklist items 12 on, one per past `[missed]` | 5. For gate, classifier, loadgen, wrapper or fitness code: ways a mutant could game the check, i.e. pass it while doing less work or skipping Argon2 (caching, replaying, ... |
 | PROTECTED_LITERAL_LOCATION | H | where the protected literal lives | the literals live in internal/hashcore/hashcore.go `paramsSegment` and `params()` |
 | PROTECTED_LITERAL_NAME | H | name of the protected literal | Argon2 parameter literal |
 | PROTECTED_LITERAL_REGEX | H | grep pattern matching it in source diffs | `^[-+].*(19456\|paramsSegment\|Memory:\|Iterations:\|Parallelism:)` |
@@ -260,7 +271,7 @@ Files: C = CLAUDE, D = decisions, H = handoff, R = reviewer.
 | REPO_LAYOUT | C | code block: directory to role, with "never touched by" rules | `cmd/service/       entrypoint: thin main.go (wires hashcore + wrapper, HTTP routes, ...` |
 | SOURCE_GLOB | H | pathspec of source files | `*.go` |
 | SYNC_DIFF_MAX_LINES | H | sync-packet diff size threshold | 400 |
-| SYNC_DOC_PATHS | H | docs diffed in a sync packet | `DESIGN.md CLAUDE.md README.md docs/handoff.md docs/overview.md` |
+| SYNC_DOC_PATHS | H | docs diffed in a sync packet (reviewer.md is always added) | `DESIGN.md CLAUDE.md README.md docs/handoff.md docs/overview.md docs/workflow/` |
 | TEST_DIFF_CONTEXT | H | context flag for test-file diffs | `-U10` |
 | TEST_GLOB | H | pathspec of test files | `*_test.go` |
 | TEST_VARIANT_FLAGS | R | test flags the reviewer may add | `-run`, `-race` or `-count=N` |
