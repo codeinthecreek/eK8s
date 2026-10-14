@@ -87,9 +87,10 @@ internal/wrapper/   evolvable: concurrency/backpressure/timeouts. The only
 gate/               correctness gate, five ordered stages (DESIGN.md sec 7).
   cmd/gate/         CLI for manual gate runs; the orchestrator calls the
                     package directly.
-loadgen/            open-loop load generator: per-variant sustained streams +
-                    Stage 5 burst mode. Imports internal/classifier and
-                    internal/hashcore.
+loadgen/            open-loop load generator: per-variant window streams +
+                    Stage 5 burst mode. Imports internal/classifier only;
+                    no Argon2 (the host generates its /verify pairs and
+                    verifies its /hash pairs).
 deploy/             kind cluster config, k8s manifests, stress-ng.
 driver/             mutation driver wrapping `claude -p`.
 orchestrator/       population manager, selection, scoring loop.

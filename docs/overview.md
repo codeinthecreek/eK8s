@@ -323,6 +323,13 @@ Any single failure rejects the candidate. There is no partial credit.
 | 4 Concurrency | local | Under parallel requests with the race detector on, no answers leak between requests |
 | 5 Under pressure | kind | It runs in its own namespace with a noisy neighbour, gets a short burst of load, and the pod must not crash and no response may be "failed" |
 
+Stages 1-4 run on the host today. The planned direction (not built) is
+to move Stages 2-4 into a pod in the cluster, so the host never runs
+candidate code; the build and the static checks stay on the host.
+The gate is a filter, not the defense: it only keeps obviously broken
+candidates out. What protects the scores is checking live answers
+(section 8), which a candidate cannot tell apart from real traffic.
+
 ## 7. How responses and variants are scored
 
 Every response from a variant is put in one of three buckets by a
@@ -423,48 +430,63 @@ carries everything required:
 
 Because of the salt, there is no single "expected" hash to
 precompute. A correct answer is any hash that checks out. The load
-generator sends a freshly random password and checks the reply:
+generator sends a random password (16 characters up to 1024 bytes) and
+checks the reply in two steps:
 
 ```
  loadgen: random password P --> /hash --> hash string H
                                               |
-   every response (cheap):                    |
+   every response (cheap, during the window): |
      - is H well-formed?                      |
      - exact t=2, m=19456, p=1?               |
-     - salt never seen before from          <-+
-       this variant?
-   all Stage 5 responses, a sample when live (costly):
+     - salt not seen before from this       <-+
+       variant (kept in loadgen's memory)?
+   after the window, on the host (costly):
      - does Verify(P, H) say match?
 ```
 
-No pool is involved, and passwords never need to repeat.
+The load generator never runs Argon2 itself; it only keeps the
+(password, hash) pairs it saw. After each window the orchestrator
+verifies them on the host with the real core, before the variant is
+scored. For a variant's first K scored windows (to start, 3) every hash
+is verified. After that only a sample is (to start, 10% of the
+variant's hashes per window). Every hash in the Stage 5 burst is
+verified too.
 
 The salt doubles as a cheat detector. Every genuine hash carries a
 brand-new random salt. With 16 random bytes, an accidental repeat is
 effectively impossible. So a repeated salt is strong evidence that the
 wrapper replayed a stored result instead of calling Argon2.
 
+A salt check alone would miss a wrapper that caches "password -> hash",
+because each password would still get a fresh-looking answer the first
+time. So about 1% of `/hash` requests deliberately repeat a password
+already sent to that variant in the same window. A correct service
+hashes it again and returns a different salt; a caching one returns the
+same hash, and is caught.
+
 ### Checking /verify: fresh known answers
 
 `/verify` is different. To judge a "match: true" reply as right or
-wrong, the judge must already know the true answer. The load generator
-builds each request itself, so it knows:
+wrong, the judge must already know the true answer. Before each
+window the host generates fresh pairs, using the real hashing core:
 
-- a *match* pair: a fresh password and a hash of it, made with the real
-  hashing core just for this request
+- a *match* pair: a fresh password and a hash of it
 - a *mismatch* pair: a fresh password and a random, well-formed hash
   that cannot belong to it
 
-Nothing repeats for a variant. A fixed pool of pairs would let a
-variant memorize "this pair -> match" and skip Argon2, so the pool is
-used only by the gate. The load generator also notes the salt of every
-hash it sends to `/verify`, so a variant that remembers one and replays
-it as a `/hash` answer is caught as a repeated salt.
+The load generator is handed the pairs and sends each one exactly once,
+to one variant. Nothing repeats and nothing is shared between variants,
+so a variant cannot memorize "this pair -> match" and skip Argon2. The
+fixed pool of test passwords and hashes is used only by the gate, never
+in live traffic. If the load generator restarts, it gets a new batch.
 
 A small share of live traffic (and at least 5% of the Stage 5 burst) is
 deliberately invalid: a malformed hash, or a well-formed one with the
 wrong settings. The only acceptable answers are a 400 or a polite
-"busy"; any success is a failure.
+"busy"; any success is a failure. Live traffic also sends three kinds
+of bad `/hash` requests: an empty password, an oversize password and
+invalid JSON. Each must get a 400.
 
 ## 9. Why so much anti-cheating, if the core is locked away?
 
@@ -549,19 +571,25 @@ bypass.
 |-------|-------------------------|-----------------|
 | Always answer "match" on /verify | no Argon2, instant | the judge checks answers against pairs it built itself, including deliberate mismatches |
 | Turn a core error into "match" (fail open) | looks robust | gate Stage 2 sends bad and wrong-strength hashes; the answer must be 400; the same invalid hashes are sent live and in Stage 5 (see "Loopholes") |
-| Return a made-up hash string | no Argon2 | format and strength checks on every response; full verification of every response in Stage 5, and a sample when live |
-| Re-send earlier hashes | no Argon2 | salt reuse is tracked for the variant's whole live life |
+| Return a made-up hash string | no Argon2 | format and strength checks on every response; full verification on the host after each window (every hash for a variant's first K windows, a sample after) and for every Stage 5 hash |
+| Re-send earlier hashes | no Argon2 | salt reuse is tracked while the load generator serves the variant; deliberately repeated passwords catch a password -> hash cache |
 | Bring its own, weaker Argon2 | faster | Stage 1 library allowlist; Stage 3 exact strength check |
 | Cheat only when overloaded | passes quiet tests | Stage 5 and the contention half use the same strict judge |
 | Pull all its pods out of rotation | avoids load | its own dedicated traffic fails, and that is scored |
 | Answer "busy" (503) to everything | never slow | only partial credit, and its success rate collapses |
 
-**Why some checks are sampled.** Fully verifying a hash costs one
-Argon2 run on the same node, which would itself distort the
-measurements. So when variants are live, cheap checks run on *every*
-response: format, strength and salt reuse. Full verification runs on a
-sample. That is why salt-reuse tracking spans a variant's whole life:
-it catches replayed hashes without paying for a full check each time.
+**Why some checks are sampled, and when they run.** Fully verifying a
+hash costs one Argon2 run, which would distort the measurements if it
+shared the node with a window. So traffic flows only during observation
+windows, and the gaps between them carry no load. Builds, gate runs and
+Stage 5 happen in the gaps, and so does full verification, after a
+window and before scoring. During a window only the cheap checks run on
+every response: format, strength and salt reuse. A variant's first K
+scored windows are verified in full; after that, a sample. A cheat
+deliberately held back past those windows could slip through. That
+limit is accepted, and a sampled catch still disqualifies. A variant
+that fails an integrity check is culled at the end of the window,
+before it is scored.
 
 ### Loopholes: decided, not yet built
 
@@ -573,18 +601,22 @@ scoring are:
   timed out could be handed to a later request. Any integrity failure
   (a wrong or reused hash, a fake "match", a success on an invalid hash)
   disqualifies the variant: the first one confirmed on the host means
-  the variant is culled at once and never becomes a parent. It counts
+  the variant is culled at the end of the window, before scoring, and
+  never becomes a parent. It counts
   even when the answer arrives past the time ceiling: a slow cheat is
   still a cheat.
-- **Memorizing verify answers:** fixed by the fresh pairs above.
+- **Memorizing verify answers:** fixed by fresh pairs, each sent once.
 - **Replaying pool hashes:** fixed by keeping the pool out of live
-  traffic and noting the salt of every hash sent to `/verify`.
+  traffic; a hash replayed as a `/hash` answer fails full verification,
+  since it does not match the password sent.
 - **Behaving differently outside the gate:** a candidate can find
   small clues that it is running inside the gate (for example, no
   resource limits, or the sandbox's process list). It could return a
   clean 400 for bad hashes during the gate, but turn core errors into
   "match" once live. Fixed by sending invalid hashes in live traffic and
-  in Stage 5, so such a candidate fails there as well.
+  in Stage 5, so such a candidate fails there as well. A candidate that
+  detects the gate in other ways is an accepted limit: the live checks
+  are what protect the scores.
 
 ## 10. Cluster layout
 
@@ -615,11 +647,16 @@ scoring are:
 - Each variant gets its own fixed-rate traffic stream. There is no
   shared load balancer splitting traffic, so variants never compete
   for requests, only for the node's resources.
+- Traffic flows only during observation windows; the gaps between
+  windows carry no load, and builds, gate runs and Stage 5 happen in
+  them. A variant starts every window from idle, so cold start is
+  scored the same for everyone.
 - The load generator is *open loop*. It sends at a fixed rate whether
   or not the service keeps up, so overload shows up as real queueing
   and latency instead of being hidden.
 - A newcomer's namespace is created by gate Stage 5. If the newcomer
-  passes, it simply goes live in place with no redeploy. When a
+  passes, it simply goes live in place with no redeploy (the pod is idle
+  until its first window, which starts cold like every other). When a
   variant is culled, its namespace is deleted.
 
 ## 11. Keeping the AI contained
@@ -680,10 +717,11 @@ In broad terms, as of 2026-10-13:
   requests, which a variant must refuse, and which failures count as
   cheating.
 - **Designed, not built:** the load generator (one long-lived
-  deployment, fresh pairs, invalid hashes in live traffic, schedule-lag
-  checks).
+  deployment, host-generated pairs sent once, invalid hashes in live
+  traffic, schedule-lag checks, no Argon2 of its own).
 - **Next:** the load generator itself, then gate Stage 5, which needs
-  it.
+  it. Also planned: a design for running gate Stages 2-4 in a pod, and a
+  classifier cleanup.
 - **Not built yet:** gate Stage 5, the load generator, AI driver,
   orchestrator and lineage records. No
   generation has evolved yet.
