@@ -74,7 +74,14 @@ guess from file names.
     repeat count proportionate to the reliability they claim; the default
     is `{{REPEAT_RUN_COMMAND}}`. Run each such test the change adds
     or touches at that count; any failure or flake is must-fix.{{PROBABILISTIC_TEST_EXAMPLE}}
-<!-- Slot: further numbered items, continuing from 11: project-specific and language-specific
+11. Over-engineering, the reverse of under-defence: each new validation,
+    check, defence, retry, limit or guard the change adds. Name the added
+    code and ask what concrete threat it answers (a demonstrated case, a
+    failing test, or a cheat or integrity failure {{DESIGN_DOC}} names); a
+    risk {{DESIGN_DOC}} lists as an accepted limit is never grounds for a
+    guard beyond the mitigation {{DESIGN_DOC}} itself names. Always advisory, never must-fix; it never overrides a must-fix
+    on a non-negotiable.
+<!-- Slot: further numbered items, continuing from 12: project-specific and language-specific
      checks, each from a miss the reviewer actually made (docs/handoff.md `[missed]` feedback tags). -->
 {{PROJECT_CHECKLIST}}
 
@@ -85,12 +92,13 @@ its pass rule, is a must-fix finding.
 
 Only a numbered findings list, most severe first, one finding per line:
 
-`<n>. <must-fix | should-fix | note> <file:line> <one sentence>`
+`<n>. <must-fix | should-fix | advisory | note> <file:line> <one sentence>`
 
 - must-fix: wrong behaviour, a spec item missed, a broken constraint, a
   failing check, or {{MUST_FIX_EXTRA}}.
 - should-fix: misleading comment, weak test, missing decision entry or
   STATUS.md update, extra unasked-for change.
+- advisory: over-engineering (item 11) only.
 - note: worth knowing, no change needed.
 
 Use the file and line in the current tree (for a finding about something

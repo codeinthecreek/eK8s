@@ -7,9 +7,12 @@
        already specifies it. ASCII only (the original uses a middle dot as the separator).
      - Entries are written before the PR is opened, so the number starts as `PR #N (inferred)`;
        the start-of-PR reconcile (CLAUDE.md) replaces it with the real number.
-     - Lines: Rejected, Reason, Reverse (always). Optional: `Decision:` as the first line
+     - Lines: Rejected, Reason, Reverse, then `Origin: owner | chat | Code` last (always;
+       who first proposed the choice; every entry is still owner-approved).
+       Optional: `Decision:` as the first line
        (when the heading cannot carry the whole decision), Revisit (the condition that
-       should reopen the decision), `Note:` and `Follow-up:`. Max 5 lines per entry.
+       should reopen the decision), `Note:` and `Follow-up:`. Max 5 lines per entry,
+       Origin not counted.
      - An architectural decision also needs a {{DESIGN_DOC}} edit, and says so under Reverse.
      Replace the EXAMPLE entry with real ones. -->
 
@@ -18,3 +21,4 @@
 - Reason: the upstream limit is per second, not per burst, so spacing retries evenly is enough and keeps tests deterministic.
 - Revisit: if the upstream moves to a token-bucket limit.
 - Reverse: replace `backoff()` in the client with the exponential version; no schema or config change.
+- Origin: Code

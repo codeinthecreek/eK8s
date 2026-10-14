@@ -82,6 +82,15 @@ guess from file names.
     two negative tests passed at -count=1 but failed about 1 run in 20: the
     seeded defect they rely on only shows when requests happen to
     interleave, and it did not always trigger.)
+13. Over-engineering, the reverse of under-defence: each new validation,
+    check, defence, retry, limit or guard the change adds. Name the added
+    code and ask what concrete threat it answers (a demonstrated case, a
+    failing test, or a cheat or integrity reason DESIGN.md sec 8-9
+    names); a risk DESIGN.md sec 15 lists as an accepted limit is never
+    grounds for a guard beyond the mitigation sec 15 itself names (for
+    example, the driver never passing candidate output into a prompt).
+    Always advisory, never must-fix; it never
+    overrides a must-fix on a non-negotiable.
 
 Also run `go build ./...`, `go vet ./...`, `go test ./...` and
 `gofmt -l .`; any failure or `gofmt -l` output is a must-fix finding.
@@ -90,12 +99,13 @@ Also run `go build ./...`, `go vet ./...`, `go test ./...` and
 
 Only a numbered findings list, most severe first, one finding per line:
 
-`<n>. <must-fix | should-fix | note> <file:line> <one sentence>`
+`<n>. <must-fix | should-fix | advisory | note> <file:line> <one sentence>`
 
 - must-fix: wrong behaviour, a spec item missed, a broken constraint, a
   failing check, or a way for a mutant to skip work.
 - should-fix: misleading comment, weak test, missing decision entry or
   STATUS.md update, extra unasked-for change.
+- advisory: over-engineering (item 13) only.
 - note: worth knowing, no change needed.
 
 Use the file and line in the current tree (for a finding about something

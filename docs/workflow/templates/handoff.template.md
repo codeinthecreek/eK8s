@@ -43,8 +43,9 @@ since #N"); "no packet" in the task prompt opts out.
   `<item> -- done | declined: <reason> | question: <question>`, so the loop
   closes visibly. A plain approval with no conditions is not feedback.
 - Review and approval packets also carry a `Self-review:` section
-  (after `Feedback:` when there is one): the reviewer subagent's findings
-  on the final tree (CLAUDE.md), one line per finding,
+  (in an approval packet after `Feedback:` when there is one; in a review
+  packet after `Added complexity:`, see "Review packet"): the reviewer
+  subagent's findings on the final tree (CLAUDE.md), one line per finding,
   `<n> <severity> <file:line> <finding> -- fixed | declined: <reason> | deferred: <where recorded>`,
   or `Self-review: skipped (docs-only)`.
 - When the change under feedback was self-reviewed, end each `Feedback:`
@@ -101,8 +102,29 @@ For a decision the owner needs to make before or during implementation.
 
 For code review of a change.
 
+- Order: header, `Feedback:` (when there is one), Task, `Added
+  complexity:`, `Self-review:`, then the items below in turn.
 - Task: the PR title, or the first line of the prompt the session
-  received, verbatim; then 2-3 lines of intent.
+  received, verbatim; then:
+  - Intent: 1-2 lines, the problem this change solves.
+  - Constraints touched: each {{DESIGN_DOC}} or CLAUDE.md non-negotiable, or
+    docs/decisions.md entry, the change relies on or alters, quoted as
+    above (`path:start-end`), or "none".
+  These come first, so the owner can review intent before the diff.
+- `Added complexity:`, after Task: one line for each new validation,
+  check, defence, retry, limit or guard the change adds,
+  `<file:line> <what it adds> -- threat: concrete: <demonstrated case, failing test, or a cheat or integrity failure {{DESIGN_DOC}} names> | hypothetical: <one line>`,
+  ending `(task prompt)` when the task prompt asked for it; or
+  `Added complexity: none`. A risk {{DESIGN_DOC}} lists as an accepted
+  limit is never grounds for a guard beyond the mitigation {{DESIGN_DOC}}
+  itself names. A hypothetical item is not built by
+  default; it goes to docs/STATUS.md Parked, unless the owner asks for it
+  (a task prompt that specifies it counts as asking). Exception: a
+  hypothetical that bears on a non-negotiable (CLAUDE.md or
+  {{DESIGN_DOC}}) is never auto-parked; it goes to the owner as a
+  question in the packet, and the guard stays in the change until the
+  owner answers. Nothing in this section weakens an existing fail-closed
+  rule.
 - Base and HEAD short SHAs. Base is `git merge-base origin/main HEAD`. If
   the owner says "since <sha>", diff from that SHA instead and say so
   (re-review after fixes); `<base>` below then means that SHA.
@@ -166,7 +188,7 @@ keeps #2 from matching #21), and use that commit as <sha>. Header:
 - `git log --oneline <sha>..origin/main`
 - docs/STATUS.md in full.
 - docs/decisions.md entries added or changed since <sha>, quoted in full.
-- `git diff <sha> origin/main -- {{SYNC_DOC_PATHS}}`
+- `git diff <sha> origin/main -- {{SYNC_DOC_PATHS}} .claude/agents/reviewer.md`
 - If that diff is over about {{SYNC_DIFF_MAX_LINES}} lines: per-file line counts plus the
   changed section headings, with the rest listed under `Omitted:`.
 - Never include {{LANGUAGE}} code.

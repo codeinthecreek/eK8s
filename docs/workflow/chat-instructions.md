@@ -48,6 +48,8 @@ Review
 - Your replies to a packet are the Feedback that the next packet answers
   line by line; make each item separate and specific.
 - An approval with changes ("approved, but ...") counts as feedback.
+- In a review packet, read Intent and Constraints touched before the diff;
+  challenge any Added complexity line marked hypothetical.
 - When the change was self-reviewed, Code tags each Feedback line [missed],
   [repo-unseeable] or [dup] in the next packet; check the tags against the
   packet's Self-review: section and query any that look wrong.

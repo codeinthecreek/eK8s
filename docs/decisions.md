@@ -1,5 +1,10 @@
 # Decision log: implementation-level decisions, oldest first (architecture lives in DESIGN.md)
 
+From the PR #34 (inferred) entry on, each entry ends with
+`- Origin: owner | chat | Code`, who first proposed the choice (every
+entry is still owner-approved). Origin does not count toward the 5-line
+max. Earlier entries are not backfilled.
+
 ## 2026-09-16 · PR #2 · `go mod init` at scaffold time (module github.com/codeinthecreek/eK8s)
 - Rejected: waiting until real code lands.
 - Reason: CLAUDE.md documents `go build ./...` / `go test ./...` as standard checks; stubs should build from day one.
@@ -638,68 +643,74 @@
 - Reason: usage windows are hit even on a small project; matching model and effort to the prompt is the cheapest saving.
 - Reverse: drop the rule from chat-instructions.md and WORKFLOW.md sec 7.
 
-## 2026-10-14 · PR #33 (inferred) · Three concerns: containment, artifact security, fitness integrity; the gate is a filter (DESIGN.md sec 7)
+## 2026-10-14 · PR #33 · Three concerns: containment, artifact security, fitness integrity; the gate is a filter (DESIGN.md sec 7)
 - Decision: the algorithm and its parameters are structural (fixed hashcore, exact params, no crypto imports); the wrapper's other security properties are enforced by integrity checks on live traffic in the cluster; the gate filters broken candidates and need not be indistinguishable from the cluster.
 - Rejected: the gate as the security boundary for wrapper behaviour, kept honest by closing every gate tell.
 - Reason: a mutant can always find another tell, so gate-only checks bind only mutants that do not look; live checks see what is scored.
 - Reverse: DESIGN.md sec 7 principle paragraph edit.
 
-## 2026-10-14 · PR #33 (inferred) · Traffic only during observation windows; builds, gate runs and Stage 5 in the gaps; cold start scored (amends the PR #26 stress-state entry; DESIGN.md sec 7, sec 11)
+## 2026-10-14 · PR #33 · Traffic only during observation windows; builds, gate runs and Stage 5 in the gaps; cold start scored (amends the PR #26 stress-state entry; DESIGN.md sec 7, sec 11)
 - Decision: gaps carry no load; nothing but scored traffic runs in a window, so Stage 5 and gate builds no longer exclude windows (the PR #26 entry's "marks the window excluded" before Stage 5 becomes "in a gap"). No warm-up exclusion: every variant starts each window from an idle gap.
 - Rejected: continuous traffic with windows excluded around builds and probes; a warm-up exclusion at window start.
 - Reason: no scored window shares the node with a build, gate run or burst, and host-side pair generation and verification get the gap; cold start is part of the behaviour scored, and the same for all. Gap order: verify, score, generate next pairs, then start the gate, so host Argon2 never competes with Stages 2-4 or Stage 5 and fails a correct candidate on the hang-timeout.
 - Reverse: DESIGN.md sec 7 Stage 5 and sec 11 edits; restore the exclusion reasons in sec 11.
 
-## 2026-10-14 · PR #33 (inferred) · /verify pairs generated on the host per window, each sent once to one variant (amends the PR #29 Q5 C fresh-pairs entry and the PR #31 FailOpen entry; DESIGN.md sec 5, 8, 10, 11)
+## 2026-10-14 · PR #33 · /verify pairs generated on the host per window, each sent once to one variant (amends the PR #29 Q5 C fresh-pairs entry and the PR #31 FailOpen entry; DESIGN.md sec 5, 8, 10, 11)
 - Decision: match = hashcore.Hash of a fresh password, mismatch = random canonical PHC at exact params with a fresh password, both made on the host before each window (a window starts only when they are ready); a loadgen restart gets a new batch, never the old one. Pool gate-only. No cross-variant reuse in v1, so egress denial is containment only (the PR #31 entry's "cross-variant pair sharing relies on it" no longer holds).
 - Rejected: loadgen generating pairs with hashcore (Argon2 on the node during scored windows); pairs shared across variants.
 - Reason: pair generation costs Argon2 time; doing it on the host in the gap keeps it out of scored windows and loadgen free of hashcore.
 - Reverse: DESIGN.md sec 10 edit; give loadgen back its hashcore import.
 
-## 2026-10-14 · PR #33 (inferred) · /hash: structural checks and a per-variant salt set in loadgen memory; ~1% repeated passwords; passwords 16 characters to 1024 bytes (amends the PR #15 salt-reuse entry and the PR #29 Q5 C and O2 entries; DESIGN.md sec 8, 10)
+## 2026-10-14 · PR #33 · /hash: structural checks and a per-variant salt set in loadgen memory; ~1% repeated passwords; passwords 16 characters to 1024 bytes (amends the PR #15 salt-reuse entry and the PR #29 Q5 C and O2 entries; DESIGN.md sec 8, 10)
 - Decision: every response is checked for format, exact params and salt against the variant's salt set, held in loadgen memory while loadgen serves the variant (no journal, no restore); about 1% of /hash requests repeat a password sent to that variant in the same window, and the same salt twice is salt_reused; /hash passwords >= 16 random characters, <= 1024 bytes (was 1-1024 bytes).
 - Rejected: a classifier Run spanning Stage 5 to cull plus a salt journal and restore (see the "Dropped" entry); no repeats (a password -> hash cache verifies, so only a repeat exposes it).
 - Reason: salts catch cross-window replay cheaply without Argon2; repeats catch caching; the floor makes a collision with a (1-1024 byte) pool password negligible.
 - Reverse: DESIGN.md sec 8, sec 10 edit.
 
-## 2026-10-14 · PR #33 (inferred) · Full verification on the host after each window, before scoring; loadgen does no Argon2 (amends the PR #29 Q3 A sizing entry; DESIGN.md sec 5, 8, 10)
+## 2026-10-14 · PR #33 · Full verification on the host after each window, before scoring; loadgen does no Argon2 (amends the PR #29 Q3 A sizing entry; DESIGN.md sec 5, 8, 10)
 - Decision: loadgen hands its recorded (password, hash) pairs to the orchestrator; every hash is verified during a variant's first K scored windows, a sample after (only scored windows count toward K); every Stage 5 burst hash is verified. Loadgen no longer imports hashcore; the PR #29 Q3 A entry's off-send-path FullVerify and token bucket go.
 - Rejected: sampled verification in loadgen during windows (Argon2 on the node competes with scored variants); verifying everything for a variant's whole life (host time per window grows with the population).
 - Reason: a mutant faking results early is caught with certainty while it is new; verification in the gap cannot distort scores.
 - Reverse: DESIGN.md sec 8, sec 10 edit; restore FullVerify in loadgen with a token bucket.
 
-## 2026-10-14 · PR #33 (inferred) · Integrity failures cull at window end, before scoring (amends the PR #29 Q6 A disqualification entry; DESIGN.md sec 9, sec 11)
+## 2026-10-14 · PR #33 · Integrity failures cull at window end, before scoring (amends the PR #29 Q6 A disqualification entry; DESIGN.md sec 9, sec 11)
 - Decision: the first confirmed integrity failure still disqualifies, but the variant is culled at window end, before scoring, not at once; a sampled catch after K still disqualifies.
 - Rejected: culling mid-window (the population changes inside a scored window).
 - Reason: verification now runs after the window, so most failures are only confirmed then; one rule for all of them.
 - Reverse: DESIGN.md sec 9, sec 11 step 7 edit.
 
-## 2026-10-14 · PR #33 (inferred) · Dropped: Run.Reserve, the salt journal and restore, the Stage-5-to-cull classifier Run, full verification during windows (reverses the PR #30 Run.Reserve entry, the PR #29 Q1 A+(i) restore clause and the PR #29 O2 entry; DESIGN.md sec 8, 10)
+## 2026-10-14 · PR #33 · Dropped: Run.Reserve, the salt journal and restore, the Stage-5-to-cull classifier Run, full verification during windows (reverses the PR #30 Run.Reserve entry, the PR #29 Q1 A+(i) restore clause and the PR #29 O2 entry; DESIGN.md sec 8, 10)
 - Decision: a /verify hash replayed as a /hash answer is caught by host verification instead of Run.Reserve; a restart only loses detection power (salt set) and that window's unverified hashes (the window is excluded). Classifier code cleanup is a later PR (docs/STATUS.md Next).
 - Rejected: keeping them alongside the new checks.
 - Reason: each existed to cover something host-side verification or the in-memory salt set now covers; the journal and restore added a control-API write path and an exclusion reason for little gain.
 - Reverse: DESIGN.md sec 8, sec 10 edit; restore Reserve's use and the restore call.
 
-## 2026-10-14 · PR #33 (inferred) · Live contract negatives gain three 400 classes: empty password, >1024-byte password, invalid JSON (amends the PR #29 Q5 C entry's "both classes"; DESIGN.md sec 7, 8, 10)
+## 2026-10-14 · PR #33 · Live contract negatives gain three 400 classes: empty password, >1024-byte password, invalid JSON (amends the PR #29 Q5 C entry's "both classes"; DESIGN.md sec 7, 8, 10)
 - Decision: five classes in sustained traffic and in the Stage 5 burst (>= 5%, every class at least once); all pass as 400 or graceful_shed, any 2xx is negative_accepted.
 - Rejected: only the two Verify-error classes live (the 400 classes would be checked by the gate only).
 - Reason: under the sec 7 principle the gate binds only mutants that do not detect it; input rejection is a security property, so it is checked live.
 - Reverse: DESIGN.md sec 8, sec 10 edit.
 
-## 2026-10-14 · PR #33 (inferred) · Gate direction: Stages 2-4 move to a pod; Stage 1 checks and builds stay on the host (planned, not built; DESIGN.md sec 7 "Planned")
+## 2026-10-14 · PR #33 · Gate direction: Stages 2-4 move to a pod; Stage 1 checks and builds stay on the host (planned, not built; DESIGN.md sec 7 "Planned")
 - Decision: pre-build checks, go vet and go build on the host, no candidate execution there; Stages 2-4 in a pod, replacing the bare boot; a host build-only probe keeps toolchain faults gate faults. Its own design packet and PR series; Stage 1's docker run sub-check is a planned removal (the gate pod proves the image boots). The bare-boot text and the PR #21 / #25 bare-boot entries stay until it lands, then that series supersedes them.
 - Rejected: bounding the bare boot with rlimits or cgroups (STATUS Parked; the gate shares the host with the live population).
 - Reason: the kubelet already bounds a pod's memory and CPU, and a pod sees the same limits as a variant.
 - Reverse: drop the "Planned" subsection.
 
-## 2026-10-14 · PR #33 (inferred) · Accepted limits; no further gate-tell closing (amends the PR #25 A1 entry's "revisit", and the reasons of the PR #26 label and PR #28 pod-name entries; DESIGN.md sec 15)
+## 2026-10-14 · PR #33 · Accepted limits; no further gate-tell closing (amends the PR #25 A1 entry's "revisit", and the reasons of the PR #26 label and PR #28 pod-name entries; DESIGN.md sec 15)
 - Decision: accepted: a cheat delayed past K windows can go uncaught; a mutant can detect the gate; a mutant can log plaintext passwords; a loadgen restart mid-window loses that window's unverified hashes. The label shape and pod-name draw stay as built but are no longer a goal; A1 is not revisited.
 - Rejected: continuing to close gate tells (GOMAXPROCS vs NumCPU, build info, environment).
 - Reason: tells cannot all be closed (A1 needs a different build); live checks protect fitness regardless.
 - Reverse: reopen the gate-detectability item in docs/STATUS.md Parked.
 
-## 2026-10-14 · PR #33 (inferred) · Starting values: K = 3, repeat share 1%, /hash password floor 16 characters (amends the PR #29 Q3 A entry; DESIGN.md sec 15)
+## 2026-10-14 · PR #33 · Starting values: K = 3, repeat share 1%, /hash password floor 16 characters (amends the PR #29 Q3 A entry; DESIGN.md sec 15)
 - Decision: K = 3, repeat share 1%, floor 16; after K, 10% of a variant's hashes verified per window; the old sustained-mode sample rate and the token-bucket rate leave sec 15's list; per-window pair-generation time and post-window verification time are workstation measurements to take.
 - Rejected: none; values are starting guesses.
 - Reason: the two measurements bound how long a gap must be.
 - Reverse: DESIGN.md sec 15 edit.
+
+## 2026-10-14 · PR #34 (inferred) · Review packets lead with intent and list added complexity; hypothetical-threat guards are parked; reviewer flags over-engineering as advisory; entries carry Origin
+- Rejected: 2-3 lines of intent and guards built for any threat by default; over-engineering as a must-fix finding.
+- Reason: the owner reviews intent before the diff, and each guard names the threat it answers, so speculative code is visible and parked; hypotheticals on hashcore isolation, protected paths, fail-closed classification or containment go to the owner with the guard kept meanwhile, so no fail-closed rule weakens; fitness integrity rests on the live checks and the sec 15 accepted limits (DESIGN.md sec 7), so its hypotheticals park like any other.
+- Reverse: revert the edits to docs/handoff.md, reviewer.md (item 13, advisory), CLAUDE.md (Self-review bullet, Origin clause), the chat Review line and the decisions.md Origin note, here and in docs/workflow/.
+- Origin: chat
