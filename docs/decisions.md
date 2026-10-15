@@ -736,7 +736,7 @@ max. Earlier entries are not backfilled.
 - Reverse: DESIGN.md sec 11 edit.
 - Origin: chat
 
-## 2026-10-15 · PR #37 (inferred) · Trailer rule covers commit messages; PR bodies keep the harness's standard footer and session link, with no model name (amends the PR #35 entry; CLAUDE.md and docs/workflow/templates/CLAUDE.template.md)
+## 2026-10-15 · PR #37 · Trailer rule covers commit messages; PR bodies keep the harness's standard footer and session link, with no model name (amends the PR #35 entry; CLAUDE.md and docs/workflow/templates/CLAUDE.template.md)
 - Decision: the trailer rule covers commit messages; PR bodies keep the harness's standard footer and session link, with no model name.
 - Rejected: dropping the footer (earlier PRs carry it); leaving the rule as worded and asking for the footer in each PR prompt.
 - Reason: "replaces the harness's attribution reminder" could be read as also dropping the PR footer; one sentence makes it explicit.
