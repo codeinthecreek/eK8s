@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	mrand "math/rand/v2"
+	"slices"
 )
 
 // The request mix, in percent: /hash, /verify and contract negatives
@@ -39,10 +40,18 @@ type Stream struct {
 	negatives int      // negatives handed out, for class rotation
 }
 
-// NewStream returns a Stream that sends each of pairs once, in order.
-// The caller must not modify pairs while the Stream is in use.
+// NewStream returns a Stream that sends each of pairs once, in random
+// order, so the host's order never decides where matches and mismatches
+// fall in the window. It keeps its own copy of pairs.
 func NewStream(pairs []Pair) *Stream {
-	return &Stream{pairs: pairs}
+	return &Stream{pairs: shuffled(pairs)}
+}
+
+// shuffled returns a copy of pairs in random order.
+func shuffled(pairs []Pair) []Pair {
+	p := slices.Clone(pairs)
+	mrand.Shuffle(len(p), func(i, j int) { p[i], p[j] = p[j], p[i] })
+	return p
 }
 
 // Next returns the next request, its kind drawn by the request mix. When
@@ -92,9 +101,9 @@ func BurstCounts(n int) (hashes, verifies, negatives int, err error) {
 
 // Burst returns a Stage 5 burst of n requests in shuffled order: the
 // negatives cycle through the classes, the /hash passwords are all fresh,
-// and the /verify requests use the first BurstCounts(n) verifies of
-// pairs, each once. It errors if n cannot hold the negatives, and wraps
-// ErrOutOfPairs if pairs is too short.
+// and the /verify requests use BurstCounts(n) verifies of pairs, drawn at
+// random, each once. It does not modify pairs. It errors if n cannot hold
+// the negatives, and wraps ErrOutOfPairs if pairs is too short.
 func Burst(n int, pairs []Pair) ([]Request, error) {
 	hashes, verifies, negatives, err := BurstCounts(n)
 	if err != nil {
@@ -110,7 +119,7 @@ func Burst(n int, pairs []Pair) ([]Request, error) {
 	for range hashes {
 		reqs = append(reqs, hashRequest(newPassword()))
 	}
-	for _, p := range pairs[:verifies] {
+	for _, p := range shuffled(pairs)[:verifies] {
 		reqs = append(reqs, verifyRequest(p))
 	}
 	mrand.Shuffle(len(reqs), func(i, j int) { reqs[i], reqs[j] = reqs[j], reqs[i] })

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"testing"
 )
 
@@ -157,8 +158,8 @@ func TestBurstCounts(t *testing.T) {
 	}
 }
 
-// TestBurst checks the quotas, every class at least once, each pair once,
-// fresh /hash passwords, and that positions are shuffled.
+// TestBurst checks the quotas, every class at least once, each pair at
+// most once, fresh /hash passwords, and that positions are shuffled.
 func TestBurst(t *testing.T) {
 	for _, n := range []int{5, 7, 100, 333} {
 		pairs := testPairs(n)
@@ -169,6 +170,10 @@ func TestBurst(t *testing.T) {
 		hashes, verifies, negatives, _ := BurstCounts(n)
 		counts := map[Kind]int{}
 		classes := map[NegativeClass]int{}
+		known := map[string]bool{}
+		for _, p := range pairs {
+			known[p.Password] = true
+		}
 		passwords := map[string]bool{}
 		for _, r := range reqs {
 			counts[r.Kind]++
@@ -180,6 +185,9 @@ func TestBurst(t *testing.T) {
 					t.Fatalf("Burst(%d): password %q sent twice", n, r.Password)
 				}
 				passwords[r.Password] = true
+				if r.Kind == KindVerify && !known[r.Password] {
+					t.Fatalf("Burst(%d): /verify password %q is not from a pair", n, r.Password)
+				}
 			}
 		}
 		if len(reqs) != n || counts[KindHash] != hashes || counts[KindVerify] != verifies || counts[KindNegative] != negatives {
@@ -188,11 +196,6 @@ func TestBurst(t *testing.T) {
 		for _, c := range negativeClasses {
 			if k := classes[c]; k < negatives/len(negativeClasses) || k > negatives/len(negativeClasses)+1 {
 				t.Errorf("Burst(%d): %d negatives of class %s out of %d", n, k, c, negatives)
-			}
-		}
-		for _, p := range pairs[:verifies] {
-			if !passwords[p.Password] {
-				t.Errorf("Burst(%d): pair %q not sent", n, p.Password)
 			}
 		}
 	}
@@ -220,4 +223,65 @@ func TestBurst(t *testing.T) {
 	if _, err := Burst(100, testPairs(verifies-1)); !errors.Is(err, ErrOutOfPairs) {
 		t.Errorf("Burst(100) with %d pairs: err = %v, want ErrOutOfPairs", verifies-1, err)
 	}
+}
+
+// matchesThenMismatches returns n matching pairs followed by n mismatching
+// ones: a host batch in the worst order.
+func matchesThenMismatches(n int) []Pair {
+	pairs := testPairs(2 * n)
+	for i := range pairs {
+		pairs[i].Match = i < n
+	}
+	return pairs
+}
+
+// TestPairOrderIgnored checks that a batch of all matches followed by all
+// mismatches comes out interleaved, from a Stream and from a Burst, and
+// that neither reorders nor keeps the caller's slice. The match share of
+// n pairs drawn from 2n has a standard deviation of about 0.025 here; the
+// tolerances are 5 of them.
+func TestPairOrderIgnored(t *testing.T) {
+	const n = 200
+	pairs := matchesThenMismatches(n)
+	orig := slices.Clone(pairs)
+	s := NewStream(pairs)
+	if !slices.Equal(pairs, orig) {
+		t.Fatal("NewStream reordered the caller's pairs")
+	}
+	for i := range pairs {
+		pairs[i] = Pair{Password: "overwritten", Hash: "overwritten"}
+	}
+	matches := 0
+	for range n {
+		r, err := s.nextVerify()
+		if err != nil {
+			t.Fatalf("Next: %v", err)
+		}
+		if r.Password == "overwritten" {
+			t.Fatal("Stream sent a pair the caller overwrote after NewStream: it aliases the caller's slice")
+		}
+		if r.Match {
+			matches++
+		}
+	}
+	within(t, "match share of a Stream's first half of verifies", float64(matches)/n, 0.5, 0.125)
+
+	const burst = 400
+	_, verifies, _, _ := BurstCounts(burst)
+	pairs = matchesThenMismatches(verifies)
+	orig = slices.Clone(pairs)
+	reqs, err := Burst(burst, pairs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(pairs, orig) {
+		t.Fatal("Burst reordered the caller's pairs")
+	}
+	matches = 0
+	for _, r := range reqs {
+		if r.Kind == KindVerify && r.Match {
+			matches++
+		}
+	}
+	within(t, "match share of a Burst's verifies", float64(matches)/float64(verifies), 0.5, 0.13)
 }
