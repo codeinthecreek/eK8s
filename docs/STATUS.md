@@ -4,7 +4,7 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 *(inferred)* are guesses, not read from the repo; correct them.
 
 ## Now
-- `claude/loadgen-orchestrator-boundary` (PR #36 *(inferred)*): docs-only: DESIGN.md sec 10, 11 record the loadgen/orchestrator boundary (raw records, halves and canary on the orchestrator side, ring size, stress waits); two decisions.md entries; the start-of-PR reconcile (PR #35 merged) is its own commit first.
+- `claude/commit-trailer-pr-footer` (PR #37 *(inferred)*): docs-only: the commit-trailer rule covers commit messages only; PR bodies keep the harness's standard footer and session link, with no model name (CLAUDE.md and its workflow template; one decisions.md entry). The start-of-PR reconcile (PR #36 merged) is its own commit first.
 
 ## Next
 - Extract docs/workflow/ into its own repo (links inside it are relative and stay within the folder); then decide whether eK8s's own CLAUDE.md, handoff.md and reviewer.md are regenerated from the templates (docs/decisions.md, PR #32 entry).
@@ -26,6 +26,7 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 - CI: unpin go-version 1.26.9 back to '1.26.x' in ci.yml and deploy.yml once actions/go-versions' manifest lists >= 1.26.9 (docs/decisions.md, PR #18 entry).
 
 ## Recent
+- #36 docs-only: DESIGN.md sec 10, 11 record the loadgen/orchestrator boundary (raw records, halves and canary on the orchestrator side, ring size, stress waits); two decisions.md entries (2026-10-15)
 - #35 CLAUDE.md, docs-only: every commit message ends with two fixed trailers (`Co-Authored-By: Claude <noreply@anthropic.com>`, `Claude-Session: <link>`), no model name in commit messages, PR titles or PR bodies, new commits only; same bullet in docs/workflow/templates/CLAUDE.template.md (2026-10-15)
 - #34 workflow, docs-only: review packets lead with Intent and Constraints touched and list `Added complexity:` before `Self-review:`; hypothetical-threat guards parked unless the owner asks (non-negotiable ones go to the owner as a question); reviewer over-engineering finding is advisory; decisions.md `Origin:` field on new entries; same edits in the docs/workflow/ templates (2026-10-14)
 - #33 Fitness-first redesign, docs-only: DESIGN.md sec 7 three-concerns principle (containment, artifact security, fitness integrity; the gate is a filter) and a "Planned" gate-pod subsection; traffic only in observation windows, builds/gate/Stage 5 in gaps, cold start scored; host-generated /verify pairs per window; /hash salt set in loadgen memory, ~1% repeats, 16-character floor; host full verification after each window (all hashes for K = 3 scored windows, then a sample); integrity culls at window end before scoring; five live contract-negative classes; accepted limits in sec 15; eleven decisions.md entries; CLAUDE.md loadgen layout line and overview.md updated (2026-10-14)
