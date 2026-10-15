@@ -782,16 +782,19 @@ pool stays gate-only (section 5).
 traffic -- `/verify` with a malformed hash and with a well-formed hash at
 non-exact parameters, an empty password, a password over 1024 bytes, and
 invalid JSON. Loadgen builds every negative itself, hash strings
-included. Every password, salt and key byte it sends comes from
-`crypto/rand`; `math/rand/v2` makes only the other choices (request kind
-and order, a negative's form, cut points, lengths). The malformed and
-non-exact-parameters hash strings need no Argon2, since hashcore rejects
-both before hashing. The classes rotate within each stream, from a
-random starting class. A Stage 5 burst of n requests holds
-max(ceil(0.05 n), 5) negatives, every class at least once. They pass as
-400 or `graceful_shed`; a 2xx is `negative_accepted`. Because they are in
-live traffic too, a wrapper that detects the gate and fails open only
-outside it is caught (the PR #6 fail-open bypass).
+included. Every random byte of a password, salt or key that loadgen
+generates comes from `crypto/rand` (the host makes the `/verify` pairs);
+`math/rand/v2` makes only the structural choices: request kind and
+order, which password repeats, lengths, a negative's form and the defect
+it carries (cut point, whether salt or key is altered, newline position,
+the value set in the unused low bits, wrong type, trailing data). The
+malformed and non-exact-parameters hash strings need no Argon2, since
+hashcore rejects both before hashing. The classes rotate within each
+stream, from a random starting class. A Stage 5 burst of n requests
+holds max(ceil(0.05 n), 5) negatives, every class at least once. They
+pass as 400 or `graceful_shed`; a 2xx is `negative_accepted`. Because
+they are in live traffic too, a wrapper that detects the gate and fails
+open only outside it is caught (the PR #6 fail-open bypass).
 
 **`/hash` payloads:** passwords are `crypto/rand.Text` output (RFC 4648
 base32: A-Z, 2-7), concatenated and cut to a length drawn uniformly from
