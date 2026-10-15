@@ -715,9 +715,23 @@ max. Earlier entries are not backfilled.
 - Reverse: revert the edits to docs/handoff.md, reviewer.md (item 13, advisory), CLAUDE.md (Self-review bullet, Origin clause), the chat Review line and the decisions.md Origin note, here and in docs/workflow/.
 - Origin: chat
 
-## 2026-10-15 · PR #35 (inferred) · Fixed commit trailers via a CLAUDE.md rule, with no model name
+## 2026-10-15 · PR #35 · Fixed commit trailers via a CLAUDE.md rule, with no model name
 - Decision: every commit message ends with `Co-Authored-By: Claude <noreply@anthropic.com>` and `Claude-Session: <this session's claude.ai/code link>` (the second omitted when a session has no link); no model name or identifier in commit messages, PR titles or PR bodies; new commits only, never amend to change trailers. The same bullet is in docs/workflow/templates/CLAUDE.template.md.
 - Rejected: `attribution.commit` in .claude/settings.json (no evidence the harness reminder reads it); the reminder's model-named trailer (it conflicts with Claude Code's built-in ban on model identifiers in pushed artifacts); amending PR #34's commits (CLAUDE.md: never amend or re-author).
 - Reason: the harness reminder says a CLAUDE.md rule takes precedence over it, so one rule satisfies both sources; commit identity is unchanged (PR #8 and PR #9 entries).
 - Reverse: drop the bullet from CLAUDE.md and docs/workflow/templates/CLAUDE.template.md.
+- Origin: chat
+
+## 2026-10-15 · PR #36 (inferred) · Loadgen/orchestrator split: raw records, halves and canary on the orchestrator side (amends the PR #29 Q4 A lag entry and the PR #31 FailOpen entry; DESIGN.md sec 10, 11)
+- Decision: loadgen returns raw per-request records (each with its verdict, wall-clock and monotonic intended send time) and the recorded pairs; the orchestrator assigns records to halves by intended send time against its own stress-ng switch times and computes every statistic and exclusion; it triggers the per-half canary (connected or refused); the ring holds one window plus one burst, read only in gaps, a gap still excludes; one clock (the kind node is a host container).
+- Rejected: loadgen computing per-half summaries; loadgen tracking halves (per-half signals, or a schedule in the window-start call).
+- Reason: statistics and thresholds live in one place and change without a loadgen restart (a restart excludes a window); raw records can be re-checked; one clock.
+- Reverse: DESIGN.md sec 10, 11 edit.
+- Origin: chat
+
+## 2026-10-15 · PR #36 (inferred) · Orchestrator stress waits: a stress half starts once stress-ng pods are Running, a baseline half only once they are gone (DESIGN.md sec 11)
+- Decision: the orchestrator waits for the stress-ng pods to be Running before a stress half, and gone before a window (so its baseline half) starts; details are settled with the orchestrator design.
+- Rejected: assigning halves by the time of the scale call.
+- Reason: stress-ng pods take time to start and stop, e.g. Stage 5's stress running into the next window's baseline half.
+- Reverse: DESIGN.md sec 11 edit.
 - Origin: chat

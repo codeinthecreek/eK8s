@@ -817,11 +817,21 @@ workstation Argon2 benchmark; the CI smoke run uses `r` = 2.
 actual send time. A scoring half is excluded for all variants (loadgen is
 one shared process) when lag p99 exceeds 10 ms, any lag exceeds 100 ms, a
 send is skipped, or the record ring has a gap (records overwritten before
-the orchestrator read them). The thresholds are starting guesses (section
-15). CFS throttling of loadgen is logged as a diagnostic, not a trigger.
-After 3 consecutive excluded halves the orchestrator flags the run and
-halts. Records carry wall-clock time (which phase a response belongs to)
-and monotonic time (lag, latency).
+the orchestrator read them). The ring holds one full window plus one
+Stage 5 burst, and the orchestrator reads it only in gaps. The thresholds
+are starting guesses (section 15). CFS throttling of loadgen is logged as
+a diagnostic, not a trigger. After 3 consecutive excluded halves the
+orchestrator flags the run and halts.
+
+**Records, not summaries; loadgen has no halves.** Loadgen returns raw
+per-request records, each carrying its per-request verdict (section 8),
+and the recorded (password, hash) pairs. Each record carries its intended
+send time in wall-clock time (assigns it to a half) and in monotonic time
+(lag, latency), plus its actual send time. The orchestrator assigns each
+record to a half by intended send time, against its own stress-ng switch
+times, and computes every per-half statistic (lag p99, `success_rate`,
+`p95_latency`, verdict counts) and every exclusion decision. Loadgen and
+the orchestrator read one clock: the kind node is a container on the host.
 
 **Runs in the cluster**, as one long-lived Deployment in namespace
 `ek8s-system` serving every variant's stream and every Stage 5 burst.
@@ -844,9 +854,10 @@ the host and drive the cluster through the API server on loopback.
 reached from the host through the API server's service proxy. Loadgen
 holds no Kubernetes API credentials. Through it the orchestrator and gate
 add and remove targets, hand over a window's `/verify` pairs, start a
-window or a burst, read records, verdicts and recorded (password, hash)
-pairs, and read `boot_id`. The owner approved this in-cluster listener
-(2026-10-13).
+window or a burst, read records, their per-request verdicts and recorded
+(password, hash) pairs, run the per-half policy canary (section 11), and
+read `boot_id`. "Verdicts" means per-request verdicts only. The owner
+approved this in-cluster listener (2026-10-13).
 
 **Restart.** A variant's salt set lives only in loadgen's memory: no
 journal, no restore. A restart empties it, which only loses detection
@@ -923,9 +934,11 @@ its policy queue FailOpen: if kindnet's userspace stops reading the
 queue, packets pass unchecked, so every NetworkPolicy fails open. That
 includes variant egress denial, now a containment measure only: fitness
 integrity no longer relies on it, since no `/verify` pair is shared
-across variants (section 10). So once per half loadgen attempts one
-connection its own policy must refuse (the API server's ClusterIP, 1s
-timeout); if it connects, enforcement is off and the half is excluded.
+across variants (section 10). So at the start of each half the
+orchestrator calls loadgen's control API for the policy canary: loadgen
+makes one connection attempt its own policy must refuse (the API server's
+ClusterIP, 1s timeout) and returns connected or refused; if connected,
+enforcement is off and the half is excluded.
 The orchestrator also checks the kindnet DaemonSet is Ready, as a cheap
 first look; Ready alone does not show the queue is being read.
 
@@ -946,7 +959,10 @@ host's reasons.
 
 **Stress state is owned by the orchestrator.** It scales the stress-ng
 Deployment on for each stress half and off for each baseline half, and on
-in a gap before calling gate Stage 5 (section 7).
+in a gap before calling gate Stage 5 (section 7). A stress half starts
+once the stress-ng pods are Running; a window, and so its baseline half,
+starts only once the stress-ng pods are gone. Details are settled with
+the orchestrator design.
 
 **Excluded windows.** The orchestrator marks a window excluded from
 scoring for a loadgen restart during it (section 10) or a loadgen
