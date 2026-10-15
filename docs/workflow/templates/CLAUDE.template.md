@@ -27,9 +27,11 @@ Applies to every session in this repo.
   `Claude-Session: <this session's claude.ai/code link>` (omit this
   line in a session that has no link).
   Never put a model name or identifier in a commit message, PR title or
-  PR body. This rule replaces the harness's attribution reminder, which
-  defers to CLAUDE.md. New commits only: never amend existing commits
-  to add or change trailers.
+  PR body. For commit messages, this rule replaces the harness's
+  attribution reminder, which defers to CLAUDE.md. PR bodies end with the
+  harness's standard "Generated with Claude Code" footer and the
+  session link, with no model name. New commits only: never amend
+  existing commits to add or change trailers.
 - Ask before: adding dependencies, changing schemas/data formats,
   exposing network services, security-relevant changes, anything hard to
   reverse, or departing from existing patterns. Anything the task prompt

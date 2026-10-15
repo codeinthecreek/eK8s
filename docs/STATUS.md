@@ -4,7 +4,7 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 *(inferred)* are guesses, not read from the repo; correct them.
 
 ## Now
-- `claude/loadgen-orchestrator-boundary` (PR #36 *(inferred)*): docs-only: DESIGN.md sec 10, 11 record the loadgen/orchestrator boundary (raw records, halves and canary on the orchestrator side, ring size, stress waits); two decisions.md entries; the start-of-PR reconcile (PR #35 merged) is its own commit first.
+- `claude/commit-trailer-pr-footer` (PR #37 *(inferred)*): docs-only: the commit-trailer rule covers commit messages only; PR bodies keep the harness's standard footer and session link, with no model name (CLAUDE.md and its workflow template; one decisions.md entry). The start-of-PR reconcile (PR #36 merged) is its own commit first.
 
 ## Next
 - Extract docs/workflow/ into its own repo (links inside it are relative and stay within the folder); then decide whether eK8s's own CLAUDE.md, handoff.md and reviewer.md are regenerated from the templates (docs/decisions.md, PR #32 entry).
