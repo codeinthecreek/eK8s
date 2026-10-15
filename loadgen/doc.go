@@ -7,6 +7,10 @@
 // /verify from host-generated pairs, and the five classes of contract
 // negatives (DESIGN.md sec 8).
 //
+// Its response checks give each response its verdict: a Checker
+// classifies one variant's responses with internal/classifier and
+// records the variant's /hash pairs, for the host to verify.
+//
 // Loadgen does no Argon2. Its build never depends, directly or
 // transitively, on internal/hashcore, internal/classifier/testvectors,
 // gate/ or any Argon2 package; deps_test.go checks this. Its _test.go
