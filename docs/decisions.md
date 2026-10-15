@@ -1,6 +1,6 @@
 # Decision log: implementation-level decisions, oldest first (architecture lives in DESIGN.md)
 
-From the PR #34 (inferred) entry on, each entry ends with
+From the PR #34 entry on, each entry ends with
 `- Origin: owner | chat | Code`, who first proposed the choice (every
 entry is still owner-approved). Origin does not count toward the 5-line
 max. Earlier entries are not backfilled.
@@ -709,7 +709,7 @@ max. Earlier entries are not backfilled.
 - Reason: the two measurements bound how long a gap must be.
 - Reverse: DESIGN.md sec 15 edit.
 
-## 2026-10-14 · PR #34 (inferred) · Review packets lead with intent and list added complexity; hypothetical-threat guards are parked; reviewer flags over-engineering as advisory; entries carry Origin
+## 2026-10-14 · PR #34 · Review packets lead with intent and list added complexity; hypothetical-threat guards are parked; reviewer flags over-engineering as advisory; entries carry Origin
 - Rejected: 2-3 lines of intent and guards built for any threat by default; over-engineering as a must-fix finding.
 - Reason: the owner reviews intent before the diff, and each guard names the threat it answers, so speculative code is visible and parked; hypotheticals on hashcore isolation, protected paths, fail-closed classification or containment go to the owner with the guard kept meanwhile, so no fail-closed rule weakens; fitness integrity rests on the live checks and the sec 15 accepted limits (DESIGN.md sec 7), so its hypotheticals park like any other.
 - Reverse: revert the edits to docs/handoff.md, reviewer.md (item 13, advisory), CLAUDE.md (Self-review bullet, Origin clause), the chat Review line and the decisions.md Origin note, here and in docs/workflow/.
