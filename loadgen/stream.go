@@ -16,8 +16,8 @@ const (
 )
 
 // repeatShare is the share of a window's or a burst's /hash requests
-// that repeat a password already sent in it (DESIGN.md sec 8). A starting
-// guess (DESIGN.md sec 15).
+// that repeat the password of another /hash request in it (DESIGN.md
+// sec 8). A starting guess (DESIGN.md sec 15).
 const repeatShare = 0.01
 
 // Stage 5 burst negatives: max(ceil(5% of n), 5) (DESIGN.md sec 10). The
@@ -109,8 +109,8 @@ func BurstCounts(n int) (hashes, verifies, negatives int, err error) {
 
 // Burst returns a Stage 5 burst of n requests in shuffled order: the
 // negatives cycle through the classes, about 1% of the /hash requests
-// repeat a password sent on /hash in the same burst (as in a Stream's
-// window) and the rest are fresh, and the /verify requests use
+// repeat the password of another /hash request in the burst (as in a
+// Stream's window, but either may be sent first) and the rest are fresh, and the /verify requests use
 // BurstCounts(n) verifies of pairs, drawn at random, each once. It does
 // not modify pairs. It errors if n cannot hold the negatives, and wraps
 // ErrOutOfPairs if pairs is too short.

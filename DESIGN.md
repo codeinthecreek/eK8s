@@ -616,11 +616,12 @@ password sent.
   Salts from 2xx hash responses that arrive after the hang-timeout are
   recorded too, so a late hash cannot be replayed on time.
 - **Repeated passwords:** about 1% of `/hash` requests repeat a password
-  already sent to that variant in the same window or Stage 5 burst. The
-  two responses must carry distinct salts; the same salt twice is an
-  integrity failure (`salt_reused`), so a wrapper that caches password ->
-  hash is caught (a cached hash still verifies, so full verification
-  alone would miss it).
+  already sent to that variant in the same window, or another `/hash`
+  request's password in the same Stage 5 burst (shuffled, so either may
+  go first). The two responses must carry distinct salts; the same salt
+  twice is an integrity failure (`salt_reused`), so a wrapper that caches
+  password -> hash is caught (a cached hash still verifies, so full
+  verification alone would miss it).
 - **Full verification, on the host, after each window and before
   scoring:** loadgen hands its recorded (password, hash) pairs to the
   orchestrator, which checks them with hashcore. Every hash is verified
@@ -797,8 +798,8 @@ base32: A-Z, 2-7), concatenated and cut to a length drawn uniformly from
 16 to 1024 inclusive. They are ASCII, so characters equal bytes, and
 `encoding/json` escapes none of them. A fresh one per request, so a
 collision with a pool password is negligible; about 1% repeat a password
-already sent to that variant in the same window or Stage 5 burst
-(section 8).
+already sent to that variant in the same window, or another `/hash`
+request's password in the same Stage 5 burst (section 8).
 
 **Loadgen does no Argon2.** It runs the structural checks on every
 response (section 8) and records each `/hash` (password, hash) pair; the

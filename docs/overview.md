@@ -461,8 +461,8 @@ wrapper replayed a stored result instead of calling Argon2.
 A salt check alone would miss a wrapper that caches "password -> hash",
 because each password would still get a fresh-looking answer the first
 time. So about 1% of `/hash` requests deliberately repeat a password
-already sent to that variant in the same window (or the same gate
-burst). A correct service hashes it again and returns a different salt;
+already sent to that variant in the same window (in a gate burst, the
+two may go out in either order). A correct service hashes it again and returns a different salt;
 a caching one returns the same hash, and is caught.
 
 ### Checking /verify: fresh known answers
