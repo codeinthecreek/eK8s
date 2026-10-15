@@ -37,14 +37,16 @@ type Stream struct {
 	pairs     []Pair
 	used      int      // pairs[:used] have been handed out
 	hashed    []string // fresh /hash passwords handed out, for repeats
-	negatives int      // negatives handed out, for class rotation
+	negatives int      // the next negative's place in the class rotation
 }
 
 // NewStream returns a Stream that sends each of pairs once, in random
 // order, so the host's order never decides where matches and mismatches
-// fall in the window. It keeps its own copy of pairs.
+// fall in the window. It keeps its own copy of pairs. Its class rotation
+// starts at a random class, so no class is always a window's first
+// negative.
 func NewStream(pairs []Pair) *Stream {
-	return &Stream{pairs: shuffled(pairs)}
+	return &Stream{pairs: shuffled(pairs), negatives: mrand.IntN(len(negativeClasses))}
 }
 
 // shuffled returns a copy of pairs in random order.

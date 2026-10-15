@@ -63,9 +63,32 @@ func TestStreamMix(t *testing.T) {
 	within(t, "repeat share of /hash", float64(repeats)/float64(counts[KindHash]), repeatShare, 0.005)
 	// Uniform picks put a repeat's relative position at 0.5 on average.
 	within(t, "mean relative position of repeated passwords", repeatPos/float64(repeats), 0.5, 0.15)
+	start := slices.Index(negativeClasses[:], classes[0])
 	for i, c := range classes {
-		if want := negativeClasses[i%len(negativeClasses)]; c != want {
+		if want := negativeClasses[(start+i)%len(negativeClasses)]; c != want {
 			t.Fatalf("negative %d has class %s, want %s (rotation)", i, c, want)
+		}
+	}
+}
+
+// TestStreamRotationStart checks that every class is the first negative
+// of some Stream. A fixed start misses four classes; a uniform one misses
+// any given class in 200 Streams with probability 0.8^200, about 4e-20.
+func TestStreamRotationStart(t *testing.T) {
+	first := map[NegativeClass]bool{}
+	for range 200 {
+		s := NewStream(nil)
+		for {
+			r, err := s.Next()
+			if err == nil && r.Kind == KindNegative {
+				first[r.Class] = true
+				break
+			}
+		}
+	}
+	for _, c := range negativeClasses {
+		if !first[c] {
+			t.Errorf("class %s was never a Stream's first negative", c)
 		}
 	}
 }
