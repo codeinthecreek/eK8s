@@ -806,9 +806,14 @@ already sent to that variant in the same window, or another `/hash`
 request's password in the same Stage 5 burst (section 8).
 
 **Loadgen does no Argon2.** It runs the structural checks on every
-response (section 8) and records each `/hash` (password, hash) pair; the
-orchestrator reads them through the control API after the window and
-fully verifies them on the host (section 8). Loadgen's build never
+response (section 8) with `internal/classifier` and no verifier, one salt
+set per variant for as long as loadgen serves it. It records the
+(password, hash) pair of a `/hash` request answered 2xx whose hash passed
+every check it makes, on time or late (late hashes are verified on the
+host too). A response body the sender could not read whole, cut short by
+its size cap or a failed read, is a transport error, not `malformed_body`.
+The orchestrator reads the pairs through the control API after the window
+and fully verifies them on the host (section 8). Loadgen's build never
 depends, directly or transitively, on `internal/hashcore`,
 `internal/classifier/testvectors`, `gate/` or any Argon2 package, and a
 `go list -deps` test checks this. Its `_test.go` files may import

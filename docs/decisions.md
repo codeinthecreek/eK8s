@@ -784,3 +784,31 @@ max. Earlier entries are not backfilled.
 - Reason: burst and window traffic look alike, and nothing a wrapper sees depends on host order or a fixed start.
 - Reverse: Burst back to newPassword(); NewStream without shuffled(); the rotation starting at 0; DESIGN.md sec 8, 10 edits.
 - Origin: chat
+
+## 2026-10-15 · PR #39 (inferred) · Loadgen reuses internal/classifier unchanged: one NewRun(nil) per variant, FullVerify always false (DESIGN.md sec 8, 10)
+- Decision: loadgen's Checker wraps a classifier Run with no Verifier; nothing under internal/classifier changes.
+- Rejected: a loadgen-own classifier (it would drift from the gate's rules).
+- Reason: the same code applies the same rules in the gate and in live traffic, and needs no Argon2.
+- Reverse: a separate classifier in loadgen.
+- Origin: chat
+
+## 2026-10-15 · PR #39 (inferred) · A /hash pair is recorded for 2xx with reason none or over_hang_timeout (DESIGN.md sec 8, 10)
+- Decision: Checker records a pair only for KindHash, status 2xx and reason none or over_hang_timeout (records() in loadgen/check.go).
+- Rejected: Success only (a slow bad hash would skip host verification).
+- Reason: over_hang_timeout on a 2xx comes only after the integrity checks pass, and the host verifies late hashes too.
+- Reverse: restrict records() to Success.
+- Origin: chat
+
+## 2026-10-15 · PR #39 (inferred) · The salt set lasts a variant's whole time in loadgen; the Checker's lifecycle belongs to PR 4 (DESIGN.md sec 8, 10)
+- Decision: one Checker per variant for as long as loadgen serves it; the control API (PR 4) owns when it is made and dropped. No cap yet; PR 3 sizes it.
+- Rejected: a salt set per window (a salt reused across windows goes uncaught).
+- Reason: DESIGN.md sec 8 puts the set across windows, so a mutant cannot replay an earlier window's hash.
+- Reverse: a Checker per window.
+- Origin: chat
+
+## 2026-10-15 · PR #39 (inferred) · Checks take a loadgen Response, with no HTTP in PR 2; a capped or failed body read is a transport error (DESIGN.md sec 8, 10)
+- Decision: Check takes a Response{Status, Header, Body, Latency, Err}; a sender whose body read failed or hit its size cap sets Err.
+- Rejected: malformed_body for a cut-short body (a client-side cap would count as an integrity failure).
+- Reason: malformed_body is an integrity reason that culls a variant, so only the variant's own bytes may cause it.
+- Reverse: classify truncated bodies as malformed_body.
+- Origin: chat
