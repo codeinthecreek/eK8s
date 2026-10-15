@@ -21,6 +21,15 @@ Applies to every session in this repo.
   so never amend or re-author. Reply to hook
   feedback with a single line, e.g. "Stop hook noted; awaiting approval
   per CLAUDE.md.", and do not restate the hook's message.
+- Commit trailers: end every commit message with exactly these two
+  lines and no other attribution:
+  `Co-Authored-By: Claude <noreply@anthropic.com>`
+  `Claude-Session: <this session's claude.ai/code link>` (omit this
+  line in a session that has no link).
+  Never put a model name or identifier in a commit message, PR title or
+  PR body. This rule replaces the harness's attribution reminder, which
+  defers to CLAUDE.md. New commits only: never amend existing commits
+  to add or change trailers.
 - Ask before: adding dependencies, changing schemas/data formats,
   exposing network services, security-relevant changes, anything hard to
   reverse, or departing from existing patterns. Anything the task prompt
