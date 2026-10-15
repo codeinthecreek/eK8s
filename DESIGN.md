@@ -133,13 +133,16 @@ repo/
                           # wrapper or loadgen (loadgen's pairs are
                           # generated fresh on the host, sec 10).
   gate/                  # correctness gate, five ordered stages.
-  loadgen/               # open-loop load generator (sec 10): per-variant
-                          # sustained streams + Stage 5 burst mode, one
+  loadgen/               # open-loop load generator (sec 10): sustained
+                          # mode (one stream per live variant, sending
+                          # only in a window or a Stage 5 burst), one
                           # long-lived Deployment. Imports
-                          # internal/classifier, never internal/hashcore:
-                          # it does no Argon2 (pairs and full verification
-                          # are the host's, sec 10). Never in the mutation
-                          # driver's sandbox.
+                          # internal/classifier; its build never depends,
+                          # directly or transitively, on internal/hashcore,
+                          # internal/classifier/testvectors, gate/ or any
+                          # Argon2 package (it does no Argon2: pairs and
+                          # full verification are the host's, sec 10).
+                          # Never in the mutation driver's sandbox.
   deploy/                # kind cluster config, k8s manifests, stress-ng.
   driver/                # mutation driver wrapping claude -p.
   orchestrator/          # population manager, selection, scoring loop.
@@ -776,22 +779,32 @@ gate-only (section 5).
 **Contract negatives** (section 8): all five classes in sustained
 traffic -- `/verify` with a malformed hash and with a well-formed hash at
 non-exact parameters, an empty password, a password over 1024 bytes, and
-invalid JSON. They are at least 5% of the Stage 5 burst, every class at
+invalid JSON. Loadgen builds every negative itself, hash strings
+included. The malformed and non-exact-parameters hash strings are
+formatted from `crypto/rand` bytes with no Argon2, since hashcore rejects
+both before hashing. The classes rotate within each stream. A Stage 5
+burst of n requests holds max(ceil(0.05 n), 5) negatives, every class at
 least once. They pass as 400 or `graceful_shed`; a 2xx is
 `negative_accepted`. Because they are in live traffic too, a wrapper that
 detects the gate and fails open only outside it is caught (the PR #6
 fail-open bypass).
 
-**`/hash` payloads:** random passwords from `crypto/rand`, at least 16
-characters and at most 1024 bytes, a fresh one per request, so a
+**`/hash` payloads:** passwords are `crypto/rand.Text` output (RFC 4648
+base32: A-Z, 2-7), concatenated and cut to a length drawn uniformly from
+16 to 1024 inclusive. They are ASCII, so characters equal bytes, and
+`encoding/json` escapes none of them. A fresh one per request, so a
 collision with a pool password is negligible; about 1% repeat a password
 already sent to that variant in the same window (section 8).
 
 **Loadgen does no Argon2.** It runs the structural checks on every
 response (section 8) and records each `/hash` (password, hash) pair; the
 orchestrator reads them through the control API after the window and
-fully verifies them on the host (section 8). Loadgen does not import
-internal/hashcore.
+fully verifies them on the host (section 8). Loadgen's build never
+depends, directly or transitively, on `internal/hashcore`,
+`internal/classifier/testvectors`, `gate/` or any Argon2 package, and a
+`go list -deps` test checks this. Its `_test.go` files may import
+hashcore to check that each negative gets the intended hashcore error;
+they are not in the binary.
 
 **Two operating modes, one generator component:**
 - Sustained mode, for the multi-minute observation window (baseline +
@@ -1266,7 +1279,8 @@ independent of whether the stagnation logic is itself working correctly.
   lag-exclusion trigger for the static CPU manager, 3 consecutive excluded
   halves, readiness-probe timings, K = 3 fully verified scored windows per
   variant, the `/hash` repeat share (1%), the `/hash` password floor (16
-  characters), the sampled verification share after K (10% of a variant's
+  characters), the `/hash` password length distribution (uniform, 16 to
+  1024), the sampled verification share after K (10% of a variant's
   hashes per window)) are all explicitly
   starting guesses pending real telemetry, not derived values -- expect to
   tune all of them once the loop is running.

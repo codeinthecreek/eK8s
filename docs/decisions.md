@@ -742,3 +742,38 @@ max. Earlier entries are not backfilled.
 - Reason: "replaces the harness's attribution reminder" could be read as also dropping the PR footer; one sentence makes it explicit.
 - Reverse: restore the PR #35 sentence in CLAUDE.md and the template.
 - Origin: chat
+
+## 2026-10-15 · PR #38 (inferred) · Loadgen formats malformed and non-exact-params hash strings itself (DESIGN.md sec 10)
+- Decision: loadgen formats both negative hash strings from crypto/rand bytes; no Argon2.
+- Rejected: the host batch carries them (more control-API payload, and it couples negatives to pair generation).
+- Reason: no Argon2 is needed, and the hashcore agreement test catches drift.
+- Reverse: DESIGN.md sec 10 edit plus moving string construction into the host batch.
+- Origin: chat
+
+## 2026-10-15 · PR #38 (inferred) · Loadgen has its own negative and password builders; gate/interop.go keeps its own (DESIGN.md sec 10)
+- Decision: two independent builders, one in loadgen and one in gate/interop.go.
+- Rejected: a shared internal package (gate's cases are a fixed set built on the pool, loadgen's are random per request, and the shared code is about three one-liners).
+- Reason: loadgen cannot import gate/; each side has a coverage test against DESIGN.md sec 8's classes.
+- Reverse: extract the one-liners into a package both import.
+- Origin: chat
+
+## 2026-10-15 · PR #38 (inferred) · /hash password alphabet and lengths (DESIGN.md sec 10, sec 15)
+- Decision: crypto/rand.Text output (base32), cut to a uniform 16 to 1024 characters.
+- Rejected: printable ASCII (encoding/json escapes some of it, so wire size drifts from password size); arbitrary UTF-8 (characters and bytes differ).
+- Reason: the 16-character floor and the 1024-byte cap then mean the same unit.
+- Reverse: DESIGN.md sec 10 and sec 15 edit; a different alphabet changes the loadgen password builder only.
+- Origin: chat
+
+## 2026-10-15 · PR #38 (inferred) · Loadgen's import rule is enforced by a go list -deps test, with test files exempt (DESIGN.md sec 10)
+- Decision: a go list -deps test over loadgen's build checks it never depends on hashcore, testvectors, gate/ or an Argon2 package; _test.go files may import hashcore.
+- Rejected: direct imports only (misses a transitive import through internal/classifier).
+- Reason: the rule is about the binary, and the negative-class tests need hashcore.
+- Reverse: drop the test and restate the rule as direct imports.
+- Origin: chat
+
+## 2026-10-15 · PR #38 (inferred) · internal/classifier gets a stdlib-only deps test (enforces the PR #15 stdlib-only decision)
+- Decision: a test lists internal/classifier's transitive dependencies and allows only the standard library.
+- Rejected: relying on the wrapper's Stage 1 allowlist alone.
+- Reason: that allowlist checks direct imports only, so a crypto or hashcore import inside classifier would reach the wrapper with no check firing.
+- Reverse: delete the test; the PR #15 entry then rests on review.
+- Origin: chat
