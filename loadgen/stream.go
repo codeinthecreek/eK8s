@@ -15,9 +15,9 @@ const (
 	negativeWeight = 2
 )
 
-// repeatShare is the share of a window's /hash requests that repeat a
-// password already sent in it (DESIGN.md sec 8). A starting guess
-// (DESIGN.md sec 15).
+// repeatShare is the share of a window's or a burst's /hash requests
+// that repeat a password already sent in it (DESIGN.md sec 8). A starting
+// guess (DESIGN.md sec 15).
 const repeatShare = 0.01
 
 // Stage 5 burst negatives: max(ceil(5% of n), 5) (DESIGN.md sec 10). The
@@ -35,9 +35,9 @@ var ErrOutOfPairs = errors.New("loadgen: out of /verify pairs")
 // It is not safe for concurrent use.
 type Stream struct {
 	pairs     []Pair
-	used      int      // pairs[:used] have been handed out
-	hashed    []string // fresh /hash passwords handed out, for repeats
-	negatives int      // the next negative's place in the class rotation
+	used      int           // pairs[:used] have been handed out
+	hashed    hashPasswords // this window's /hash passwords
+	negatives int           // the next negative's place in the class rotation
 }
 
 // NewStream returns a Stream that sends each of pairs once, in random
@@ -62,7 +62,7 @@ func shuffled(pairs []Pair) []Pair {
 func (s *Stream) Next() (Request, error) {
 	switch n := mrand.IntN(hashWeight + verifyWeight + negativeWeight); {
 	case n < hashWeight:
-		return hashRequest(s.hashPassword()), nil
+		return hashRequest(s.hashed.next()), nil
 	case n < hashWeight+verifyWeight:
 		if s.used == len(s.pairs) {
 			return Request{}, ErrOutOfPairs
@@ -76,21 +76,27 @@ func (s *Stream) Next() (Request, error) {
 	}
 }
 
-// hashPassword returns a fresh password, or with probability repeatShare
-// one already sent on /hash in this window, picked uniformly from them.
-func (s *Stream) hashPassword() string {
-	if len(s.hashed) > 0 && mrand.Float64() < repeatShare {
-		return s.hashed[mrand.IntN(len(s.hashed))]
+// hashPasswords hands out the /hash passwords of one window or one
+// burst. Its zero value is ready to use.
+type hashPasswords struct {
+	fresh []string // fresh passwords handed out, for repeats
+}
+
+// next returns a fresh password, or with probability repeatShare one
+// already handed out, picked uniformly from the fresh ones.
+func (h *hashPasswords) next() string {
+	if len(h.fresh) > 0 && mrand.Float64() < repeatShare {
+		return h.fresh[mrand.IntN(len(h.fresh))]
 	}
 	pw := newPassword()
-	s.hashed = append(s.hashed, pw)
+	h.fresh = append(h.fresh, pw)
 	return pw
 }
 
 // BurstCounts returns how many /hash, /verify and negative requests a
 // Stage 5 burst of n holds: max(ceil(5% of n), 5) negatives, and the rest
-// split 50:48, rounded to nearest. It errors if n cannot hold the
-// negatives.
+// split 50:48, rounded to nearest. The /hash count includes the repeats
+// (see Burst). It errors if n cannot hold the negatives.
 func BurstCounts(n int) (hashes, verifies, negatives int, err error) {
 	negatives = max((n*burstNegativePercent+99)/100, burstMinNegatives)
 	if n < negatives {
@@ -102,10 +108,12 @@ func BurstCounts(n int) (hashes, verifies, negatives int, err error) {
 }
 
 // Burst returns a Stage 5 burst of n requests in shuffled order: the
-// negatives cycle through the classes, the /hash passwords are all fresh,
-// and the /verify requests use BurstCounts(n) verifies of pairs, drawn at
-// random, each once. It does not modify pairs. It errors if n cannot hold
-// the negatives, and wraps ErrOutOfPairs if pairs is too short.
+// negatives cycle through the classes, about 1% of the /hash requests
+// repeat a password sent on /hash in the same burst (as in a Stream's
+// window) and the rest are fresh, and the /verify requests use
+// BurstCounts(n) verifies of pairs, drawn at random, each once. It does
+// not modify pairs. It errors if n cannot hold the negatives, and wraps
+// ErrOutOfPairs if pairs is too short.
 func Burst(n int, pairs []Pair) ([]Request, error) {
 	hashes, verifies, negatives, err := BurstCounts(n)
 	if err != nil {
@@ -118,8 +126,9 @@ func Burst(n int, pairs []Pair) ([]Request, error) {
 	for i := range negatives {
 		reqs = append(reqs, newNegative(negativeClasses[i%len(negativeClasses)]))
 	}
+	var hashed hashPasswords
 	for range hashes {
-		reqs = append(reqs, hashRequest(newPassword()))
+		reqs = append(reqs, hashRequest(hashed.next()))
 	}
 	for _, p := range shuffled(pairs)[:verifies] {
 		reqs = append(reqs, verifyRequest(p))

@@ -182,7 +182,8 @@ func TestBurstCounts(t *testing.T) {
 }
 
 // TestBurst checks the quotas, every class at least once, each pair at
-// most once, fresh /hash passwords, and that positions are shuffled.
+// most once, no /hash password equal to a pair's, and that positions are
+// shuffled. TestBurstRepeats checks the /hash repeats.
 func TestBurst(t *testing.T) {
 	for _, n := range []int{5, 7, 100, 333} {
 		pairs := testPairs(n)
@@ -197,20 +198,21 @@ func TestBurst(t *testing.T) {
 		for _, p := range pairs {
 			known[p.Password] = true
 		}
-		passwords := map[string]bool{}
+		verified := map[string]bool{}
 		for _, r := range reqs {
 			counts[r.Kind]++
 			switch r.Kind {
 			case KindNegative:
 				classes[r.Class]++
-			case KindHash, KindVerify:
-				if passwords[r.Password] {
-					t.Fatalf("Burst(%d): password %q sent twice", n, r.Password)
+			case KindHash:
+				if known[r.Password] {
+					t.Fatalf("Burst(%d): /hash password %q is a pair's", n, r.Password)
 				}
-				passwords[r.Password] = true
-				if r.Kind == KindVerify && !known[r.Password] {
-					t.Fatalf("Burst(%d): /verify password %q is not from a pair", n, r.Password)
+			case KindVerify:
+				if verified[r.Password] || !known[r.Password] {
+					t.Fatalf("Burst(%d): /verify password %q: already sent %v, from a pair %v", n, r.Password, verified[r.Password], known[r.Password])
 				}
+				verified[r.Password] = true
 			}
 		}
 		if len(reqs) != n || counts[KindHash] != hashes || counts[KindVerify] != verifies || counts[KindNegative] != negatives {
@@ -307,4 +309,23 @@ func TestPairOrderIgnored(t *testing.T) {
 		}
 	}
 	within(t, "match share of a Burst's verifies", float64(matches)/float64(verifies), 0.5, 0.13)
+}
+
+// TestBurstRepeats checks the /hash repeat share in a burst, at the same
+// tolerance as TestStreamMix's (about 5 standard deviations here).
+func TestBurstRepeats(t *testing.T) {
+	const n = 20000
+	hashes, verifies, _, _ := BurstCounts(n)
+	reqs, err := Burst(n, testPairs(verifies))
+	if err != nil {
+		t.Fatal(err)
+	}
+	distinct := map[string]bool{}
+	for _, r := range reqs {
+		if r.Kind == KindHash {
+			checkAlphabet(t, r.Password)
+			distinct[r.Password] = true
+		}
+	}
+	within(t, "repeat share of burst /hash", float64(hashes-len(distinct))/float64(hashes), repeatShare, 0.005)
 }
