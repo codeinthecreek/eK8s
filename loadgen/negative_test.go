@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"slices"
 	"strings"
@@ -173,5 +174,48 @@ func TestTooLongLen(t *testing.T) {
 	}
 	if !seenMin || !seenMax {
 		t.Errorf("lengths %d seen: %v, %d seen: %v", maxPasswordLen+1, seenMin, maxTooLongLen, seenMax)
+	}
+}
+
+// TestMalformedDrawBounds checks the draws the malformed forms make, both
+// ends of each range reached and nothing outside it: hashcore_test.go
+// enumerates every value inside the ranges, so a draw off by one at either
+// end would otherwise go unseen. With 2000 draws, missing an end of the
+// widest range (42 newline positions in the key) has probability about
+// (41/42)^2000, under 1e-20.
+func TestMalformedDrawBounds(t *testing.T) {
+	const draws = 2000
+	bounds := func(name string, lo, hi int, draw func() int) {
+		t.Helper()
+		seen := map[int]bool{}
+		for range draws {
+			v := draw()
+			if v < lo || v > hi {
+				t.Fatalf("%s: drew %d, want %d to %d", name, v, lo, hi)
+			}
+			seen[v] = true
+		}
+		if !seen[lo] || !seen[hi] {
+			t.Errorf("%s: %d seen: %v, %d seen: %v", name, lo, seen[lo], hi, seen[hi])
+		}
+	}
+	truncated := negativeForms[MalformedHash][slices.IndexFunc(negativeForms[MalformedHash], func(f negForm) bool { return f.name == "truncated" })]
+	bounds("truncated length", 1, lastCut(randomExactPHC()), func() int {
+		var body struct{ Hash string }
+		if err := json.Unmarshal(truncated.build().Body, &body); err != nil {
+			t.Fatal(err)
+		}
+		return len(body.Hash)
+	})
+	for _, n := range []int{saltLen, keyLen} {
+		b := randomBytes(n)
+		enc := b64(b)
+		bounds(fmt.Sprintf("newline position in %d bytes", n), 1, len(enc)-1, func() int {
+			return strings.IndexByte(insertNewline(b), '\n')
+		})
+		bounds(fmt.Sprintf("unused-bit value in %d bytes", n), 1, unusedBitValues(b), func() int {
+			s := setUnusedBits(b)
+			return strings.IndexByte(base64Alphabet, s[len(s)-1]) &^ strings.IndexByte(base64Alphabet, enc[len(enc)-1])
+		})
 	}
 }
