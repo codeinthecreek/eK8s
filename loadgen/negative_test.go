@@ -181,8 +181,8 @@ func TestTooLongLen(t *testing.T) {
 // ends of each range reached and nothing outside it: hashcore_test.go
 // enumerates every value inside the ranges, so a draw off by one at either
 // end would otherwise go unseen. With 2000 draws, missing an end of the
-// widest range (42 newline positions in the key) has probability about
-// (41/42)^2000, under 1e-20.
+// widest range (53 truncated lengths) has probability about
+// (52/53)^2000, about 3e-17.
 func TestMalformedDrawBounds(t *testing.T) {
 	const draws = 2000
 	bounds := func(name string, lo, hi int, draw func() int) {
