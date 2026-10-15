@@ -110,10 +110,10 @@ func BurstCounts(n int) (hashes, verifies, negatives int, err error) {
 // Burst returns a Stage 5 burst of n requests in shuffled order: the
 // negatives cycle through the classes, about 1% of the /hash requests
 // repeat the password of another /hash request in the burst (as in a
-// Stream's window, but either may be sent first) and the rest are fresh, and the /verify requests use
-// BurstCounts(n) verifies of pairs, drawn at random, each once. It does
-// not modify pairs. It errors if n cannot hold the negatives, and wraps
-// ErrOutOfPairs if pairs is too short.
+// Stream's window, but either may be sent first) and the rest are fresh,
+// and the /verify requests use BurstCounts(n) verifies of pairs, drawn at
+// random, each once. It does not modify pairs. It errors if n cannot hold
+// the negatives, and wraps ErrOutOfPairs if pairs is too short.
 func Burst(n int, pairs []Pair) ([]Request, error) {
 	hashes, verifies, negatives, err := BurstCounts(n)
 	if err != nil {
