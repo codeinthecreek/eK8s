@@ -4,7 +4,7 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 *(inferred)* are guesses, not read from the repo; correct them.
 
 ## Now
-- none
+- `claude/commit-trailers` (PR #35 *(inferred)*): docs-only: CLAUDE.md and docs/workflow/templates/CLAUDE.template.md gain a commit-trailer bullet (two fixed trailers, no model name in commit messages, PR titles or PR bodies, new commits only, never amend to change trailers); decisions.md entry for it; the start-of-PR reconcile (PR #34 merged) goes in its own commit first.
 
 ## Next
 - Extract docs/workflow/ into its own repo (links inside it are relative and stay within the folder); then decide whether eK8s's own CLAUDE.md, handoff.md and reviewer.md are regenerated from the templates (docs/decisions.md, PR #32 entry).
