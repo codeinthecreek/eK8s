@@ -743,44 +743,72 @@ max. Earlier entries are not backfilled.
 - Reverse: restore the PR #35 sentence in CLAUDE.md and the template.
 - Origin: chat
 
-## 2026-10-15 · PR #38 (inferred) · Loadgen formats malformed and non-exact-params hash strings itself (DESIGN.md sec 10)
+## 2026-10-15 · PR #38 · Loadgen formats malformed and non-exact-params hash strings itself (DESIGN.md sec 10)
 - Decision: loadgen formats both negative hash strings from crypto/rand bytes; no Argon2.
 - Rejected: the host batch carries them (more control-API payload, and it couples negatives to pair generation).
 - Reason: no Argon2 is needed, and the hashcore agreement test catches drift.
 - Reverse: DESIGN.md sec 10 edit plus moving string construction into the host batch.
 - Origin: chat
 
-## 2026-10-15 · PR #38 (inferred) · Loadgen has its own negative and password builders; gate/interop.go keeps its own (DESIGN.md sec 10)
+## 2026-10-15 · PR #38 · Loadgen has its own negative and password builders; gate/interop.go keeps its own (DESIGN.md sec 10)
 - Decision: two independent builders, one in loadgen and one in gate/interop.go.
 - Rejected: a shared internal package (gate's cases are a fixed set built on the pool, loadgen's are random per request, and the shared code is about three one-liners).
 - Reason: loadgen cannot import gate/; each side has a coverage test against DESIGN.md sec 8's classes.
 - Reverse: extract the one-liners into a package both import.
 - Origin: chat
 
-## 2026-10-15 · PR #38 (inferred) · /hash password alphabet and lengths (DESIGN.md sec 10, sec 15)
+## 2026-10-15 · PR #38 · /hash password alphabet and lengths (DESIGN.md sec 10, sec 15)
 - Decision: crypto/rand.Text output (base32), cut to a uniform 16 to 1024 characters.
 - Rejected: printable ASCII (encoding/json escapes some of it, so wire size drifts from password size); arbitrary UTF-8 (characters and bytes differ).
 - Reason: the 16-character floor and the 1024-byte cap then mean the same unit.
 - Reverse: DESIGN.md sec 10 and sec 15 edit; a different alphabet changes the loadgen password builder only.
 - Origin: chat
 
-## 2026-10-15 · PR #38 (inferred) · Loadgen's import rule is enforced by a go list -deps test, with test files exempt (DESIGN.md sec 10)
+## 2026-10-15 · PR #38 · Loadgen's import rule is enforced by a go list -deps test, with test files exempt (DESIGN.md sec 10)
 - Decision: a go list -deps test over loadgen's build checks it never depends on hashcore, testvectors, gate/ or an Argon2 package; _test.go files may import hashcore.
 - Rejected: direct imports only (misses a transitive import through internal/classifier).
 - Reason: the rule is about the binary, and the negative-class tests need hashcore.
 - Reverse: drop the test and restate the rule as direct imports.
 - Origin: chat
 
-## 2026-10-15 · PR #38 (inferred) · internal/classifier gets a stdlib-only deps test (enforces the PR #15 stdlib-only decision)
+## 2026-10-15 · PR #38 · internal/classifier gets a stdlib-only deps test (enforces the PR #15 stdlib-only decision)
 - Decision: a test lists internal/classifier's transitive dependencies and allows only the standard library.
 - Rejected: relying on the wrapper's Stage 1 allowlist alone.
 - Reason: that allowlist checks direct imports only, so a crypto or hashcore import inside classifier would reach the wrapper with no check firing.
 - Reverse: delete the test; the PR #15 entry then rests on review.
 - Origin: chat
 
-## 2026-10-15 · PR #38 (inferred) · Bursts repeat ~1% of /hash passwords; pairs go out in random order; each Stream's class rotation starts at a random class (DESIGN.md sec 8, 10)
+## 2026-10-15 · PR #38 · Bursts repeat ~1% of /hash passwords; pairs go out in random order; each Stream's class rotation starts at a random class (DESIGN.md sec 8, 10)
 - Decision: a Stage 5 burst repeats about 1% of its /hash passwords as a window does (one shared helper); Stream and Burst shuffle a copy of the host's pairs; a Stream's first negative class is random.
 - Rejected: all-fresh burst passwords (a burst could not catch a password -> hash cache); host order (it would decide where matches fall); a fixed first class.
 - Reason: burst and window traffic look alike, and nothing a wrapper sees depends on host order or a fixed start.
 - Reverse: Burst back to newPassword(); NewStream without shuffled(); the rotation starting at 0; DESIGN.md sec 8, 10 edits.
+- Origin: chat
+
+## 2026-10-15 · PR #39 (inferred) · Loadgen reuses internal/classifier unchanged: one NewRun(nil) per variant, FullVerify always false (DESIGN.md sec 8, 10)
+- Decision: loadgen's Checker wraps a classifier Run with no Verifier; nothing under internal/classifier changes.
+- Rejected: a loadgen-own classifier (it would drift from the gate's rules).
+- Reason: the same code applies the same rules in the gate and in live traffic, and needs no Argon2.
+- Reverse: a separate classifier in loadgen.
+- Origin: chat
+
+## 2026-10-15 · PR #39 (inferred) · A /hash pair is recorded for 2xx with reason none or over_hang_timeout (DESIGN.md sec 8, 10)
+- Decision: Checker records a pair only for KindHash, status 2xx and reason none or over_hang_timeout (records() in loadgen/check.go).
+- Rejected: Success only (a slow bad hash would skip host verification).
+- Reason: over_hang_timeout on a 2xx comes only after the integrity checks pass, and the host verifies late hashes too.
+- Reverse: restrict records() to Success.
+- Origin: chat
+
+## 2026-10-15 · PR #39 (inferred) · The salt set lasts a variant's whole time in loadgen; the Checker's lifecycle belongs to PR 4 (DESIGN.md sec 8, 10)
+- Decision: one Checker per variant for as long as loadgen serves it; the control API (PR 4) owns when it is made and dropped. No cap yet; PR 3 sizes it.
+- Rejected: a salt set per window (a salt reused across windows goes uncaught).
+- Reason: DESIGN.md sec 8 puts the set across windows, so a mutant cannot replay an earlier window's hash.
+- Reverse: a Checker per window.
+- Origin: chat
+
+## 2026-10-15 · PR #39 (inferred) · Checks take a loadgen Response, with no HTTP in PR 2; a capped or failed body read is a transport error (DESIGN.md sec 8, 10)
+- Decision: Check takes a Response{Status, Header, Body, Latency, Err}; a sender whose body read failed or hit its size cap sets Err.
+- Rejected: malformed_body for a cut-short body (a client-side cap would count as an integrity failure).
+- Reason: malformed_body is an integrity reason that culls a variant, so only the variant's own bytes may cause it.
+- Reverse: classify truncated bodies as malformed_body.
 - Origin: chat
