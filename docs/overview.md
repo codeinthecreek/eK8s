@@ -718,10 +718,10 @@ In broad terms, as of 2026-10-15:
   requests, which a variant must refuse, and which failures count as
   cheating.
 - **Being built:** the load generator. Its first part is written:
-  building what it sends (the traffic mix, fresh passwords, and all five
-  kinds of deliberately invalid request, each checked against the
-  hashing core in tests), with a test that it never links the hashing
-  core or any Argon2 code.
+  building what it sends (the traffic mix, fresh passwords with about 1%
+  deliberately repeated, and all five kinds of deliberately invalid
+  request, each checked against the hashing core in tests), with a test
+  that it never links the hashing core or any Argon2 code.
 - **Designed, not built:** the rest of the load generator (answer
   checks, open-loop sending, schedule-lag checks, its control API, one
   long-lived deployment; host-generated pairs sent once).
