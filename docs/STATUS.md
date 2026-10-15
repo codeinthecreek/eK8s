@@ -4,7 +4,7 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 *(inferred)* are guesses, not read from the repo; correct them.
 
 ## Now
-- `claude/loadgen-pr1-docs` (PR #38 *(inferred)*): PR 1 of the loadgen series, the request generator. Docs: DESIGN.md sec 10, 15, the loadgen layout lines, five decisions.md entries. Code: a stdlib-only `go list -deps` test for internal/classifier; package loadgen (flat, like gate/) with `Stream` (one variant, one window: 50/48/2 mix, each /verify pair once in random order then `ErrOutOfPairs`, ~1% /hash repeats, the five negative classes in rotation from a random start, with several forms each) and `Burst`/`BurstCounts` (max(ceil(0.05 n), 5) negatives, rest 50:48, a random draw of the pairs, ~1% /hash repeats, shuffled); tests for the shares, bounds and quotas, a hashcore agreement test that enumerates every malformed-hash variant (no Argon2, bounded by heap allocation) and the `go list -deps` import test. Sending, response checks and the control API are PRs 2-4.
+- claude/loadgen-pr2-checks: loadgen PR 2 of 5, response checks
 
 ## Next
 - Extract docs/workflow/ into its own repo (links inside it are relative and stay within the folder); then decide whether eK8s's own CLAUDE.md, handoff.md and reviewer.md are regenerated from the templates (docs/decisions.md, PR #32 entry).
@@ -32,6 +32,7 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 - CI: unpin go-version 1.26.9 back to '1.26.x' in ci.yml and deploy.yml once actions/go-versions' manifest lists >= 1.26.9 (docs/decisions.md, PR #18 entry).
 
 ## Recent
+- #38 Loadgen PR 1 of 5, request generator: `Stream` and `Burst` (50/48/2 mix, each /verify pair once, ~1% /hash repeats, the five contract-negative classes in rotation), tests for shares, bounds and quotas, a hashcore agreement test over the malformed-hash forms, and a `go list -deps` test keeping loadgen off hashcore, testvectors, gate/ and Argon2; a stdlib-only deps test for internal/classifier. Sending, response checks and the control API are PRs 2-4.
 - #37 CLAUDE.md, docs-only: the commit-trailer rule covers commit messages only; PR bodies keep the harness's standard footer and session link, with no model name (CLAUDE.md and its workflow template; one decisions.md entry) (2026-10-15)
 - #36 docs-only: DESIGN.md sec 10, 11 record the loadgen/orchestrator boundary (raw records, halves and canary on the orchestrator side, ring size, stress waits); two decisions.md entries (2026-10-15)
 - #35 CLAUDE.md, docs-only: every commit message ends with two fixed trailers (`Co-Authored-By: Claude <noreply@anthropic.com>`, `Claude-Session: <link>`), no model name in commit messages, PR titles or PR bodies, new commits only; same bullet in docs/workflow/templates/CLAUDE.template.md (2026-10-15)
