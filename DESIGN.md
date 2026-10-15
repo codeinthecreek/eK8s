@@ -616,11 +616,11 @@ password sent.
   Salts from 2xx hash responses that arrive after the hang-timeout are
   recorded too, so a late hash cannot be replayed on time.
 - **Repeated passwords:** about 1% of `/hash` requests repeat a password
-  already sent to that variant in the same window or Stage 5 burst. The two responses must
-  carry distinct salts; the same salt twice is an integrity failure
-  (`salt_reused`), so a wrapper that caches password -> hash is caught
-  (a cached hash still verifies, so full verification alone would miss
-  it).
+  already sent to that variant in the same window or Stage 5 burst. The
+  two responses must carry distinct salts; the same salt twice is an
+  integrity failure (`salt_reused`), so a wrapper that caches password ->
+  hash is caught (a cached hash still verifies, so full verification
+  alone would miss it).
 - **Full verification, on the host, after each window and before
   scoring:** loadgen hands its recorded (password, hash) pairs to the
   orchestrator, which checks them with hashcore. Every hash is verified
@@ -767,10 +767,10 @@ fresh, so a mutant has nothing finite to memoize or replay.
 **`/verify` pairs** are generated on the host, fresh for each window, and
 handed to loadgen through its control API. Each pair is sent once, to one
 variant; no pair is reused across variants in v1. Loadgen sends a batch
-in random order, whatever order the host hands it over in. A window starts only
-when its pairs are ready. After a loadgen restart the orchestrator hands
-over a new batch, never the old one. The test-vector pool stays
-gate-only (section 5).
+in random order, whatever order the host hands it over in. A window
+starts only when its pairs are ready. After a loadgen restart the
+orchestrator hands over a new batch, never the old one. The test-vector
+pool stays gate-only (section 5).
 - Match pair: `hashcore.Hash` of a fresh password.
 - Mismatch pair: a random canonical PHC string at the exact parameters
   with a fresh password. Sending only matching pairs would never exercise
@@ -786,12 +786,11 @@ included. Every password, salt and key byte it sends comes from
 and order, a negative's form, cut points, lengths). The malformed and
 non-exact-parameters hash strings need no Argon2, since hashcore rejects
 both before hashing. The classes rotate within each stream, from a
-random starting class. A Stage 5
-burst of n requests holds max(ceil(0.05 n), 5) negatives, every class at
-least once. They pass as 400 or `graceful_shed`; a 2xx is
-`negative_accepted`. Because they are in live traffic too, a wrapper that
-detects the gate and fails open only outside it is caught (the PR #6
-fail-open bypass).
+random starting class. A Stage 5 burst of n requests holds
+max(ceil(0.05 n), 5) negatives, every class at least once. They pass as
+400 or `graceful_shed`; a 2xx is `negative_accepted`. Because they are in
+live traffic too, a wrapper that detects the gate and fails open only
+outside it is caught (the PR #6 fail-open bypass).
 
 **`/hash` payloads:** passwords are `crypto/rand.Text` output (RFC 4648
 base32: A-Z, 2-7), concatenated and cut to a length drawn uniformly from
