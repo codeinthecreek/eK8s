@@ -777,3 +777,10 @@ max. Earlier entries are not backfilled.
 - Reason: that allowlist checks direct imports only, so a crypto or hashcore import inside classifier would reach the wrapper with no check firing.
 - Reverse: delete the test; the PR #15 entry then rests on review.
 - Origin: chat
+
+## 2026-10-15 · PR #38 (inferred) · Bursts repeat ~1% of /hash passwords; pairs go out in random order; each Stream's class rotation starts at a random class (DESIGN.md sec 8, 10)
+- Decision: a Stage 5 burst repeats about 1% of its /hash passwords as a window does (one shared helper); Stream and Burst shuffle a copy of the host's pairs; a Stream's first negative class is random.
+- Rejected: all-fresh burst passwords (a burst could not catch a password -> hash cache); host order (it would decide where matches fall); a fixed first class.
+- Reason: burst and window traffic look alike, and nothing a wrapper sees depends on host order or a fixed start.
+- Reverse: Burst back to newPassword(); NewStream without shuffled(); the rotation starting at 0; DESIGN.md sec 8, 10 edits.
+- Origin: chat
