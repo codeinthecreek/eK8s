@@ -4,7 +4,7 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 *(inferred)* are guesses, not read from the repo; correct them.
 
 ## Now
-- `claude/loadgen-pr1-docs` (PR #38 *(inferred)*): PR 1 of the loadgen series, the request generator; docs first (DESIGN.md sec 10, 15, the loadgen layout lines, five decisions.md entries), then the code in the same PR.
+- `claude/loadgen-pr1-docs` (PR #38 *(inferred)*): PR 1 of the loadgen series, the request generator. Docs: DESIGN.md sec 10, 15, the loadgen layout lines, five decisions.md entries. Code: a stdlib-only `go list -deps` test for internal/classifier; package loadgen (flat, like gate/) with `Stream` (one variant, one window: 50/48/2 mix, each /verify pair once then `ErrOutOfPairs`, ~1% /hash repeats, the five negative classes in rotation with several forms each) and `Burst`/`BurstCounts` (max(ceil(0.05 n), 5) negatives, rest 50:48, shuffled); tests for the shares, bounds and quotas, a hashcore agreement test (no Argon2, bounded by heap allocation) and the `go list -deps` import test. Sending, response checks and the control API are PRs 2-4.
 
 ## Next
 - Extract docs/workflow/ into its own repo (links inside it are relative and stay within the folder); then decide whether eK8s's own CLAUDE.md, handoff.md and reviewer.md are regenerated from the templates (docs/decisions.md, PR #32 entry).

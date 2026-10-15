@@ -701,7 +701,7 @@ to 9 exist.
 For the current state, always check [STATUS.md](STATUS.md). Every
 change updates it; this page is not updated that often.
 
-In broad terms, as of 2026-10-13:
+In broad terms, as of 2026-10-15:
 
 - **Built:** the *thing being evolved* and the *rulebook for judging
   it*. That is the generation-0 service, the locked hashing core, the
@@ -716,13 +716,18 @@ In broad terms, as of 2026-10-13:
   The judge also knows the load generator's deliberately invalid
   requests, which a variant must refuse, and which failures count as
   cheating.
-- **Designed, not built:** the load generator (one long-lived
-  deployment, host-generated pairs sent once, invalid hashes in live
-  traffic, schedule-lag checks, no Argon2 of its own).
-- **Next:** the load generator itself, then gate Stage 5, which needs
-  it. Also planned: a design for running gate Stages 2-4 in a pod, and a
-  classifier cleanup.
-- **Not built yet:** gate Stage 5, the load generator, AI driver,
+- **Being built:** the load generator. Its first part is written:
+  building what it sends (the traffic mix, fresh passwords, and all five
+  kinds of deliberately invalid request, each checked against the
+  hashing core in tests), with a test that it never links the hashing
+  core or any Argon2 code.
+- **Designed, not built:** the rest of the load generator (answer
+  checks, open-loop sending, schedule-lag checks, its control API, one
+  long-lived deployment; host-generated pairs sent once).
+- **Next:** the rest of the load generator, then gate Stage 5, which
+  needs it. Also planned: a design for running gate Stages 2-4 in a pod,
+  and a classifier cleanup.
+- **Not built yet:** gate Stage 5, most of the load generator, AI driver,
   orchestrator and lineage records. No
   generation has evolved yet.
 
