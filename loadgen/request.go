@@ -145,9 +145,14 @@ func phc(variant, version, params, salt, key string) string {
 	return "$" + variant + "$" + version + "$" + params + "$" + salt + "$" + key
 }
 
+// exactPHC formats a PHC string at the fixed parameters.
+func exactPHC(salt, key string) string {
+	return phc(exactVariant, exactVersion, exactParams, salt, key)
+}
+
 // randomExactPHC returns a canonical PHC string at the fixed parameters
 // with a random salt and key: well-formed, but no Argon2 ran, so it is a
 // hash of no known password.
 func randomExactPHC() string {
-	return phc(exactVariant, exactVersion, exactParams, b64(randomBytes(saltLen)), b64(randomBytes(keyLen)))
+	return exactPHC(b64(randomBytes(saltLen)), b64(randomBytes(keyLen)))
 }

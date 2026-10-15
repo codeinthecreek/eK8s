@@ -40,10 +40,8 @@ var negativeForms = map[NegativeClass][]negForm{
 	MalformedHash: {
 		{"not_phc", func() Request { return malformed(b64(randomBytes(48))) }},
 		{"truncated", func() Request {
-			// Cutting before the last '$' leaves at most five segments,
-			// so the result can never parse as a PHC string.
 			s := randomExactPHC()
-			return malformed(s[:1+mrand.IntN(strings.LastIndexByte(s, '$'))])
+			return malformed(s[:1+mrand.IntN(lastCut(s))])
 		}},
 		{"noncanonical_bits", func() Request { return malformed(nonCanonicalPHC(setUnusedBits)) }},
 		{"noncanonical_newline", func() Request { return malformed(nonCanonicalPHC(insertNewline)) }},
@@ -151,6 +149,13 @@ func nonExactForms() []negForm {
 	return forms
 }
 
+// lastCut is the longest cut of PHC string s the truncated form makes: s
+// up to, not including, its last '$'. Every cut from 1 to lastCut(s)
+// leaves at most five segments, so none can parse as a PHC string;
+// hashcore_test.go tries them all. Longer cuts can (an empty or short
+// key) and are not malformed.
+func lastCut(s string) int { return strings.LastIndexByte(s, '$') }
+
 // nonCanonicalPHC returns a PHC string at the fixed parameters whose salt
 // or key (drawn evenly) is encoded by enc instead of canonically.
 func nonCanonicalPHC(enc func([]byte) string) string {
@@ -160,18 +165,30 @@ func nonCanonicalPHC(enc func([]byte) string) string {
 	} else {
 		key = enc(randomBytes(keyLen))
 	}
-	return phc(exactVariant, exactVersion, exactParams, salt, key)
+	return exactPHC(salt, key)
 }
 
 const base64Alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 
-// setUnusedBits encodes b, then sets some of the unused low bits of the
-// last character (4 bits for 16 bytes, 2 for 32). A lenient decoder
-// returns the same bytes; the canonical encoding has those bits zero.
+// setUnusedBits encodes b, then sets the unused low bits of the last
+// character (4 bits for 16 bytes, 2 for 32) to a value drawn from the
+// non-zero ones. A lenient decoder returns the same bytes; the canonical
+// encoding has those bits zero.
 func setUnusedBits(b []byte) string {
+	return setUnusedBitsTo(b, 1+mrand.IntN(unusedBitValues(b)))
+}
+
+// unusedBitValues returns how many non-zero values the unused low bits
+// of b's encoding can take.
+func unusedBitValues(b []byte) int {
+	return 1<<(6*len(b64(b))-8*len(b)) - 1
+}
+
+// setUnusedBitsTo encodes b with its unused low bits set to v, from 1 to
+// unusedBitValues(b).
+func setUnusedBitsTo(b []byte, v int) string {
 	s := b64(b)
-	unused := 6*len(s) - 8*len(b)
-	last := strings.IndexByte(base64Alphabet, s[len(s)-1]) | (1 + mrand.IntN(1<<unused-1))
+	last := strings.IndexByte(base64Alphabet, s[len(s)-1]) | v
 	return s[:len(s)-1] + base64Alphabet[last:last+1]
 }
 
@@ -179,9 +196,11 @@ func setUnusedBits(b []byte) string {
 // decoders skip, so it decodes but is not the canonical encoding.
 func insertNewline(b []byte) string {
 	s := b64(b)
-	i := 1 + mrand.IntN(len(s)-1)
-	return s[:i] + "\n" + s[i:]
+	return insertNewlineAt(s, 1+mrand.IntN(len(s)-1))
 }
+
+// insertNewlineAt returns s with a newline before s[i].
+func insertNewlineAt(s string, i int) string { return s[:i] + "\n" + s[i:] }
 
 // tooLongPassword returns a fresh password of a length drawn uniformly
 // from maxPasswordLen+1 to maxTooLongLen inclusive.

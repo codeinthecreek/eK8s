@@ -20,3 +20,18 @@ func Forms(c NegativeClass) []Form {
 }
 
 var RandomExactPHC = randomExactPHC
+
+// For enumerating the malformed-hash forms' variable parts.
+var (
+	ExactPHC        = exactPHC
+	B64             = b64
+	LastCut         = lastCut
+	InsertNewlineAt = insertNewlineAt
+	UnusedBitValues = unusedBitValues
+	SetUnusedBitsTo = setUnusedBitsTo
+)
+
+const (
+	SaltLen = saltLen
+	KeyLen  = keyLen
+)
