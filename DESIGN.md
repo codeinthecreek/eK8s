@@ -908,17 +908,19 @@ clone of `http.DefaultTransport` with `Proxy` nil), sending
 `Content-Type: application/json`, so every request opens its own
 connection: kube-proxy balances per connection, so a kept-alive stream
 would pin to one replica, and HPA's second pod and readiness changes
-would act only on new connections. Its HTTP client timeout is longer
-than cmd/service's fixed `WriteTimeout` (3 x `HangTimeout`, 6s): 3 x
-`HangTimeout` + 1s (7s), a loadgen constant, and a `go/parser` test fails
-unless cmd/service/main.go's `WriteTimeout` field still reads
-`3 * classifier.HangTimeout`. So every response the service can ever
-write is observed and classified: a shorter timeout would turn a slow
-fail-open or faked result, one a real client waiting longer would
-receive, into a `transport_error` instead of an integrity failure
-(section 8, "Integrity reasons apply at any latency"). No host ports are
-published; the gate and orchestrator stay on the host and drive the
-cluster through the API server on loopback.
+would act only on new connections. It follows no redirect: a 3xx is the
+variant's own response (`bad_status`), and following it would send the
+request wherever the variant names, a peer variant included. Its HTTP
+client timeout is longer than cmd/service's fixed `WriteTimeout` (3 x
+`HangTimeout`, 6s): 3 x `HangTimeout` + 1s (7s), a loadgen constant, and
+a `go/parser` test fails unless cmd/service/main.go's `WriteTimeout`
+field still reads `3 * classifier.HangTimeout`. So every response the
+service can ever write is observed and classified: a shorter timeout
+would turn a slow fail-open or faked result, one a real client waiting
+longer would receive, into a `transport_error` instead of an integrity
+failure (section 8, "Integrity reasons apply at any latency"). No host
+ports are published; the gate and orchestrator stay on the host and
+drive the cluster through the API server on loopback.
 
 **Control API.** A listener on a separate port behind a ClusterIP Service,
 reached from the host through the API server's service proxy. Loadgen

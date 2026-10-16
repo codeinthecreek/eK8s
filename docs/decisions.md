@@ -889,3 +889,10 @@ max. Earlier entries are not backfilled.
 - Reason: a culled target's records and memory go with its Checker, and no target's sends can evict another target's records.
 - Reverse: DESIGN.md sec 10 edit; one shared ring.
 - Origin: chat
+
+## 2026-10-16 · PR #41 (inferred) · Loadgen follows no redirect; a 3xx is the variant's own response (DESIGN.md sec 10)
+- Decision: loadgen's client sets CheckRedirect to return http.ErrUseLastResponse, so a 3xx comes back as the response and classifies as bad_status.
+- Rejected: net/http's default (follows up to 10 redirects and re-sends the POST body on 307 and 308).
+- Reason: a variant could answer 307 to a peer variant's Service, which loadgen's egress allows, and score the peer's real hash as its own; host verification passes it, and the peer's salts sit in the peer's Checker.
+- Reverse: drop CheckRedirect in loadgen/send.go; DESIGN.md sec 10 edit.
+- Origin: Code
