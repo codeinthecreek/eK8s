@@ -3,6 +3,7 @@ package loadgen
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"time"
@@ -53,16 +54,17 @@ func NewSender() *Sender {
 // It reads at most classifier.MaxBodyBytes+1 bytes of the body and passes
 // them with Err nil whether or not it hit that cap, so the classifier
 // sees an over-cap 2xx body (malformed_body). Err is set only for a
-// failed request: a failed build, a transport error, or a failed body
-// read, whose truncated Body is then a transport_error, never
-// malformed_body. Latency runs from the send to the full body read. A
-// failed build is loadgen's own fault (a bad baseURL): actual is then when
-// it failed, and Latency is 0.
-func (s *Sender) send(baseURL string, req Request) (actual time.Duration, resp Response) {
+// failed request: a transport error, or a failed body read, whose
+// truncated Body is then a transport_error, never malformed_body.
+// Latency runs from the send to the full body read.
+//
+// A request that cannot be built (a bad baseURL) is loadgen's own fault,
+// not the variant's: send returns it as fault, with actual and resp
+// zero, and sends nothing.
+func (s *Sender) send(baseURL string, req Request) (actual time.Duration, resp Response, fault error) {
 	r, err := http.NewRequestWithContext(context.Background(), http.MethodPost, baseURL+req.Path, bytes.NewReader(req.Body))
 	if err != nil {
-		resp.Err = err
-		return time.Since(s.base), resp
+		return 0, Response{}, fmt.Errorf("loadgen: building the request: %w", err)
 	}
 	r.Header.Set("Content-Type", "application/json")
 	t0 := time.Now()
@@ -71,11 +73,11 @@ func (s *Sender) send(baseURL string, req Request) (actual time.Duration, resp R
 	if err != nil {
 		resp.Err = err
 		resp.Latency = time.Since(t0)
-		return actual, resp
+		return actual, resp, nil
 	}
 	defer hr.Body.Close()
 	resp.Status, resp.Header = hr.StatusCode, hr.Header
 	resp.Body, resp.Err = io.ReadAll(io.LimitReader(hr.Body, classifier.MaxBodyBytes+1))
 	resp.Latency = time.Since(t0)
-	return actual, resp
+	return actual, resp, nil
 }

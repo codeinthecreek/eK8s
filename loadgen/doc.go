@@ -13,6 +13,10 @@
 // send's outcome is a Record in its target's Ring, which the orchestrator
 // reads from.
 //
+// Its sender runs the open-loop schedule: Sender.RunWindow sends one
+// window and Sender.RunBurst one Stage 5 burst to a Target, each send at
+// its intended time in its own goroutine, whatever earlier responses do.
+//
 // Loadgen does no Argon2. Its build never depends, directly or
 // transitively, on internal/hashcore, internal/classifier/testvectors,
 // gate/ or any Argon2 package; deps_test.go checks this. Its _test.go

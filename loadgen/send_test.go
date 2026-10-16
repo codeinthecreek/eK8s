@@ -27,6 +27,16 @@ func serve(t *testing.T, h http.HandlerFunc) *httptest.Server {
 	return srv
 }
 
+// sendOK runs s.send and fails the test on a fault.
+func sendOK(t *testing.T, s *Sender, baseURL string, req Request) (time.Duration, Response) {
+	t.Helper()
+	actual, resp, fault := s.send(baseURL, req)
+	if fault != nil {
+		t.Fatalf("send: fault %v", fault)
+	}
+	return actual, resp
+}
+
 // TestSendLatencyIncludesBody checks that Latency runs to the full body
 // read: the header arrives at once, the body 200 ms later.
 func TestSendLatencyIncludesBody(t *testing.T) {
@@ -38,7 +48,7 @@ func TestSendLatencyIncludesBody(t *testing.T) {
 		time.Sleep(delay)
 		w.Write(body)
 	})
-	_, resp := NewSender().send(srv.URL, hashRequest(newPassword()))
+	_, resp := sendOK(t, NewSender(), srv.URL, hashRequest(newPassword()))
 	if resp.Err != nil {
 		t.Fatalf("send: %v", resp.Err)
 	}
@@ -60,7 +70,7 @@ func TestSendLatencyFromSend(t *testing.T) {
 		w.Write(hashJSON(randomExactPHC()))
 	})
 	s := NewSender()
-	actual, resp := s.send(srv.URL, hashRequest(newPassword()))
+	actual, resp := sendOK(t, s, srv.URL, hashRequest(newPassword()))
 	end := time.Since(s.base)
 	if resp.Err != nil {
 		t.Fatalf("send: %v", resp.Err)
@@ -76,7 +86,7 @@ func TestSendBodyCap(t *testing.T) {
 	body := padTo(hashJSON(randomExactPHC()), classifier.MaxBodyBytes+100)
 	srv := serve(t, func(w http.ResponseWriter, r *http.Request) { w.Write(body) })
 	req := hashRequest(newPassword())
-	_, resp := NewSender().send(srv.URL, req)
+	_, resp := sendOK(t, NewSender(), srv.URL, req)
 	if resp.Err != nil {
 		t.Fatalf("send: %v", resp.Err)
 	}
@@ -105,7 +115,7 @@ func TestSendReadFails(t *testing.T) {
 		rw.Flush()
 	})
 	req := hashRequest(newPassword())
-	_, resp := NewSender().send(srv.URL, req)
+	_, resp := sendOK(t, NewSender(), srv.URL, req)
 	if resp.Err == nil {
 		t.Fatalf("send = status %d body %q, Err nil; want a read error", resp.Status, resp.Body)
 	}
@@ -118,11 +128,20 @@ func TestSendRefused(t *testing.T) {
 	srv := httptest.NewServer(http.NotFoundHandler())
 	srv.Close()
 	req := hashRequest(newPassword())
-	_, resp := NewSender().send(srv.URL, req)
+	_, resp := sendOK(t, NewSender(), srv.URL, req)
 	if resp.Err == nil || resp.Status != 0 || resp.Latency <= 0 {
 		t.Fatalf("send to a closed server = status %d, Latency %v, Err %v; want 0, positive and an error", resp.Status, resp.Latency, resp.Err)
 	}
 	check(t, NewChecker(), req, resp, verdict(classifier.ReasonTransportError), nil)
+}
+
+// TestSendBuildFault checks that a request that cannot be built is a
+// fault, with actual and resp zero.
+func TestSendBuildFault(t *testing.T) {
+	actual, resp, fault := NewSender().send(unparseableURL, hashRequest(newPassword()))
+	if fault == nil || actual != 0 || resp.Status != 0 || resp.Header != nil || resp.Body != nil || resp.Latency != 0 || resp.Err != nil {
+		t.Errorf("send to %q = %v, %+v, fault %v; want 0, a zero Response and a fault", unparseableURL, actual, resp, fault)
+	}
 }
 
 // TestSendRequestShape checks that each kind of request goes out as a
@@ -147,7 +166,7 @@ func TestSendRequestShape(t *testing.T) {
 	}
 	s := NewSender()
 	for _, req := range reqs {
-		if _, resp := s.send(srv.URL, req); resp.Err != nil {
+		if _, resp := sendOK(t, s, srv.URL, req); resp.Err != nil {
 			t.Fatalf("send %s %s: %v", req.Kind, req.Class, resp.Err)
 		}
 		g := <-got
@@ -171,7 +190,7 @@ func TestSendNoRedirect(t *testing.T) {
 		http.Redirect(w, r, peer.URL+HashPath, http.StatusTemporaryRedirect)
 	})
 	req := hashRequest(newPassword())
-	_, resp := NewSender().send(srv.URL, req)
+	_, resp := sendOK(t, NewSender(), srv.URL, req)
 	if resp.Err != nil || resp.Status != http.StatusTemporaryRedirect {
 		t.Fatalf("send = status %d, Err %v; want 307, nil", resp.Status, resp.Err)
 	}
@@ -194,7 +213,7 @@ func TestSendNoKeepAlive(t *testing.T) {
 	t.Cleanup(srv.Close)
 	s := NewSender()
 	for range 2 {
-		if _, resp := s.send(srv.URL, hashRequest(newPassword())); resp.Err != nil {
+		if _, resp := sendOK(t, s, srv.URL, hashRequest(newPassword())); resp.Err != nil {
 			t.Fatalf("send: %v", resp.Err)
 		}
 	}
@@ -271,7 +290,7 @@ func TestSendActual(t *testing.T) {
 	s := NewSender()
 	var prev time.Duration
 	for i := range 5 {
-		actual, resp := s.send(srv.URL, hashRequest(newPassword()))
+		actual, resp := sendOK(t, s, srv.URL, hashRequest(newPassword()))
 		if resp.Err != nil {
 			t.Fatalf("send %d: %v", i, resp.Err)
 		}

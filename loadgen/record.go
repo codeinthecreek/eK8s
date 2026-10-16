@@ -38,18 +38,24 @@ type Record struct {
 	// IntendedMono is the intended send time, from the index.
 	IntendedMono time.Duration
 	// ActualMono is read just before client.Do; lag is ActualMono - IntendedMono.
+	// It is 0, unset, when nothing was sent: Skipped, or a Fault before the send.
 	ActualMono time.Duration
 	// Latency runs from ActualMono to the full body read.
 	Latency time.Duration
 	// Verdict is the per-request verdict, ignored if Skipped or Fault is set.
 	Verdict Verdict
-	// Skipped is set when a /verify was due with no pair left (ErrOutOfPairs).
+	// Skipped is set when a /verify was due with no pair left (ErrOutOfPairs);
+	// Kind is then KindVerify.
 	Skipped bool
-	// Fault is a loadgen fault (a Check error), "" for none; it excludes the half.
+	// Fault is a loadgen fault, "" for none; it excludes the half. It is a
+	// request-generator error other than ErrOutOfPairs or a request that could
+	// not be built (nothing sent), or a Check error (Verdict and Pair unset).
 	Fault string
 	// Pair is the /hash pair the host must verify (Checker.Check), nil for none.
 	Pair *HashPair
-	// Evidence is set on the first 8 integrity-reason records per Target and RunID.
+	// Evidence is set on the first 8 integrity-reason records, in the order
+	// their Checks finish, of each RunWindow or RunBurst call (one call per
+	// Target and RunID).
 	Evidence *Evidence
 }
 
