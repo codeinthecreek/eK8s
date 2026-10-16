@@ -339,7 +339,7 @@ the same judge, so they can never disagree about what "good" means.
 ```
   response
      |
-     +--> success        2xx, in time, AND correct
+     +--> success        200, in time, AND correct
      |                   (verify answer matches known truth;
      |                    hash is genuine, fresh, correct strength)
      |

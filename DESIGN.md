@@ -553,7 +553,7 @@ One function, used by both Stage 5 (boolean: any `failed`?) and the
 fitness function (graded: what fraction in each bucket?), implemented in
 internal/classifier/ (section 5).
 
-- **`success`** -- 2xx status, arriving within the hang-timeout ceiling
+- **`success`** -- status 200, arriving within the hang-timeout ceiling
   (same constant as the fitness function's latency-normalization ceiling,
   section 9 -- one number serving both purposes rather than two thresholds
   that could drift apart).
@@ -600,7 +600,7 @@ exactly the stress-active half where the fitness signal is most
 trusted.)
 
 `hash` calls get the same anti-gaming treatment. A hash response is
-`success` only if all of the following hold: 2xx within the hang-timeout
+`success` only if all of the following hold: 200 within the hang-timeout
 ceiling; a well-formed PHC string; exactly the section 6 parameters; a
 salt not already seen from that variant; and it verifies against the
 password sent.
@@ -644,8 +644,13 @@ implements it, and a mutant that breaks it fails Stage 2.
 - `POST /verify`, JSON `{"password": string, "hash": string}` -> 200
   `{"match": bool}`.
 - A 200 body is exactly the contract object: one JSON object holding only
-  its one key (matched case-sensitively), with a non-null value of the
-  stated type, and nothing after it but whitespace.
+  its one key (matched case-sensitively; a second member, a duplicate key
+  included, is `malformed_body`), with a non-null value of the stated
+  type, valid UTF-8, at most `MaxBodyBytes` (4 KiB), and nothing after it
+  but whitespace. JSON-equivalent forms (escaped names or characters,
+  surrounding whitespace) are accepted. A 2xx other than 200 gets the
+  same body checks, its hash salt is recorded, and it is then
+  `bad_status`. Content-Type is not part of the contract.
 - Malformed input, an empty or >1024-byte password on either endpoint
   (`/hash` or `/verify`), or a hash whose parameters hashcore rejects
   -> 400.
@@ -687,9 +692,10 @@ output from timed-out clients as later hashes). The first one, once
 confirmed on the host with hashcore, disqualifies the variant: it is
 culled at window end, before scoring, and is never a parent (section
 11). A catch by the sampled verification after K windows (section 8)
-disqualifies just the same. `malformed_body`
-counts only when the body was read to a clean EOF; a body cut short by a
-timeout or reset is an ordinary `failed`.
+disqualifies just the same. A failed body read (a timeout or reset) is
+`transport_error`, an ordinary `failed`; a 2xx body over `MaxBodyBytes`
+is `malformed_body`. The classifier owns that cap: callers read
+`MaxBodyBytes`+1 bytes and pass them with no error.
 
 **Normalization: fixed absolute bounds, not against the live population.**
 This is a non-negotiable design choice, not a simplification. It is
@@ -808,10 +814,11 @@ request's password in the same Stage 5 burst (section 8).
 **Loadgen does no Argon2.** It runs the structural checks on every
 response (section 8) with `internal/classifier` and no verifier, one salt
 set per variant for as long as loadgen serves it. It records the
-(password, hash) pair of a `/hash` request answered 2xx whose hash passed
-every check it makes, on time or late (late hashes are verified on the
-host too). A response body the sender could not read whole, cut short by
-its size cap or a failed read, is a transport error, not `malformed_body`.
+(password, hash) pair of a `/hash` request answered 2xx, 200 or not,
+whose hash passed every check it makes, on time or late (those hashes
+are verified on the host too). The sender reads `MaxBodyBytes`+1 bytes
+and passes them with no error: a 2xx body over the cap is
+`malformed_body`, and only a failed read is a transport error.
 The orchestrator reads the pairs through the control API after the window
 and fully verifies them on the host (section 8). Loadgen's build never
 depends, directly or transitively, on `internal/hashcore`,

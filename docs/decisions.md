@@ -590,7 +590,7 @@ max. Earlier entries are not backfilled.
 - Reason: the caller decides whether a non-canonical reserve is a bug (match/mismatch pair) or expected (negative).
 - Reverse: change Reserve's signature (callers: loadgen only).
 
-## 2026-10-13 · PR #30 · malformed_body is integrity only via a caller contract on Observation.Body/Err (DESIGN.md sec 9)
+## 2026-10-13 · PR #30 · malformed_body is integrity only via a caller contract on Observation.Body/Err (DESIGN.md sec 9) (size-cap half superseded by the PR #40 cap entry)
 - Decision: Observation.Body must be read to a clean EOF; a read error or a size-cap cut sets Err (transport_error). Integrity(reason) then lists malformed_body unconditionally. gate/interop.go's post already does this.
 - Rejected: an Observation flag "body complete" (a second way to say what Err already says).
 - Reason: the classifier cannot see how the body was read; one rule keeps it the caller's.
@@ -806,9 +806,44 @@ max. Earlier entries are not backfilled.
 - Reverse: a Checker per window.
 - Origin: chat
 
-## 2026-10-15 · PR #39 · Checks take a loadgen Response, with no HTTP in PR 2; a capped or failed body read is a transport error (DESIGN.md sec 8, 10)
+## 2026-10-15 · PR #39 · Checks take a loadgen Response, with no HTTP in PR 2; a capped or failed body read is a transport error (DESIGN.md sec 8, 10) (cap half superseded by the PR #40 cap entry)
 - Decision: Check takes a Response{Status, Header, Body, Latency, Err}; a sender whose body read failed or hit its size cap sets Err.
 - Rejected: malformed_body for a cut-short body (a client-side cap would count as an integrity failure).
 - Reason: malformed_body is an integrity reason that culls a variant, so only the variant's own bytes may cause it.
 - Reverse: classify truncated bodies as malformed_body.
+- Origin: chat
+
+## 2026-10-16 · PR #40 (inferred) · Strict single-member decode: a v1 json.Decoder token walk; a duplicate key is malformed_body (DESIGN.md sec 8)
+- Decision: the classifier walks the body with encoding/json's Decoder tokens and accepts one object with exactly one member; a second member, a duplicate included, is malformed_body.
+- Rejected: encoding/json/v2 (needs GOEXPERIMENT=jsonv2 in go1.26.9, outside the compatibility promise); last value wins (a first-wins client sees a different value than the one checked).
+- Reason: the checked value must be the value every client reads.
+- Reverse: back to the map decode.
+- Origin: chat
+
+## 2026-10-16 · PR #40 (inferred) · Body matching is JSON-equivalent, not byte-exact; invalid UTF-8 is malformed_body (DESIGN.md sec 8)
+- Decision: escaped names and characters and surrounding whitespace are accepted; invalid UTF-8 is malformed_body; a lone-surrogate escape in a hash stays non_canonical_phc.
+- Rejected: byte-exact matching (every conforming parser reads the equivalent forms the same, so there is no client divergence to guard; it would constrain wrappers beyond the spec).
+- Reason: reject what a client could read differently, nothing more.
+- Reverse: compare raw bytes.
+- Origin: chat
+
+## 2026-10-16 · PR #40 (inferred) · Only 200 is success; a non-200 2xx is bad_status after the integrity checks, and loadgen records its pair (DESIGN.md sec 8, 10)
+- Decision: a non-200 2xx gets the integrity checks first (salt recorded), then over_hang_timeout if late, else bad_status; loadgen records its /hash pair.
+- Rejected: rejecting non-200 2xx before reading the body (a 201 hash's salt goes unrecorded and can be replayed as a 200; clients that accept any 2xx would use a wrong hash undetected); non-200 2xx as an integrity reason (culls a variant for a correct hash).
+- Reason: the host must verify every hash a client could accept, and a status slip alone is not cheating.
+- Reverse: is2xx for Success; drop bad_status from loadgen records().
+- Origin: chat
+
+## 2026-10-16 · PR #40 (inferred) · The classifier owns a 4 KiB MaxBodyBytes; a 2xx body over it is malformed_body (DESIGN.md sec 8, 10; supersedes the size-cap half of the PR #30 caller-contract entry and the PR #39 capped-body entry)
+- Decision: callers read MaxBodyBytes+1 bytes and pass them with Err nil; a 2xx body over MaxBodyBytes is malformed_body; a failed read stays transport_error.
+- Rejected: the caller setting Err at its own cap (lets a variant turn an integrity failure into a transport error by padding); 64 KiB (loadgen buffers up to the cap per in-flight request against 256Mi).
+- Reason: only the variant's own bytes may cause malformed_body, and an over-cap body is its own.
+- Reverse: caller-side cap with Err.
+- Origin: chat
+
+## 2026-10-16 · PR #40 (inferred) · Content-Type stays unchecked (DESIGN.md sec 8)
+- Decision: the classifier ignores Content-Type, since the contract states no 2xx headers.
+- Rejected: requiring application/json (a rule the spec does not state).
+- Reason: a check the spec does not state would cull variants for no stated reason.
+- Reverse: add it to the contract and the classifier.
 - Origin: chat
