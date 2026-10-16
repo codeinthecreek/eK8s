@@ -153,17 +153,19 @@ func TestCheckVerify(t *testing.T) {
 	for _, match := range []bool{true, false} {
 		req := verifyRequest(Pair{Password: newPassword(), Hash: randomExactPHC(), Match: match})
 		for _, tc := range []struct {
-			name string
-			body []byte
-			want Verdict
+			name   string
+			status int
+			body   []byte
+			want   Verdict
 		}{
-			{"right match", mustJSON(map[string]bool{"match": match}), verdict(classifier.ReasonNone)},
-			{"wrong match", mustJSON(map[string]bool{"match": !match}), verdict(classifier.ReasonWrongMatch)},
-			{"hash body", hashJSON(randomExactPHC()), verdict(classifier.ReasonMalformedBody)},
+			{"right match", http.StatusOK, mustJSON(map[string]bool{"match": match}), verdict(classifier.ReasonNone)},
+			{"wrong match", http.StatusOK, mustJSON(map[string]bool{"match": !match}), verdict(classifier.ReasonWrongMatch)},
+			{"hash body", http.StatusOK, hashJSON(randomExactPHC()), verdict(classifier.ReasonMalformedBody)},
+			{"201 right match", http.StatusCreated, mustJSON(map[string]bool{"match": match}), verdict(classifier.ReasonBadStatus)},
 		} {
 			t.Run(fmt.Sprintf("match=%v/%s", match, tc.name), func(t *testing.T) {
 				c := NewChecker()
-				check(t, c, req, ok(tc.body, onTime), tc.want)
+				check(t, c, req, Response{Status: tc.status, Body: tc.body, Latency: onTime}, tc.want)
 				wantPairs(t, c)
 			})
 		}
@@ -171,19 +173,26 @@ func TestCheckVerify(t *testing.T) {
 }
 
 // TestCheckHashRecords checks that a valid hash records its pair at any
-// 2xx status, on time or late (the host verifies late hashes too).
+// 2xx status, on time or late (the host verifies those hashes too). A
+// 2xx other than 200 is bad_status, or over_hang_timeout when late, but
+// only after the integrity checks pass, so its salt is recorded too.
 func TestCheckHashRecords(t *testing.T) {
 	for _, status := range []int{http.StatusOK, http.StatusCreated, http.StatusNoContent, 299} {
 		for _, latency := range []time.Duration{onTime, late} {
 			t.Run(fmt.Sprintf("%d/%v", status, latency), func(t *testing.T) {
 				want := verdict(classifier.ReasonNone)
-				if latency > classifier.HangTimeout {
+				switch {
+				case latency > classifier.HangTimeout:
 					want = verdict(classifier.ReasonOverHangTimeout)
+				case status != http.StatusOK:
+					want = verdict(classifier.ReasonBadStatus)
 				}
 				c := NewChecker()
 				req := hashRequest(newPassword())
 				hash := randomExactPHC()
 				check(t, c, req, Response{Status: status, Body: hashJSON(hash), Latency: latency}, want)
+				wantPairs(t, c, HashPair{req.Password, hash})
+				check(t, c, hashRequest(newPassword()), ok(hashJSON(hash), onTime), verdict(classifier.ReasonSaltReused))
 				wantPairs(t, c, HashPair{req.Password, hash})
 			})
 		}
@@ -250,6 +259,7 @@ func TestCheckHashNoRecord(t *testing.T) {
 		{"malformed: hash not a string", ok([]byte(`{"hash":5}`), onTime), verdict(classifier.ReasonMalformedBody)},
 		{"malformed: extra key", ok(mustJSON(map[string]string{"hash": randomExactPHC(), "x": "y"}), onTime), verdict(classifier.ReasonMalformedBody)},
 		{"late malformed", ok([]byte("{}"), late), verdict(classifier.ReasonMalformedBody)},
+		{"malformed: over MaxBodyBytes", ok(padTo(hashJSON(randomExactPHC()), classifier.MaxBodyBytes+1), onTime), verdict(classifier.ReasonMalformedBody)},
 		{"non-canonical: unused bits", ok(hashJSON(nonCanonicalPHC(setUnusedBits)), onTime), verdict(classifier.ReasonNonCanonicalPHC)},
 		{"non-canonical: padded", ok(hashJSON(nonCanonicalPHC(paddedB64)), onTime), verdict(classifier.ReasonNonCanonicalPHC)},
 		{"non-canonical: t=1", ok(hashJSON(phc(exactVariant, exactVersion, "m=19456,t=1,p=1", newSalt(), b64(randomBytes(keyLen)))), onTime), verdict(classifier.ReasonNonCanonicalPHC)},
@@ -271,6 +281,21 @@ func TestCheckHashNoRecord(t *testing.T) {
 
 func paddedB64(b []byte) string { return b64(b) + "==" }
 
+// padTo pads body with trailing JSON whitespace to n bytes.
+func padTo(body []byte, n int) []byte {
+	return append(body, strings.Repeat(" ", n-len(body))...)
+}
+
+// TestCheckHashBodyCap checks that a valid hash body padded to exactly
+// classifier.MaxBodyBytes records its pair (one byte more is
+// TestCheckHashNoRecord's "over MaxBodyBytes" case).
+func TestCheckHashBodyCap(t *testing.T) {
+	c := NewChecker()
+	req, hash := hashRequest(newPassword()), randomExactPHC()
+	check(t, c, req, ok(padTo(hashJSON(hash), classifier.MaxBodyBytes), onTime), verdict(classifier.ReasonNone))
+	wantPairs(t, c, HashPair{req.Password, hash})
+}
+
 // TestCheckHashTransportErrorNoSalt checks that a transport error leaves
 // the salt set alone: the same body then passes.
 func TestCheckHashTransportErrorNoSalt(t *testing.T) {
@@ -285,17 +310,18 @@ func TestCheckHashTransportErrorNoSalt(t *testing.T) {
 }
 
 // TestCheckHashDuplicateKey checks that a body with a duplicate "hash"
-// key, which the classifier accepts (its last value wins), records that
-// last value, the one whose salt the classifier recorded, even when an
-// earlier value is not a string.
+// key is malformed_body, whatever the first value holds, and records
+// nothing: no pair, and no salt, so the last hash then passes alone.
 func TestCheckHashDuplicateKey(t *testing.T) {
 	for _, first := range []string{`"` + randomExactPHC() + `"`, `5`} {
 		c := NewChecker()
 		req, last := hashRequest(newPassword()), randomExactPHC()
 		body := []byte(`{"hash":` + first + `,"hash":"` + last + `"}`)
-		check(t, c, req, ok(body, onTime), verdict(classifier.ReasonNone))
-		wantPairs(t, c, HashPair{req.Password, last})
-		check(t, c, hashRequest(newPassword()), ok(hashJSON(last), onTime), verdict(classifier.ReasonSaltReused))
+		check(t, c, req, ok(body, onTime), verdict(classifier.ReasonMalformedBody))
+		wantPairs(t, c)
+		req2 := hashRequest(newPassword())
+		check(t, c, req2, ok(hashJSON(last), onTime), verdict(classifier.ReasonNone))
+		wantPairs(t, c, HashPair{req2.Password, last})
 	}
 }
 

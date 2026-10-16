@@ -212,7 +212,7 @@ max. Earlier entries are not backfilled.
 - Reason: an empty or garbage value is no usable retry hint; a repeated Retry-After header is rejected, since RFC 9110 defines it as a single-value field. Both fail closed. Gen 0 sends "1".
 - Reverse: DESIGN.md sec 8 edit (graceful_shed bullet, HTTP contract); replace the parse check in Classify with a presence check.
 
-## 2026-10-02 · PR #15 · Strict 2xx bodies: one JSON object, exactly the contract key (case-sensitive), non-null right type, no trailing data
+## 2026-10-02 · PR #15 · Strict 2xx bodies: one JSON object, exactly the contract key (case-sensitive), non-null right type, no trailing data (duplicate-key half superseded by the PR #40 strict-decode entry)
 - Rejected: encoding/json struct decoding (matches keys case-insensitively, accepts null as absent); ignoring unknown fields.
 - Reason: the HTTP contract (DESIGN.md sec 8) is fixed, so extra or misspelled fields mean a broken mutant. Duplicate keys are not detected (last wins); the wrapper's encoder never emits them.
 - Reverse: DESIGN.md sec 8 edit (HTTP contract 200-body bullet); let decodeField ignore keys other than the contract one.
@@ -590,7 +590,7 @@ max. Earlier entries are not backfilled.
 - Reason: the caller decides whether a non-canonical reserve is a bug (match/mismatch pair) or expected (negative).
 - Reverse: change Reserve's signature (callers: loadgen only).
 
-## 2026-10-13 · PR #30 · malformed_body is integrity only via a caller contract on Observation.Body/Err (DESIGN.md sec 9)
+## 2026-10-13 · PR #30 · malformed_body is integrity only via a caller contract on Observation.Body/Err (DESIGN.md sec 9) (size-cap half superseded by the PR #40 cap entry)
 - Decision: Observation.Body must be read to a clean EOF; a read error or a size-cap cut sets Err (transport_error). Integrity(reason) then lists malformed_body unconditionally. gate/interop.go's post already does this.
 - Rejected: an Observation flag "body complete" (a second way to say what Err already says).
 - Reason: the classifier cannot see how the body was read; one rule keeps it the caller's.
@@ -785,30 +785,65 @@ max. Earlier entries are not backfilled.
 - Reverse: Burst back to newPassword(); NewStream without shuffled(); the rotation starting at 0; DESIGN.md sec 8, 10 edits.
 - Origin: chat
 
-## 2026-10-15 · PR #39 (inferred) · Loadgen reuses internal/classifier unchanged: one NewRun(nil) per variant, FullVerify always false (DESIGN.md sec 8, 10)
+## 2026-10-15 · PR #39 · Loadgen reuses internal/classifier unchanged: one NewRun(nil) per variant, FullVerify always false (DESIGN.md sec 8, 10)
 - Decision: loadgen's Checker wraps a classifier Run with no Verifier; nothing under internal/classifier changes.
 - Rejected: a loadgen-own classifier (it would drift from the gate's rules).
 - Reason: the same code applies the same rules in the gate and in live traffic, and needs no Argon2.
 - Reverse: a separate classifier in loadgen.
 - Origin: chat
 
-## 2026-10-15 · PR #39 (inferred) · A /hash pair is recorded for 2xx with reason none or over_hang_timeout (DESIGN.md sec 8, 10)
+## 2026-10-15 · PR #39 · A /hash pair is recorded for 2xx with reason none or over_hang_timeout (DESIGN.md sec 8, 10) (extended by the PR #40 status entry: bad_status also records)
 - Decision: Checker records a pair only for KindHash, status 2xx and reason none or over_hang_timeout (records() in loadgen/check.go).
 - Rejected: Success only (a slow bad hash would skip host verification).
 - Reason: over_hang_timeout on a 2xx comes only after the integrity checks pass, and the host verifies late hashes too.
 - Reverse: restrict records() to Success.
 - Origin: chat
 
-## 2026-10-15 · PR #39 (inferred) · The salt set lasts a variant's whole time in loadgen; the Checker's lifecycle belongs to PR 4 (DESIGN.md sec 8, 10)
+## 2026-10-15 · PR #39 · The salt set lasts a variant's whole time in loadgen; the Checker's lifecycle belongs to PR 4 (DESIGN.md sec 8, 10)
 - Decision: one Checker per variant for as long as loadgen serves it; the control API (PR 4) owns when it is made and dropped. No cap yet; PR 3 sizes it.
 - Rejected: a salt set per window (a salt reused across windows goes uncaught).
 - Reason: DESIGN.md sec 8 puts the set across windows, so a mutant cannot replay an earlier window's hash.
 - Reverse: a Checker per window.
 - Origin: chat
 
-## 2026-10-15 · PR #39 (inferred) · Checks take a loadgen Response, with no HTTP in PR 2; a capped or failed body read is a transport error (DESIGN.md sec 8, 10)
+## 2026-10-15 · PR #39 · Checks take a loadgen Response, with no HTTP in PR 2; a capped or failed body read is a transport error (DESIGN.md sec 8, 10) (cap half superseded by the PR #40 cap entry)
 - Decision: Check takes a Response{Status, Header, Body, Latency, Err}; a sender whose body read failed or hit its size cap sets Err.
 - Rejected: malformed_body for a cut-short body (a client-side cap would count as an integrity failure).
 - Reason: malformed_body is an integrity reason that culls a variant, so only the variant's own bytes may cause it.
 - Reverse: classify truncated bodies as malformed_body.
+- Origin: chat
+
+## 2026-10-16 · PR #40 (inferred) · Strict single-member decode: a v1 json.Decoder token walk; a duplicate key is malformed_body (DESIGN.md sec 8)
+- Decision: the classifier walks the body with encoding/json's Decoder tokens and accepts one object with exactly one member; a second member, a duplicate included, is malformed_body.
+- Rejected: encoding/json/v2 (needs GOEXPERIMENT=jsonv2 in go1.26.9, outside the compatibility promise); last value wins (a first-wins client sees a different value than the one checked).
+- Reason: the checked value must be the value every client reads.
+- Reverse: back to the map decode.
+- Origin: chat
+
+## 2026-10-16 · PR #40 (inferred) · Body matching is JSON-equivalent, not byte-exact; invalid UTF-8 is malformed_body (DESIGN.md sec 8)
+- Decision: escaped names and characters and surrounding whitespace are accepted; invalid UTF-8 is malformed_body; a lone-surrogate escape in a hash stays non_canonical_phc.
+- Rejected: byte-exact matching (every conforming parser reads the equivalent forms the same, so there is no client divergence to guard; it would constrain wrappers beyond the spec).
+- Reason: reject what a client could read differently, nothing more.
+- Reverse: compare raw bytes.
+- Origin: chat
+
+## 2026-10-16 · PR #40 (inferred) · Only 200 is success; a non-200 2xx is bad_status after the integrity checks, and loadgen records its pair (DESIGN.md sec 8, 10)
+- Decision: a non-200 2xx gets the integrity checks first (salt recorded), then over_hang_timeout if late, else bad_status; loadgen records its /hash pair.
+- Rejected: rejecting non-200 2xx before reading the body (a 201 hash's salt goes unrecorded and can be replayed as a 200; clients that accept any 2xx would use a wrong hash undetected); non-200 2xx as an integrity reason (culls a variant for a correct hash).
+- Reason: the host must verify every hash a client could accept, and a status slip alone is not cheating.
+- Reverse: is2xx for Success; drop bad_status from loadgen records().
+- Origin: chat
+
+## 2026-10-16 · PR #40 (inferred) · The classifier owns a 4 KiB MaxBodyBytes; a 2xx body over it is malformed_body (DESIGN.md sec 8, 10; supersedes the size-cap half of the PR #30 caller-contract entry and the PR #39 capped-body entry)
+- Decision: callers read MaxBodyBytes+1 bytes and pass them with Err nil; a 2xx body over MaxBodyBytes is malformed_body; a failed read stays transport_error.
+- Rejected: the caller setting Err at its own cap (lets a variant turn an integrity failure into a transport error by padding); 64 KiB (loadgen buffers up to the cap per in-flight request against 256Mi).
+- Reason: only the variant's own bytes may cause malformed_body, and an over-cap body is its own.
+- Reverse: caller-side cap with Err.
+- Origin: chat
+
+## 2026-10-16 · PR #40 (inferred) · Content-Type stays unchecked (DESIGN.md sec 8)
+- Decision: the classifier ignores Content-Type, since the contract states no 2xx headers.
+- Rejected: requiring application/json (a rule the spec does not state).
+- Reason: a check the spec does not state would cull variants for no stated reason.
+- Reverse: add it to the contract and the classifier.
 - Origin: chat

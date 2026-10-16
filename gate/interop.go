@@ -26,9 +26,6 @@ const (
 	// up as the classifier's over_hang_timeout, not a client error.
 	clientTimeout = classifier.HangTimeout + 500*time.Millisecond
 
-	// maxResponseBytes caps a response body read; a longer body fails.
-	maxResponseBytes = 64 << 10
-
 	// maxPasswordBytes is the HTTP contract's password limit (DESIGN.md
 	// sec 8).
 	maxPasswordBytes = 1024
@@ -85,7 +82,10 @@ func boundaryPasswords() []string {
 
 // post sends body to path and returns the response as an Observation
 // (Kind and ground truth left to the caller), or a problem if the
-// response lacks the run's X-EK8s-Variant.
+// response lacks the run's X-EK8s-Variant. It reads at most
+// classifier.MaxBodyBytes+1 bytes of the body and passes them with Err
+// nil whether or not it hit that cap, so the classifier sees an over-cap
+// 2xx body (malformed_body); Err is set only for a failed read.
 func (s *interop) post(ctx context.Context, path string, body []byte) (classifier.Observation, string) {
 	var o classifier.Observation
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://candidate"+path, bytes.NewReader(body))
@@ -103,11 +103,8 @@ func (s *interop) post(ctx context.Context, path string, body []byte) (classifie
 	}
 	defer resp.Body.Close()
 	o.Status, o.Header = resp.StatusCode, resp.Header
-	o.Body, o.Err = io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
+	o.Body, o.Err = io.ReadAll(io.LimitReader(resp.Body, classifier.MaxBodyBytes+1))
 	o.Latency = time.Since(start)
-	if o.Err == nil && len(o.Body) > maxResponseBytes {
-		o.Err = fmt.Errorf("response body over %d bytes", maxResponseBytes)
-	}
 	return o, checkVariant(resp.Header, s.label)
 }
 

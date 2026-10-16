@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os/exec"
@@ -336,7 +337,7 @@ func TestSendWithRetryBodyError(t *testing.T) {
 	calls := 0
 	send := func(context.Context) (classifier.Observation, string) {
 		calls++
-		return classifier.Observation{Kind: classifier.Hash, Status: 200, Err: errors.New("response body over 65536 bytes")}, ""
+		return classifier.Observation{Kind: classifier.Hash, Status: 200, Err: io.ErrUnexpectedEOF}, ""
 	}
 	out := sendWithRetry(context.Background(), send, make(chan struct{}), func() time.Duration { return 0 })
 	if calls != 1 || out.problem != "" || out.o.Status != 200 {

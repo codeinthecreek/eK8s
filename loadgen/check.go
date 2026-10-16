@@ -17,17 +17,22 @@ type Response struct {
 	Status int
 	Header http.Header
 
-	// Body is the whole response body, read to a clean EOF. A sender
-	// whose read failed, or stopped at a size cap, sets Err instead: a
-	// cut-short body is a transport error, never malformed_body (an
-	// integrity failure, see classifier.Integrity).
+	// Body is the response body. The sender reads at most
+	// classifier.MaxBodyBytes+1 bytes and passes what it read with Err
+	// nil, whether or not it hit that cap: a 2xx /hash or /verify body
+	// longer than classifier.MaxBodyBytes is malformed_body (an
+	// integrity failure, see classifier.Integrity); a negative's 2xx is
+	// negative_accepted whatever its body. A sender whose read failed
+	// sets Err instead: a body cut short by a failed read is a transport
+	// error, never malformed_body.
 	Body []byte
 
 	// Latency is from send to full body read.
 	Latency time.Duration
 
 	// Err is any transport error (connection refused or reset, timeout,
-	// body read failure, body over the sender's size cap).
+	// body read failure). Reaching the classifier.MaxBodyBytes+1 read
+	// cap is not one.
 	Err error
 }
 
@@ -64,9 +69,9 @@ func NewChecker() *Checker {
 
 // Check returns resp's verdict as a response to req. It records req's
 // password and the response's hash when req is a /hash request, resp is
-// 2xx, and the hash passed every check loadgen makes, on time or late:
-// the host verifies late hashes too. A /verify request or a contract
-// negative never records a pair.
+// 2xx, and the hash passed every check loadgen makes, whatever the 2xx
+// status or the latency: the host verifies those hashes too. A /verify
+// request or a contract negative never records a pair.
 //
 // It errors, with a zero Verdict, if req.Kind is not one of loadgen's
 // kinds, before anything is classified. It also errors if it cannot
@@ -102,12 +107,16 @@ func (c *Checker) Check(req Request, resp Response) (Verdict, error) {
 }
 
 // records reports whether a response with this status and reason, to a
-// request of this kind, carries a hash that passed every check: on a
-// 2xx /hash response, over_hang_timeout comes only after those checks
-// (classifier.Run.Classify).
+// request of this kind, carries a hash that passed every check. On a
+// 2xx /hash response, over_hang_timeout and bad_status (a 2xx other than
+// 200) come only after the integrity checks pass
+// (classifier.Run.Classify), so every 2xx hash that passes loadgen's
+// checks is recorded for the host to verify, whatever its status or
+// latency.
 func records(kind Kind, status int, reason classifier.Reason) bool {
 	return kind == KindHash && status >= 200 && status <= 299 &&
-		(reason == classifier.ReasonNone || reason == classifier.ReasonOverHangTimeout)
+		(reason == classifier.ReasonNone || reason == classifier.ReasonOverHangTimeout ||
+			reason == classifier.ReasonBadStatus)
 }
 
 // Pairs returns a copy of the pairs recorded so far, in the order
@@ -134,10 +143,10 @@ func classifierKind(k Kind) (classifier.Kind, error) {
 }
 
 // hashField returns the "hash" string of a /hash response body that the
-// classifier has accepted. It decodes in the classifier's two steps, the
-// object into raw values and then the "hash" value, so a duplicate key
-// resolves as it does there (the last one wins, whatever the earlier
-// ones hold): this is the hash whose salt the classifier recorded.
+// classifier has accepted. The classifier accepts only an object whose
+// one member is "hash" with a string value (a second member, a duplicate
+// "hash" included, is malformed_body), so hashField reads back that one
+// member: the hash whose salt the classifier recorded.
 func hashField(body []byte) (string, error) {
 	var obj map[string]json.RawMessage
 	if err := json.Unmarshal(body, &obj); err != nil {
