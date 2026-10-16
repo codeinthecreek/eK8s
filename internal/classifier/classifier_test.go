@@ -253,6 +253,33 @@ func TestSaltReuse(t *testing.T) {
 	}
 }
 
+// TestFullVerifyFailureKeepsSalt: FullVerify is the one check that runs
+// after the salt is recorded, so a hash that fails it still holds its
+// salt.
+func TestFullVerifyFailureKeepsSalt(t *testing.T) {
+	tests := []struct {
+		name       string
+		verifier   *fakeVerifier
+		wantReason Reason
+	}{
+		{"verify_mismatch", &fakeVerifier{match: false}, ReasonVerifyMismatch},
+		{"verify_error", &fakeVerifier{err: errors.New("bad")}, ReasonVerifyError},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := NewRun(tt.verifier.verify)
+			o := Observation{Kind: Hash, Password: "pw", Status: 200, Body: hashBody(phc(3)), FullVerify: true}
+			if b, reason := r.Classify(o); b != Failed || reason != tt.wantReason {
+				t.Fatalf("FullVerify = (%v, %q), want (failed, %q)", b, reason, tt.wantReason)
+			}
+			o.FullVerify = false
+			if b, reason := r.Classify(o); b != Failed || reason != ReasonSaltReused {
+				t.Fatalf("replay = (%v, %q), want (failed, salt_reused)", b, reason)
+			}
+		})
+	}
+}
+
 func TestLateHashSaltRecorded(t *testing.T) {
 	r := NewRun(nil)
 	late := Observation{Kind: Hash, Status: 200, Body: hashBody(phc(5)), Latency: HangTimeout + 1}
