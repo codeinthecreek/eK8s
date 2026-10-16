@@ -148,9 +148,9 @@ type outcome struct {
 // 503 that classifies as graceful_shed, latency aside) nor a transport
 // error, at most maxAttempts times, waiting wait() between sends. A
 // transport error is one with no response status; a response whose body
-// failed to read (truncated, over maxResponseBytes) is final. A
-// transport error is not retried once exited is closed. send returns the
-// observation (Kind set) and any X-EK8s-Variant problem.
+// failed to read (cut short) is final. A transport error is not retried
+// once exited is closed. send returns the observation (Kind set) and any
+// X-EK8s-Variant problem.
 func sendWithRetry(ctx context.Context, send func(context.Context) (classifier.Observation, string), exited <-chan struct{}, wait func() time.Duration) outcome {
 	var out outcome
 	for out.attempts < maxAttempts {
