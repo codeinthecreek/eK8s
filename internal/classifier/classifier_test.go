@@ -253,6 +253,33 @@ func TestSaltReuse(t *testing.T) {
 	}
 }
 
+// TestFullVerifyFailureKeepsSalt: FullVerify is the one check that runs
+// after the salt is recorded, so a hash that fails it still holds its
+// salt.
+func TestFullVerifyFailureKeepsSalt(t *testing.T) {
+	tests := []struct {
+		name       string
+		verifier   *fakeVerifier
+		wantReason Reason
+	}{
+		{"verify_mismatch", &fakeVerifier{match: false}, ReasonVerifyMismatch},
+		{"verify_error", &fakeVerifier{err: errors.New("bad")}, ReasonVerifyError},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := NewRun(tt.verifier.verify)
+			o := Observation{Kind: Hash, Password: "pw", Status: 200, Body: hashBody(phc(3)), FullVerify: true}
+			if b, reason := r.Classify(o); b != Failed || reason != tt.wantReason {
+				t.Fatalf("FullVerify = (%v, %q), want (failed, %q)", b, reason, tt.wantReason)
+			}
+			o.FullVerify = false
+			if b, reason := r.Classify(o); b != Failed || reason != ReasonSaltReused {
+				t.Fatalf("replay = (%v, %q), want (failed, salt_reused)", b, reason)
+			}
+		})
+	}
+}
+
 func TestLateHashSaltRecorded(t *testing.T) {
 	r := NewRun(nil)
 	late := Observation{Kind: Hash, Status: 200, Body: hashBody(phc(5)), Latency: HangTimeout + 1}
@@ -369,12 +396,73 @@ func TestNegativeRecordsNoSalt(t *testing.T) {
 
 func TestSaltNotRecordedWhenNonCanonical(t *testing.T) {
 	r := NewRun(nil)
-	bad := withKey(b64(make([]byte, 31))) // canonical salt16, bad key
-	if _, reason := r.Classify(Observation{Kind: Hash, Status: 200, Body: hashBody(bad)}); reason != ReasonNonCanonicalPHC {
-		t.Fatalf("reason = %q, want non_canonical_phc", reason)
+	for _, bad := range []string{
+		withKey(b64(make([]byte, 31))),                           // canonical salt16, bad key
+		"$argon2id$v=19$m=19456,t=1,p=1$" + salt16 + "$" + key32, // non-exact params
+	} {
+		if _, reason := r.Classify(Observation{Kind: Hash, Status: 200, Body: hashBody(bad)}); reason != ReasonNonCanonicalPHC {
+			t.Fatalf("%q: reason = %q, want non_canonical_phc", bad, reason)
+		}
 	}
 	if b, reason := r.Classify(Observation{Kind: Hash, Status: 200, Body: hashBody(withSalt(salt16))}); b != Success {
 		t.Fatalf("= (%v, %q), want success", b, reason)
+	}
+}
+
+// TestSaltKeyUsesAllBytes: salts that differ only in one half are
+// distinct, whichever half it is.
+func TestSaltKeyUsesAllBytes(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		from int // first byte index that differs
+	}{
+		{"last 8 bytes differ", 8},
+		{"first 8 bytes differ", 0},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			a := bytes.Repeat([]byte{0x11}, 16)
+			b := bytes.Clone(a)
+			for i := tt.from; i < tt.from+8; i++ {
+				b[i] = 0x22
+			}
+			r := NewRun(nil)
+			for _, salt := range [][]byte{a, b} {
+				if got, reason := r.Classify(Observation{Kind: Hash, Status: 200, Body: hashBody(withSalt(b64(salt)))}); got != Success {
+					t.Fatalf("salt %x = (%v, %q), want success", salt, got, reason)
+				}
+			}
+		})
+	}
+}
+
+// TestNonCanonicalSaltSameBytes: a salt segment with non-zero trailing
+// bits decodes to the same 16 bytes as salt16 but is not its canonical
+// encoding, so it is non_canonical_phc, never salt_reused, and records
+// nothing.
+func TestNonCanonicalSaltSameBytes(t *testing.T) {
+	// salt16 ends in "Q"; "R" sets a trailing bit the decoder ignores.
+	loose := withSalt(salt16[:21] + "R")
+	hash := func(encoded string) Observation { return Observation{Kind: Hash, Status: 200, Body: hashBody(encoded)} }
+
+	r := NewRun(nil)
+	if b, reason := r.Classify(hash(withSalt(salt16))); b != Success {
+		t.Fatalf("canonical = (%v, %q), want success", b, reason)
+	}
+	if b, reason := r.Classify(hash(loose)); b != Failed || reason != ReasonNonCanonicalPHC {
+		t.Fatalf("same bytes, loose encoding = (%v, %q), want (failed, non_canonical_phc)", b, reason)
+	}
+	if b, reason := r.Classify(hash(phc(2))); b != Success {
+		t.Fatalf("new salt after it = (%v, %q), want success", b, reason)
+	}
+
+	// In the other order: the loose encoding records nothing, so the
+	// canonical one is still new.
+	r = NewRun(nil)
+	if b, reason := r.Classify(hash(loose)); b != Failed || reason != ReasonNonCanonicalPHC {
+		t.Fatalf("loose encoding first = (%v, %q), want (failed, non_canonical_phc)", b, reason)
+	}
+	if b, reason := r.Classify(hash(withSalt(salt16))); b != Success {
+		t.Fatalf("canonical after it = (%v, %q), want success", b, reason)
 	}
 }
 
@@ -405,6 +493,33 @@ func TestConcurrentSaltReuse(t *testing.T) {
 	}
 	if v.calls.Load() != 1 {
 		t.Fatalf("Verifier calls = %d, want 1", v.calls.Load())
+	}
+}
+
+// TestConcurrentDistinctSalts must pass under -race: n goroutines on one
+// Run each record their own salt, then find it already recorded. n is
+// 256, every salt phc can make, so the set grows through several
+// resizes while other goroutines read and write it.
+func TestConcurrentDistinctSalts(t *testing.T) {
+	const n = 256
+	r := NewRun(nil)
+	var wg sync.WaitGroup
+	for i := range n {
+		wg.Go(func() {
+			o := Observation{Kind: Hash, Status: 200, Body: hashBody(phc(byte(i)))}
+			if b, reason := r.Classify(o); b != Success {
+				t.Errorf("salt %d = (%v, %q), want success", i, b, reason)
+			}
+			if b, reason := r.Classify(o); b != Failed || reason != ReasonSaltReused {
+				t.Errorf("salt %d replayed = (%v, %q), want (failed, salt_reused)", i, b, reason)
+			}
+		})
+	}
+	wg.Wait()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(r.salts) != n {
+		t.Fatalf("salt set holds %d, want %d", len(r.salts), n)
 	}
 }
 
@@ -513,110 +628,6 @@ func TestHashVerifyUnchanged(t *testing.T) {
 	}
 	if b, reason := r.Classify(Observation{Kind: Verify, WantMatch: false, Status: 200, Body: []byte(`{"match":false}`)}); b != Success {
 		t.Errorf("verify 200 = (%v, %q), want success", b, reason)
-	}
-}
-
-func TestReserve(t *testing.T) {
-	hash := func(saltByte byte) Observation {
-		return Observation{Kind: Hash, Status: 200, Body: hashBody(phc(saltByte))}
-	}
-
-	// A reserved salt replayed as a hash answer is caught, on time and
-	// late, and with a different key.
-	r := NewRun(nil)
-	if err := r.Reserve(phc(1)); err != nil {
-		t.Fatalf("Reserve = %v", err)
-	}
-	if b, reason := r.Classify(hash(1)); b != Failed || reason != ReasonSaltReused {
-		t.Fatalf("replay = (%v, %q), want (failed, salt_reused)", b, reason)
-	}
-	if err := r.Reserve(phc(6)); err != nil {
-		t.Fatalf("Reserve = %v", err)
-	}
-	late := hash(6)
-	late.Latency = HangTimeout + 1
-	if b, reason := r.Classify(late); b != Failed || reason != ReasonSaltReused {
-		t.Fatalf("late replay = (%v, %q), want (failed, salt_reused)", b, reason)
-	}
-	if err := r.Reserve(phc(2)); err != nil {
-		t.Fatalf("Reserve = %v", err)
-	}
-	otherKey := "$argon2id$v=19$m=19456,t=2,p=1$" + b64(bytes.Repeat([]byte{2}, 16)) + "$" + b64(make([]byte, 32))
-	if _, reason := r.Classify(Observation{Kind: Hash, Status: 200, Body: hashBody(otherKey)}); reason != ReasonSaltReused {
-		t.Fatalf("replay, other key: reason = %q, want salt_reused", reason)
-	}
-
-	// Reserving classifies nothing: a salt reserved and never replayed
-	// leaves other hashes, verifies and negatives alone, and reserving it
-	// twice is harmless.
-	r = NewRun(nil)
-	for range 2 {
-		if err := r.Reserve(phc(3)); err != nil {
-			t.Fatalf("Reserve = %v", err)
-		}
-	}
-	if b, reason := r.Classify(hash(4)); b != Success {
-		t.Fatalf("other salt = (%v, %q), want success", b, reason)
-	}
-	if b, reason := r.Classify(Observation{Kind: Verify, WantMatch: true, Status: 200, Body: []byte(`{"match":true}`)}); b != Success {
-		t.Fatalf("verify = (%v, %q), want success", b, reason)
-	}
-	if b, reason := r.Classify(Observation{Kind: Negative, Status: 400}); b != Success {
-		t.Fatalf("negative = (%v, %q), want success", b, reason)
-	}
-
-	// A salt already recorded from a hash response is reserved without
-	// error, and stays reused.
-	if err := r.Reserve(phc(4)); err != nil {
-		t.Fatalf("Reserve of a seen salt = %v", err)
-	}
-	if _, reason := r.Classify(hash(4)); reason != ReasonSaltReused {
-		t.Fatalf("after Reserve of a seen salt: reason = %q, want salt_reused", reason)
-	}
-
-	// A hash Reserve cannot parse is an error, records nothing, and
-	// never panics.
-	r = NewRun(nil)
-	for _, bad := range []string{
-		"",
-		"not-a-phc-string",
-		"$",
-		"$$$$$",
-		"$argon2id$v=19$m=19456,t=1,p=1$" + salt16 + "$" + key32, // non-exact params
-		withSalt(b64(make([]byte, 15))),
-		withKey("x"),
-		phc(5) + "$",
-		phc(5)[:len(phc(5))-10],
-	} {
-		if err := r.Reserve(bad); !errors.Is(err, ErrNotCanonical) {
-			t.Errorf("Reserve(%q) = %v, want ErrNotCanonical", bad, err)
-		}
-	}
-	// The non-exact-params string above carries salt16; it was not
-	// recorded.
-	if b, reason := r.Classify(Observation{Kind: Hash, Status: 200, Body: hashBody(withSalt(salt16))}); b != Success {
-		t.Fatalf("salt of a rejected Reserve = (%v, %q), want success", b, reason)
-	}
-}
-
-// TestConcurrentReserve must pass under -race.
-func TestConcurrentReserve(t *testing.T) {
-	const n = 64
-	r := NewRun(nil)
-	var wg sync.WaitGroup
-	for i := range n {
-		wg.Go(func() {
-			if err := r.Reserve(phc(byte(i))); err != nil {
-				t.Errorf("Reserve = %v", err)
-			}
-		})
-		wg.Go(func() { r.Classify(Observation{Kind: Hash, Status: 200, Body: hashBody(phc(byte(n + i)))}) })
-	}
-	wg.Wait()
-	for i := range 2 * n {
-		if _, reason := r.Classify(Observation{Kind: Hash, Status: 200, Body: hashBody(phc(byte(i)))}); reason != ReasonSaltReused {
-			t.Fatalf("salt %d: reason = %q, want salt_reused", i, reason)
-		}
 	}
 }
 

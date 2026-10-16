@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -87,7 +86,7 @@ type Kind int
 const (
 	Hash     Kind = iota + 1 // POST /hash
 	Verify                   // POST /verify
-	Negative                 // POST /verify that must be rejected (a contract negative)
+	Negative                 // POST /hash or /verify that must be rejected (a contract negative)
 )
 
 func (k Kind) String() string {
@@ -144,47 +143,25 @@ type Observation struct {
 // pass the fixed core's Verify; this package cannot import it.
 type Verifier func(password, encoded string) (bool, error)
 
-// Run classifies the responses of one run. It remembers every canonical
-// salt seen in a 2xx hash body, on time or late, and every salt passed
-// to Reserve, so a reused salt classifies as Failed. A variant's run
-// starts at its Stage 5 burst and continues through promotion to cull,
-// not one observation window, so hashes cached in the burst or an
-// earlier window cannot be replayed later (DESIGN.md sec 8). A Run is
-// safe for concurrent use.
+// Run classifies the responses of one run. It remembers the salt of
+// each 2xx answer to a Hash observation (a Negative's body is never
+// read) whose body passes the body checks and whose hash is canonical,
+// on time or late and whatever the later checks find, so a second
+// response with that salt is salt_reused. The salt set spans every
+// response the Run classifies; the caller sets the Run's lifetime
+// (loadgen keeps one per variant for as long as it serves it, DESIGN.md
+// sec 8, 10). A Run is safe for concurrent use.
 type Run struct {
 	verify Verifier
 
 	mu    sync.Mutex
-	salts map[string]struct{}
+	salts map[[saltLength]byte]struct{}
 }
 
 // NewRun returns a Run that uses verify for FullVerify observations.
 // verify may be nil if no observation sets FullVerify.
 func NewRun(verify Verifier) *Run {
-	return &Run{verify: verify, salts: make(map[string]struct{})}
-}
-
-// ErrNotCanonical is returned by Reserve for a hash that is not the
-// canonical PHC string at the fixed parameters.
-var ErrNotCanonical = errors.New("classifier: not a canonical PHC string at the fixed parameters")
-
-// Reserve records encoded's salt in the Run without classifying
-// anything, so a later hash response carrying that salt classifies as
-// salt_reused. loadgen reserves every hash it sends to /verify (DESIGN.md
-// sec 8, sec 10), so a mutant cannot answer /hash with one it was sent.
-//
-// If encoded is not canonical (Reserve uses the same check as a hash
-// response), Reserve records nothing and returns ErrNotCanonical: such a
-// string can never come back as a successful hash response, since that
-// would classify as non_canonical_phc first. Reserving an
-// already-recorded salt is a no-op.
-func (r *Run) Reserve(encoded string) error {
-	salt, ok := canonicalSalt(encoded)
-	if !ok {
-		return ErrNotCanonical
-	}
-	r.recordSalt(salt)
-	return nil
+	return &Run{verify: verify, salts: make(map[[saltLength]byte]struct{})}
 }
 
 // Classify returns o's bucket and, for Failed, the reason. It panics if
@@ -309,7 +286,7 @@ func singleValidRetryAfter(h http.Header) bool {
 }
 
 // recordSalt adds salt to the Run's set and reports whether it was new.
-func (r *Run) recordSalt(salt string) bool {
+func (r *Run) recordSalt(salt [saltLength]byte) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if _, seen := r.salts[salt]; seen {
@@ -372,24 +349,34 @@ const (
 	keyLength      = 32
 )
 
-// canonicalSalt returns encoded's salt segment if encoded is the
-// canonical PHC string at exactly the fixed parameters.
-func canonicalSalt(encoded string) (string, bool) {
+// canonicalSalt returns encoded's decoded salt if encoded is the
+// canonical PHC string at exactly the fixed parameters. The canonical
+// encoding is one-to-one, so the decoded bytes tell salts apart exactly
+// as the salt segment does, and as an array they keep no part of
+// encoded alive.
+func canonicalSalt(encoded string) ([saltLength]byte, bool) {
 	segs := strings.Split(encoded, "$")
 	if len(segs) != 6 || segs[0] != "" ||
 		segs[1] != variantSegment || segs[2] != versionSegment || segs[3] != paramsSegment {
-		return "", false
+		return [saltLength]byte{}, false
 	}
-	if !canonicalBase64(segs[4], saltLength) || !canonicalBase64(segs[5], keyLength) {
-		return "", false
+	salt, ok := canonicalBase64(segs[4], saltLength)
+	if !ok {
+		return [saltLength]byte{}, false
 	}
-	return segs[4], true
+	if _, ok := canonicalBase64(segs[5], keyLength); !ok {
+		return [saltLength]byte{}, false
+	}
+	return [saltLength]byte(salt), true
 }
 
-// canonicalBase64 reports whether s is the unpadded standard base64
-// encoding of exactly n bytes. Re-encoding catches what decoding
-// tolerates: ignored CR/LF and non-zero trailing bits.
-func canonicalBase64(s string, n int) bool {
+// canonicalBase64 returns the bytes s decodes to if s is the unpadded
+// standard base64 encoding of exactly n bytes. Re-encoding catches what
+// decoding tolerates: ignored CR/LF and non-zero trailing bits.
+func canonicalBase64(s string, n int) ([]byte, bool) {
 	b, err := base64.RawStdEncoding.DecodeString(s)
-	return err == nil && len(b) == n && base64.RawStdEncoding.EncodeToString(b) == s
+	if err != nil || len(b) != n || base64.RawStdEncoding.EncodeToString(b) != s {
+		return nil, false
+	}
+	return b, true
 }

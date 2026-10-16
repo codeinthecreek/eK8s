@@ -613,8 +613,12 @@ password sent.
   set sees every `/hash` response the variant gives. It has no journal
   and no restore: a loadgen restart empties it, which only loses
   detection power (section 10).
-  Salts from 2xx hash responses that arrive after the hang-timeout are
-  recorded too, so a late hash cannot be replayed on time.
+  A salt is recorded for every 2xx answer to a `/hash` request that is
+  not a contract negative, whose body passes the body checks and whose
+  hash is canonical, on time or late (so a late hash cannot be replayed
+  on time), whatever full verification then finds. A malformed or
+  over-cap body, or a non-canonical hash, records nothing.
+  The set is keyed on the decoded 16-byte salt.
 - **Repeated passwords:** about 1% of `/hash` requests repeat a password
   already sent to that variant in the same window, or another `/hash`
   request's password in the same Stage 5 burst (shuffled, so either may
@@ -649,8 +653,9 @@ implements it, and a mutant that breaks it fails Stage 2.
   type, valid UTF-8, at most `MaxBodyBytes` (4 KiB), and nothing after it
   but whitespace. JSON-equivalent forms (escaped names or characters,
   surrounding whitespace) are accepted. A 2xx other than 200 gets the
-  same body checks, its hash salt is recorded, and it is then
-  `bad_status`. Content-Type is not part of the contract.
+  same body checks; if they pass and its hash is canonical its salt is
+  recorded, and it is then `bad_status`. Content-Type is not part of the
+  contract.
 - Malformed input, an empty or >1024-byte password on either endpoint
   (`/hash` or `/verify`), or a hash whose parameters hashcore rejects
   -> 400.
