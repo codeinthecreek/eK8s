@@ -212,7 +212,7 @@ max. Earlier entries are not backfilled.
 - Reason: an empty or garbage value is no usable retry hint; a repeated Retry-After header is rejected, since RFC 9110 defines it as a single-value field. Both fail closed. Gen 0 sends "1".
 - Reverse: DESIGN.md sec 8 edit (graceful_shed bullet, HTTP contract); replace the parse check in Classify with a presence check.
 
-## 2026-10-02 · PR #15 · Strict 2xx bodies: one JSON object, exactly the contract key (case-sensitive), non-null right type, no trailing data
+## 2026-10-02 · PR #15 · Strict 2xx bodies: one JSON object, exactly the contract key (case-sensitive), non-null right type, no trailing data (duplicate-key half superseded by the PR #40 strict-decode entry)
 - Rejected: encoding/json struct decoding (matches keys case-insensitively, accepts null as absent); ignoring unknown fields.
 - Reason: the HTTP contract (DESIGN.md sec 8) is fixed, so extra or misspelled fields mean a broken mutant. Duplicate keys are not detected (last wins); the wrapper's encoder never emits them.
 - Reverse: DESIGN.md sec 8 edit (HTTP contract 200-body bullet); let decodeField ignore keys other than the contract one.
@@ -792,7 +792,7 @@ max. Earlier entries are not backfilled.
 - Reverse: a separate classifier in loadgen.
 - Origin: chat
 
-## 2026-10-15 · PR #39 · A /hash pair is recorded for 2xx with reason none or over_hang_timeout (DESIGN.md sec 8, 10)
+## 2026-10-15 · PR #39 · A /hash pair is recorded for 2xx with reason none or over_hang_timeout (DESIGN.md sec 8, 10) (extended by the PR #40 status entry: bad_status also records)
 - Decision: Checker records a pair only for KindHash, status 2xx and reason none or over_hang_timeout (records() in loadgen/check.go).
 - Rejected: Success only (a slow bad hash would skip host verification).
 - Reason: over_hang_timeout on a 2xx comes only after the integrity checks pass, and the host verifies late hashes too.
