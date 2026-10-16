@@ -860,7 +860,8 @@ are not capped.
 **Schedule lag and global exclusion.** Every send records its intended and
 actual send time. A scoring half is excluded for all variants (loadgen is
 one shared process) when lag p99 exceeds 10 ms, any lag exceeds 100 ms, a
-send is skipped, a `Check` call fails (a loadgen fault, not the variant's
+send is skipped, a send faults (a `Check` error, or a request loadgen
+could not build or generate: a loadgen fault, not the variant's
 verdict), or a record ring has a gap (records overwritten before the
 orchestrator read them; a gap on any target excludes the half for all
 variants). Each target has its own ring, made and dropped with that
@@ -1038,7 +1039,7 @@ the orchestrator design.
 
 **Excluded windows.** The orchestrator marks a window excluded from
 scoring for a loadgen restart during it (section 10) or a loadgen
-exclusion trigger (lag, a skipped send, a `Check` fault, a ring gap, a
+exclusion trigger (lag, a skipped send, a loadgen fault, a ring gap, a
 policy canary that connects). Probe Events (readiness failures,
 restarts) are diagnostics only, never a reason to exclude: a variant's
 own readiness behaviour is part of what is scored.

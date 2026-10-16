@@ -869,7 +869,7 @@ max. Earlier entries are not backfilled.
 - Reverse: change the count in loadgen; DESIGN.md sec 10 edit.
 - Origin: chat
 
-## 2026-10-16 · PR #41 (inferred) · A Check error is a record Fault that excludes the half (extends the PR #29 global-exclusion entry; DESIGN.md sec 10, 11)
+## 2026-10-16 · PR #41 (inferred) · A Check error is a record Fault that excludes the half (extends the PR #29 global-exclusion entry; DESIGN.md sec 10, 11) (extended by the PR #41 build-fault entry)
 - Decision: a Checker.Check error yields a record with Fault set and its Verdict ignored; the half is excluded for all variants, like a skipped send.
 - Rejected: recording the zero Verdict (charges a loadgen bug to the variant as failed); dropping the record (hides the fault and undercounts sends).
 - Reason: a Check error is loadgen's, so it must neither count against a variant nor vanish.
@@ -895,4 +895,11 @@ max. Earlier entries are not backfilled.
 - Rejected: net/http's default (follows up to 10 redirects and re-sends the POST body on 307 and 308).
 - Reason: a variant could answer 307 to a peer variant's Service, which loadgen's egress allows, and score the peer's real hash as its own; host verification passes it, and the peer's salts sit in the peer's Checker.
 - Reverse: drop CheckRedirect in loadgen/send.go; DESIGN.md sec 10 edit.
+- Origin: Code
+
+## 2026-10-16 · PR #41 (inferred) · A request loadgen cannot build or generate is a Fault too (extends the PR #41 Check-fault entry; DESIGN.md sec 10, 11)
+- Decision: a failed request build, and a request-generator error other than ErrOutOfPairs, give a Fault record with nothing sent and Check not called; a Fault excludes the half like a Check error.
+- Rejected: charging a failed build to the variant as transport_error (loadgen's own bad URL would count against the variant).
+- Reason: only the variant's own behaviour may count against it.
+- Reverse: loadgen/send.go returns the build error as resp.Err; for a generator error, drop the `err != nil` case in run.go's schedule and say what replaces it (the zero Request would otherwise be sent).
 - Origin: Code
