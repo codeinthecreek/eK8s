@@ -4,7 +4,7 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 *(inferred)* are guesses, not read from the repo; correct them.
 
 ## Now
-- Nothing in flight. Loadgen PR 4 (control API) is next; see Next.
+- claude/cut-doc-reads (PR #42, inferred): docs-only, cuts per-PR doc reads: decisions.md entries before #32 move to docs/decisions-archive.md; the reconcile greps decisions.md instead of reading it; Recent capped at 5; overview.md status is a pointer and overview.md/README.md refresh on request; docs/workflow/ frozen until extraction.
 
 ## Next
 - Extract docs/workflow/ into its own repo (links inside it are relative and stay within the folder); then decide whether eK8s's own CLAUDE.md, handoff.md and reviewer.md are regenerated from the templates (docs/decisions.md, PR #32 entry).
@@ -28,6 +28,7 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 - HPA at 70% of a 250m request pins variants at maxReplicas under load; revisit with the observation-window design (also the default 300s scale-down stabilisation). Windows now start from an idle gap with no warm-up exclusion (DESIGN.md sec 11), so the gap length versus the scale-down stabilisation decides how many replicas a variant starts a window with.
 - CI: unpin go-version 1.26.9 back to '1.26.x' in ci.yml and deploy.yml once actions/go-versions' manifest lists >= 1.26.9 (docs/decisions.md, PR #18 entry).
 - An in-flight request cap in loadgen (hypothetical; no concrete threat).
+- docs/workflow/ frozen until extraction; its templates lag CLAUDE.md from this PR on (re-sync at extraction).
 
 ## Recent
 - #41 Loadgen PR 3 of 5, open-loop sender and records: per-target Ring and Record (pairs ride on records), the HTTP client and send (no keep-alives, no proxy, no redirects, WriteTimeout + 1s pinned by a go/parser test), RunWindow/RunBurst on an index-based open-loop schedule with Evidence, Skipped and Fault records, memory benchmarks; DESIGN.md sec 10, 11 and eight decisions.md entries (2026-10-16)
@@ -35,35 +36,3 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 - #39 Loadgen PR 2 of 5, response checks: `Checker` (one classifier Run with no Verifier per variant, safe for concurrent use), `Verdict`, `HashPair` and a `Response` the sender fills; a pair is recorded only for a 2xx /hash whose reason is none or over_hang_timeout; tests plus mutation checks on that rule and the Kind mapping (all killed but one inert); DESIGN.md sec 10 and four decisions.md entries (2026-10-15)
 - #38 Loadgen PR 1 of 5, request generator: `Stream` and `Burst` (50/48/2 mix, each /verify pair once, ~1% /hash repeats, the five contract-negative classes in rotation), tests for shares, bounds and quotas, a hashcore agreement test over the malformed-hash forms, and a `go list -deps` test keeping loadgen off hashcore, testvectors, gate/ and Argon2; a stdlib-only deps test for internal/classifier. Sending, response checks and the control API are PRs 2-4.
 - #37 CLAUDE.md, docs-only: the commit-trailer rule covers commit messages only; PR bodies keep the harness's standard footer and session link, with no model name (CLAUDE.md and its workflow template; one decisions.md entry) (2026-10-15)
-- #36 docs-only: DESIGN.md sec 10, 11 record the loadgen/orchestrator boundary (raw records, halves and canary on the orchestrator side, ring size, stress waits); two decisions.md entries (2026-10-15)
-- #35 CLAUDE.md, docs-only: every commit message ends with two fixed trailers (`Co-Authored-By: Claude <noreply@anthropic.com>`, `Claude-Session: <link>`), no model name in commit messages, PR titles or PR bodies, new commits only; same bullet in docs/workflow/templates/CLAUDE.template.md (2026-10-15)
-- #34 workflow, docs-only: review packets lead with Intent and Constraints touched and list `Added complexity:` before `Self-review:`; hypothetical-threat guards parked unless the owner asks (non-negotiable ones go to the owner as a question); reviewer over-engineering finding is advisory; decisions.md `Origin:` field on new entries; same edits in the docs/workflow/ templates (2026-10-14)
-- #33 Fitness-first redesign, docs-only: DESIGN.md sec 7 three-concerns principle (containment, artifact security, fitness integrity; the gate is a filter) and a "Planned" gate-pod subsection; traffic only in observation windows, builds/gate/Stage 5 in gaps, cold start scored; host-generated /verify pairs per window; /hash salt set in loadgen memory, ~1% repeats, 16-character floor; host full verification after each window (all hashes for K = 3 scored windows, then a sample); integrity culls at window end before scoring; five live contract-negative classes; accepted limits in sec 15; eleven decisions.md entries; CLAUDE.md loadgen layout line and overview.md updated (2026-10-14)
-- #32 docs/workflow/, the project-independent chat/Code workflow for later extraction: five *.template.md templates (CLAUDE, STATUS, decisions, handoff, reviewer), WORKFLOW.md, chat-instructions.md; eK8s's own CLAUDE.md, docs/handoff.md and reviewer.md are unchanged; docs-only (2026-10-14)
-- #31 deploy/ek8s-system: namespace (PSA restricted), ClusterIP Service loadgen:control 9090, NetworkPolicy loadgen (no ingress rule; egress TCP 8080 to ek8s.io/role=variant and DNS to kube-dns), applied by up.sh; variant namespaces labelled ek8s.io/role: variant; readiness probe 2s/2s/3; variant-smoke.sh gains a loadgen stand-in and checks for the API server proxy, control-port refusals, loadgen egress and terminating endpoints (deploy smoke run 38372577882 passed every check, (h): 115ms); DESIGN.md sec 11: control-port ingress is node root processes only, kindnet FailOpen known limit (2026-10-13)
-- #30 internal/classifier contract negatives: Kind Negative (`negative_accepted`), `Run.Reserve` (ErrNotCanonical on an unparseable hash), `Integrity(reason)` (the DESIGN.md sec 9 list) and the Observation.Body/Err caller contract; integrity reasons win over the hang-timeout (DESIGN.md sec 8, amends PR #15); the Run starts at the Stage 5 burst; testvectors doc comments say gate-only (2026-10-13)
-- #29 Loadgen design packet recorded (docs-only, owner-approved): DESIGN.md sec 5, 7, 8, 9, 10, 11, 15 and eleven decisions.md entries (Q1-Q8, O1, O2, O5); the deploy PR carries the readiness-probe values (Q7) and the ek8s.io/role: variant namespace label (O5) (2026-10-13)
-- #28 deploy/ PR (2) of 2, the per-variant bundle: deploy/variant/*.yaml.tmpl (Namespace PSA restricted, LimitRange 250m/1000m CPU and 256Mi, NetworkPolicy deny egress + ingress 8080 from ek8s-system app=loadgen, Deployment hasher, Service, HPA 1-2 at 70%) rendered by package deploy/variant (shape checks, golden files, cmd/render); gate label prefix gate- -> ek8s- and pod names drawn as Kubernetes does; deploy/variant-smoke.sh in deploy.yml proves egress denial (deploy smoke run 38356331140: 1.1.1.1:80, the API server ClusterIP and the node address refused); DESIGN.md sec 11 egress sentence updated (2026-10-13)
-- #27 Gate fix for the Stage 4 seed flake (answer packet O2): the race boot sets GOMAXPROCS = max(NumCPU, 4) via bwrap --setenv, N unchanged; a positive Stage 4 seed guards the env wiring; DESIGN.md sec 7 Stage 4 Mechanics; decisions entries (O2, known gap: in-slot races need concurrent holders); the hash_cross-talk seed's residual 2-CPU miss Parked (2026-10-13)
-- #26 deploy/ PR (1) of 2, cluster infra: kind config (kind v0.33.0, node v1.37.0 by digest, 1 CPU / 2Gi reserved), metrics-server v0.9.0 vendored, stress-ng by digest (0 <-> 1 replicas, dose ConfigMap), up.sh, smoke.sh, deploy/README host setup; DESIGN.md sec 5, 7, 10, 11 edits; CI-size kind smoke workflow (deploy.yml), merge gate run 38318638954; ci.yml path filter narrowed to its own file (2026-10-13)
-- #25 Gate PR3 of 4: Stage 4 concurrency safety (static race build in the same bwrap sandbox after a race probe preflight, N = 2 x NumCPU concurrent requests with bounded retries, race report by exit status plus output scan, cross-talk via the Stage 2 Run; fails a candidate that exits by the end of the load) (2026-10-12)
-- #24 Reviewer checklist gains limit-boundary and child-process-lifetime items; handoff.md Feedback rule covers any owner reply carrying feedback, conditions or an approval with changes (2026-10-12)
-- #23 Packets are the default end-of-task output (CLAUDE.md, docs/handoff.md); packet header gains origin/main and the last merged PR; new Sync packet type and a Chat side staleness check; the start-of-PR reconcile goes in its own commit (2026-10-12)
-- #22 Newcomer overview (docs/overview.md) and a short front-door README.md; CLAUDE.md layout line and a bullet to keep the overview in step with DESIGN.md and the generation-0 wrapper (2026-10-12)
-- #21 Gate PR2 of 4: Stage 1 build/boot (static build, bare boot under bwrap via an nsenter relay, FROM scratch image), Stage 2 interop + contract, Stage 3 cost params; minimum-toolchain gate fault; CI installs bubblewrap and lifts the AppArmor userns restriction; sandbox preflight (2026-10-09)
-- #20 go.mod: `toolchain go1.26.9` for GOTOOLCHAIN=auto builds (2026-10-09)
-- #19 reviewer: three checklist items from PR #18's [missed] feedback (2026-10-09)
-- #18 Gate PR1 of 4: build-tree assembly and Stage 1 pre-build checks (candidate file set, hasher pin, build-constraint ban, go list allowlist under the deployed and race builds), gate/cmd/gate CLI; DESIGN.md sec 5, 7, 12 and CLAUDE.md edits for the approved gate design (2026-10-09)
-- #17 Pre-packet self-review by a read-only reviewer subagent (2026-10-02)
-- #16 internal/classifier PR B: test-vector pool (internal/classifier/testvectors), generator, pool-validity and agreement tests (2026-10-02)
-- #15 internal/classifier PR A: three-bucket response classifier with injected Verifier (2026-10-02)
-- #14 handoff: shorten review-packet full diffs (2026-10-02)
-- #13 CLAUDE.md: reconcile STATUS.md and decisions.md with main at PR start (2026-10-01)
-- #12 CI: run only on Go-relevant changes, plus weekly and on demand (2026-10-01)
-- #11 Add docs/handoff.md packet formats for the planning/review chat (2026-10-01)
-- #10 Add docs/STATUS.md as the resume point after long gaps (2026-10-01)
-- #9 decisions: record dropping GIT_COMMITTER_* from the cloud environment (2026-10-01)
-- #8 CLAUDE.md: don't act on the cloud Stop hook's commit/push prompts (2026-10-01)
-- #7 CI: vet, test, race, govulncheck (2026-10-01)
-- #6 Generation 0: hashcore, wrapper seed, cmd/service (2026-09-27)
-- #5 Add working agreement and decision log (2026-09-27)

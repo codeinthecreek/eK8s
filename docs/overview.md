@@ -699,44 +699,7 @@ to 9 exist.
 
 ## 12. Where the project is now
 
-For the current state, always check [STATUS.md](STATUS.md). Every
-change updates it; this page is not updated that often.
-
-In broad terms, as of 2026-10-15:
-
-- **Built:** the *thing being evolved* and the *rulebook for judging
-  it*. That is the generation-0 service, the locked hashing core, the
-  shared judge (classifier) and the gate's known-answer test pool, plus gate
-  Stages 1-4 (section 6), all tested in CI. The cluster setup is
-  written too: the kind config, metrics-server, the stress-ng noisy
-  neighbour and the per-variant manifests (namespace, limits, network
-  policy, Deployment, Service, autoscaler) and the load generator's
-  namespace (its control Service and network policy, no load generator
-  yet), with a small-scale smoke test in CI; the full-size run waits for
-  the workstation.
-  The judge also knows the load generator's deliberately invalid
-  requests, which a variant must refuse, and which failures count as
-  cheating.
-- **Being built:** the load generator. Its first part is written:
-  building what it sends (the traffic mix, fresh passwords with about 1%
-  deliberately repeated, and all five kinds of deliberately invalid
-  request, each checked against the hashing core in tests), with a test
-  that it never links the hashing core or any Argon2 code. Its answer
-  checks are written too: each response gets its verdict from the shared
-  classifier, and each accepted hash is kept, with its password, for the
-  host to verify.
-- **Designed, not built:** the rest of the load generator (open-loop
-  sending, schedule-lag checks, its control API, one long-lived
-  deployment; host-generated pairs sent once).
-- **Next:** the rest of the load generator, then gate Stage 5, which
-  needs it. Also planned: a design for running gate Stages 2-4 in a pod,
-  and a classifier cleanup.
-- **Not built yet:** gate Stage 5, most of the load generator, AI driver,
-  orchestrator and lineage records. No
-  generation has evolved yet.
-
-The reasons behind individual implementation choices are logged in
-[decisions.md](decisions.md).
+For the current state, see [STATUS.md](STATUS.md).
 
 ## 13. Expected outcome
 
