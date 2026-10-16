@@ -4,7 +4,7 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 *(inferred)* are guesses, not read from the repo; correct them.
 
 ## Now
-- claude/classifier-strict-bodies (PR #40, inferred): classifier rejects 2xx bodies that do not match the spec exactly (S1-S5: single member, duplicate keys, JSON-equivalent forms, only 200 is success, 4 KiB MaxBodyBytes); gate and loadgen follow the cap contract (MaxBodyBytes+1 read, Err only for a failed read); loadgen records() adds bad_status; tests and mutation checks
+- claude/loadgen-sender (PR #41, inferred): loadgen PR 3 of 5, open-loop sender and records
 
 ## Next
 - Extract docs/workflow/ into its own repo (links inside it are relative and stay within the folder); then decide whether eK8s's own CLAUDE.md, handoff.md and reviewer.md are regenerated from the templates (docs/decisions.md, PR #32 entry).
@@ -30,6 +30,7 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 - CI: unpin go-version 1.26.9 back to '1.26.x' in ci.yml and deploy.yml once actions/go-versions' manifest lists >= 1.26.9 (docs/decisions.md, PR #18 entry).
 
 ## Recent
+- #40 Classifier strictness, security-relevant: classifier rejects 2xx bodies that do not match the spec exactly (S1-S5: single member, duplicate keys, JSON-equivalent forms, only 200 is success, 4 KiB MaxBodyBytes); gate and loadgen follow the cap contract (MaxBodyBytes+1 read, Err only for a failed read); loadgen records() adds bad_status; tests and mutation checks (2026-10-16)
 - #39 Loadgen PR 2 of 5, response checks: `Checker` (one classifier Run with no Verifier per variant, safe for concurrent use), `Verdict`, `HashPair` and a `Response` the sender fills; a pair is recorded only for a 2xx /hash whose reason is none or over_hang_timeout; tests plus mutation checks on that rule and the Kind mapping (all killed but one inert); DESIGN.md sec 10 and four decisions.md entries (2026-10-15)
 - #38 Loadgen PR 1 of 5, request generator: `Stream` and `Burst` (50/48/2 mix, each /verify pair once, ~1% /hash repeats, the five contract-negative classes in rotation), tests for shares, bounds and quotas, a hashcore agreement test over the malformed-hash forms, and a `go list -deps` test keeping loadgen off hashcore, testvectors, gate/ and Argon2; a stdlib-only deps test for internal/classifier. Sending, response checks and the control API are PRs 2-4.
 - #37 CLAUDE.md, docs-only: the commit-trailer rule covers commit messages only; PR bodies keep the harness's standard footer and session link, with no model name (CLAUDE.md and its workflow template; one decisions.md entry) (2026-10-15)
