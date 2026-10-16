@@ -4,10 +4,11 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 *(inferred)* are guesses, not read from the repo; correct them.
 
 ## Now
-- claude/cut-doc-reads (PR #42, inferred): docs-only, cuts per-PR doc reads: decisions.md entries before #32 move to docs/decisions-archive.md; the reconcile greps decisions.md instead of reading it; Recent capped at 5; overview.md status is a pointer and overview.md/README.md refresh on request; docs/workflow/ frozen until extraction.
+- claude/cut-doc-reads (PR #42, inferred): docs-only, cuts per-PR doc reads: decisions.md entries before #32 move to docs/decisions-archive.md; the reconcile greps decisions.md instead of reading it; Recent capped at 5; overview.md/README.md refresh on request; docs/workflow/ frozen until extraction.
 
 ## Next
 - Extract docs/workflow/ into its own repo (links inside it are relative and stay within the folder); then decide whether eK8s's own CLAUDE.md, handoff.md and reviewer.md are regenerated from the templates (docs/decisions.md, PR #32 entry).
+- overview.md: stale since #41 (loadgen sender built; sec 12 snapshot is as of 2026-10-15)
 - Loadgen series, PRs 4-5 left (PR 1 is #38, PR 2 is #39, PR 3 is #41), then gate PR4 (Stage 5).
   PR 4. Control API on :9090: targets, per-window /verify pair batches from the host (a new batch after a restart, never the old one), start window/burst, records and recorded (password, hash) pairs, boot_id; a per-half policy canary the orchestrator triggers through the control API, returning connected or refused (DESIGN.md sec 11); settle the API details and what drives it in tests; it owns each variant's Checker lifecycle (make, keep for the variant's whole time in loadgen, drop); it also owns each target's ring with its Checker and drops a target only after its records are read. A cancelled RunWindow or RunBurst returns ctx.Err() with no records for its later indices; the orchestrator must exclude that window or burst.
   PR 5. Deployment in ek8s-system: 750m/256Mi Guaranteed, label app=loadgen, its only listener the container port named control (9090), which deploy/ek8s-system/service.yaml targets; no other listener (pprof, metrics), since every root process on the node reaches any loadgen port: add a check for it.
