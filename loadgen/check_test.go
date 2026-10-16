@@ -38,30 +38,27 @@ func verdict(r classifier.Reason) Verdict {
 	return Verdict{classifier.Failed, r}
 }
 
-// check runs c.Check and fails the test on an error or an unexpected
-// verdict.
-func check(t *testing.T, c *Checker, req Request, resp Response, want Verdict) {
+// check runs c.Check and fails the test on an error, an unexpected
+// verdict or an unexpected pair (nil for none).
+func check(t *testing.T, c *Checker, req Request, resp Response, want Verdict, wantPair *HashPair) {
 	t.Helper()
-	got, err := c.Check(req, resp)
+	got, pair, err := c.Check(req, resp)
 	if err != nil {
 		t.Fatalf("Check: %v", err)
 	}
 	if got != want {
 		t.Errorf("Check = %v %q, want %v %q", got.Bucket, got.Reason, want.Bucket, want.Reason)
 	}
+	if !samePair(pair, wantPair) {
+		t.Errorf("Check pair = %+v, want %+v", pair, wantPair)
+	}
 }
 
-func wantPairs(t *testing.T, c *Checker, want ...HashPair) {
-	t.Helper()
-	got := c.Pairs()
-	if len(got) != len(want) {
-		t.Fatalf("Pairs() = %d pairs %v, want %d %v", len(got), got, len(want), want)
+func samePair(a, b *HashPair) bool {
+	if a == nil || b == nil {
+		return a == b
 	}
-	for i := range got {
-		if got[i] != want[i] {
-			t.Errorf("Pairs()[%d] = %+v, want %+v", i, got[i], want[i])
-		}
-	}
+	return *a == *b
 }
 
 func TestClassifierKind(t *testing.T) {
@@ -86,18 +83,19 @@ func TestClassifierKind(t *testing.T) {
 // TestCheckUnknownKind checks that a request of an unknown kind errors
 // and never reaches the classifier: it does not panic (Classify panics
 // on an invalid kind), and the salt of its valid 2xx hash body is not
-// recorded, so the same body then passes as a /hash response.
+// recorded, so the same body then passes as a /hash response, with its
+// pair.
 func TestCheckUnknownKind(t *testing.T) {
 	c := NewChecker()
-	body := hashJSON(randomExactPHC())
+	hash := randomExactPHC()
+	body := hashJSON(hash)
 	req := hashRequest(newPassword())
 	bad := req
 	bad.Kind = "bogus"
-	if v, err := c.Check(bad, ok(body, onTime)); err == nil || v != (Verdict{}) {
-		t.Fatalf("Check(kind %q) = %v, %v; want zero Verdict and an error", bad.Kind, v, err)
+	if v, p, err := c.Check(bad, ok(body, onTime)); err == nil || v != (Verdict{}) || p != nil {
+		t.Fatalf("Check(kind %q) = %v, %+v, %v; want zero Verdict, nil pair and an error", bad.Kind, v, p, err)
 	}
-	wantPairs(t, c)
-	check(t, c, req, ok(body, onTime), verdict(classifier.ReasonNone))
+	check(t, c, req, ok(body, onTime), verdict(classifier.ReasonNone), &HashPair{req.Password, hash})
 }
 
 // burstNegatives returns one negative of each class, taken from a real
@@ -140,9 +138,7 @@ func TestCheckNegatives(t *testing.T) {
 				{"late 400", Response{Status: http.StatusBadRequest, Latency: late}, verdict(classifier.ReasonOverHangTimeout)},
 			} {
 				t.Run(tc.name, func(t *testing.T) {
-					c := NewChecker()
-					check(t, c, req, tc.resp, tc.want)
-					wantPairs(t, c)
+					check(t, NewChecker(), req, tc.resp, tc.want, nil)
 				})
 			}
 		})
@@ -164,15 +160,13 @@ func TestCheckVerify(t *testing.T) {
 			{"201 right match", http.StatusCreated, mustJSON(map[string]bool{"match": match}), verdict(classifier.ReasonBadStatus)},
 		} {
 			t.Run(fmt.Sprintf("match=%v/%s", match, tc.name), func(t *testing.T) {
-				c := NewChecker()
-				check(t, c, req, Response{Status: tc.status, Body: tc.body, Latency: onTime}, tc.want)
-				wantPairs(t, c)
+				check(t, NewChecker(), req, Response{Status: tc.status, Body: tc.body, Latency: onTime}, tc.want, nil)
 			})
 		}
 	}
 }
 
-// TestCheckHashRecords checks that a valid hash records its pair at any
+// TestCheckHashRecords checks that a valid hash returns its pair at any
 // 2xx status, on time or late (the host verifies those hashes too). A
 // 2xx other than 200 is bad_status, or over_hang_timeout when late, but
 // only after the integrity checks pass, so its salt is recorded too.
@@ -190,28 +184,16 @@ func TestCheckHashRecords(t *testing.T) {
 				c := NewChecker()
 				req := hashRequest(newPassword())
 				hash := randomExactPHC()
-				check(t, c, req, Response{Status: status, Body: hashJSON(hash), Latency: latency}, want)
-				wantPairs(t, c, HashPair{req.Password, hash})
-				check(t, c, hashRequest(newPassword()), ok(hashJSON(hash), onTime), verdict(classifier.ReasonSaltReused))
-				wantPairs(t, c, HashPair{req.Password, hash})
+				check(t, c, req, Response{Status: status, Body: hashJSON(hash), Latency: latency}, want, &HashPair{req.Password, hash})
+				check(t, c, hashRequest(newPassword()), ok(hashJSON(hash), onTime), verdict(classifier.ReasonSaltReused), nil)
 			})
 		}
 	}
 }
 
-// TestCheckPairsCopy checks that Pairs returns a copy: changing it
-// leaves the Checker's pairs alone.
-func TestCheckPairsCopy(t *testing.T) {
-	c := NewChecker()
-	req, hash := hashRequest(newPassword()), randomExactPHC()
-	check(t, c, req, ok(hashJSON(hash), onTime), verdict(classifier.ReasonNone))
-	c.Pairs()[0] = HashPair{"changed", "changed"}
-	wantPairs(t, c, HashPair{req.Password, hash})
-}
-
 // TestCheckHashSaltReused checks the salt set at any latency: the second
-// response with a salt is salt_reused and records nothing, whichever of
-// the two is late.
+// response with a salt is salt_reused and has no pair, whichever of the
+// two is late.
 func TestCheckHashSaltReused(t *testing.T) {
 	for _, tc := range []struct{ first, second time.Duration }{
 		{onTime, onTime}, {onTime, late}, {late, onTime}, {late, late},
@@ -225,9 +207,8 @@ func TestCheckHashSaltReused(t *testing.T) {
 			if tc.first == late {
 				want1 = verdict(classifier.ReasonOverHangTimeout)
 			}
-			check(t, c, req1, ok(hashJSON(hash1), tc.first), want1)
-			check(t, c, req2, ok(hashJSON(withSalt(salt)), tc.second), verdict(classifier.ReasonSaltReused))
-			wantPairs(t, c, HashPair{req1.Password, hash1})
+			check(t, c, req1, ok(hashJSON(hash1), tc.first), want1, &HashPair{req1.Password, hash1})
+			check(t, c, req2, ok(hashJSON(withSalt(salt)), tc.second), verdict(classifier.ReasonSaltReused), nil)
 		})
 	}
 }
@@ -239,15 +220,14 @@ func TestCheckHashSaltPerChecker(t *testing.T) {
 	for range 2 {
 		c := NewChecker()
 		req, hash := hashRequest(newPassword()), withSalt(salt)
-		check(t, c, req, ok(hashJSON(hash), onTime), verdict(classifier.ReasonNone))
-		wantPairs(t, c, HashPair{req.Password, hash})
+		check(t, c, req, ok(hashJSON(hash), onTime), verdict(classifier.ReasonNone), &HashPair{req.Password, hash})
 	}
 }
 
-// TestCheckHashNoRecord covers the /hash responses that record no pair.
-// Where a body carries a valid hash, recording it would be wrong, so a
+// TestCheckHashNoRecord covers the /hash responses that have no pair.
+// Where a body carries a valid hash, returning it would be wrong, so a
 // missing status or reason clause in the record condition shows up as a
-// recorded pair.
+// returned pair.
 func TestCheckHashNoRecord(t *testing.T) {
 	retry := http.Header{"Retry-After": {"1"}}
 	for _, tc := range []struct {
@@ -272,9 +252,7 @@ func TestCheckHashNoRecord(t *testing.T) {
 		{"500", Response{Status: http.StatusInternalServerError, Body: hashJSON(randomExactPHC()), Latency: onTime}, verdict(classifier.ReasonBadStatus)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			c := NewChecker()
-			check(t, c, hashRequest(newPassword()), tc.resp, tc.want)
-			wantPairs(t, c)
+			check(t, NewChecker(), hashRequest(newPassword()), tc.resp, tc.want, nil)
 		})
 	}
 }
@@ -287,13 +265,12 @@ func padTo(body []byte, n int) []byte {
 }
 
 // TestCheckHashBodyCap checks that a valid hash body padded to exactly
-// classifier.MaxBodyBytes records its pair (one byte more is
+// classifier.MaxBodyBytes returns its pair (one byte more is
 // TestCheckHashNoRecord's "over MaxBodyBytes" case).
 func TestCheckHashBodyCap(t *testing.T) {
 	c := NewChecker()
 	req, hash := hashRequest(newPassword()), randomExactPHC()
-	check(t, c, req, ok(padTo(hashJSON(hash), classifier.MaxBodyBytes), onTime), verdict(classifier.ReasonNone))
-	wantPairs(t, c, HashPair{req.Password, hash})
+	check(t, c, req, ok(padTo(hashJSON(hash), classifier.MaxBodyBytes), onTime), verdict(classifier.ReasonNone), &HashPair{req.Password, hash})
 }
 
 // TestCheckHashTransportErrorNoSalt checks that a transport error leaves
@@ -304,24 +281,21 @@ func TestCheckHashTransportErrorNoSalt(t *testing.T) {
 	resp := ok(hashJSON(hash), onTime)
 	failed := resp
 	failed.Err = errors.New("read: connection reset")
-	check(t, c, req, failed, verdict(classifier.ReasonTransportError))
-	check(t, c, req, resp, verdict(classifier.ReasonNone))
-	wantPairs(t, c, HashPair{req.Password, hash})
+	check(t, c, req, failed, verdict(classifier.ReasonTransportError), nil)
+	check(t, c, req, resp, verdict(classifier.ReasonNone), &HashPair{req.Password, hash})
 }
 
 // TestCheckHashDuplicateKey checks that a body with a duplicate "hash"
-// key is malformed_body, whatever the first value holds, and records
-// nothing: no pair, and no salt, so the last hash then passes alone.
+// key is malformed_body, whatever the first value holds, and has no
+// pair and records no salt, so the last hash then passes alone.
 func TestCheckHashDuplicateKey(t *testing.T) {
 	for _, first := range []string{`"` + randomExactPHC() + `"`, `5`} {
 		c := NewChecker()
 		req, last := hashRequest(newPassword()), randomExactPHC()
 		body := []byte(`{"hash":` + first + `,"hash":"` + last + `"}`)
-		check(t, c, req, ok(body, onTime), verdict(classifier.ReasonMalformedBody))
-		wantPairs(t, c)
+		check(t, c, req, ok(body, onTime), verdict(classifier.ReasonMalformedBody), nil)
 		req2 := hashRequest(newPassword())
-		check(t, c, req2, ok(hashJSON(last), onTime), verdict(classifier.ReasonNone))
-		wantPairs(t, c, HashPair{req2.Password, last})
+		check(t, c, req2, ok(hashJSON(last), onTime), verdict(classifier.ReasonNone), &HashPair{req2.Password, last})
 	}
 }
 
@@ -340,7 +314,7 @@ func TestHashField(t *testing.T) {
 // TestCheckConcurrent runs many goroutines on one Checker: each of
 // nSalts salts is answered nRepeats times, by different goroutines, with
 // /verify and negative responses interleaved. Exactly one response per
-// salt records a pair and the rest are salt_reused. Run it under -race.
+// salt returns a pair and the rest are salt_reused. Run it under -race.
 func TestCheckConcurrent(t *testing.T) {
 	const (
 		nSalts     = 200
@@ -364,6 +338,7 @@ func TestCheckConcurrent(t *testing.T) {
 	c := NewChecker()
 	ch := make(chan job)
 	counts := make([]map[classifier.Reason]int, goroutines)
+	gPairs := make([][]HashPair, goroutines)
 	var wg sync.WaitGroup
 	for g := range goroutines {
 		counts[g] = map[classifier.Reason]int{}
@@ -371,13 +346,22 @@ func TestCheckConcurrent(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for j := range ch {
-				v, err := c.Check(j.req, j.resp)
+				v, p, err := c.Check(j.req, j.resp)
 				if err != nil {
 					t.Error(err)
 					continue
 				}
 				if j.req.Kind == KindHash {
 					counts[g][v.Reason]++
+				}
+				if (p != nil) != (j.req.Kind == KindHash && v.Reason == classifier.ReasonNone) {
+					t.Errorf("%s %q: pair %+v", j.req.Kind, v.Reason, p)
+				}
+				if p != nil {
+					if p.Password != j.req.Password {
+						t.Errorf("pair password %q, want the request's %q", p.Password, j.req.Password)
+					}
+					gPairs[g] = append(gPairs[g], *p)
 				}
 			}
 		}()
@@ -394,12 +378,15 @@ func TestCheckConcurrent(t *testing.T) {
 			total[r] += n
 		}
 	}
-	pairs := c.Pairs()
+	var pairs []HashPair
+	for _, ps := range gPairs {
+		pairs = append(pairs, ps...)
+	}
 	if total[classifier.ReasonNone] != nSalts || total[classifier.ReasonSaltReused] != nSalts*(nRepeats-1) || len(total) != 2 {
 		t.Errorf("/hash reasons = %v, want %d success and %d salt_reused", total, nSalts, nSalts*(nRepeats-1))
 	}
 	if len(pairs) != total[classifier.ReasonNone] {
-		t.Errorf("%d pairs recorded, want one per success, %d", len(pairs), total[classifier.ReasonNone])
+		t.Errorf("%d pairs returned, want one per success, %d", len(pairs), total[classifier.ReasonNone])
 	}
 	salts := map[string]bool{}
 	for _, p := range pairs {

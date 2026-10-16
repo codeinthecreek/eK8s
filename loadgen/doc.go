@@ -9,7 +9,9 @@
 //
 // Its response checks give each response its verdict: a Checker
 // classifies one variant's responses with internal/classifier and
-// records the variant's /hash pairs, for the host to verify.
+// returns the /hash pairs the host must verify, for their records. Each
+// send's outcome is a Record in its target's Ring, which the orchestrator
+// reads from.
 //
 // Loadgen does no Argon2. Its build never depends, directly or
 // transitively, on internal/hashcore, internal/classifier/testvectors,
