@@ -144,12 +144,13 @@ type Observation struct {
 type Verifier func(password, encoded string) (bool, error)
 
 // Run classifies the responses of one run. It remembers the salt of
-// each 2xx /hash answer whose body passes the body checks and whose
-// hash is canonical, on time or late and whatever the later checks
-// find, so a second response with that salt is salt_reused. The salt
-// set spans every response the Run classifies; the caller sets the
-// Run's lifetime (loadgen keeps one per variant for as long as it
-// serves it, DESIGN.md sec 8, 10). A Run is safe for concurrent use.
+// each 2xx answer to a Hash observation (a Negative's body is never
+// read) whose body passes the body checks and whose hash is canonical,
+// on time or late and whatever the later checks find, so a second
+// response with that salt is salt_reused. The salt set spans every
+// response the Run classifies; the caller sets the Run's lifetime
+// (loadgen keeps one per variant for as long as it serves it, DESIGN.md
+// sec 8, 10). A Run is safe for concurrent use.
 type Run struct {
 	verify Verifier
 

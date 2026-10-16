@@ -613,10 +613,11 @@ password sent.
   set sees every `/hash` response the variant gives. It has no journal
   and no restore: a loadgen restart empties it, which only loses
   detection power (section 10).
-  A salt is recorded for every 2xx `/hash` answer whose body passes the
-  body checks and whose hash is canonical, on time or late (so a late
-  hash cannot be replayed on time), whatever full verification then finds.
-  A malformed or over-cap body, or a non-canonical hash, records nothing.
+  A salt is recorded for every 2xx answer to a `/hash` request that is
+  not a contract negative, whose body passes the body checks and whose
+  hash is canonical, on time or late (so a late hash cannot be replayed
+  on time), whatever full verification then finds. A malformed or
+  over-cap body, or a non-canonical hash, records nothing.
   The set is keyed on the decoded 16-byte salt.
 - **Repeated passwords:** about 1% of `/hash` requests repeat a password
   already sent to that variant in the same window, or another `/hash`

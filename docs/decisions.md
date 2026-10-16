@@ -292,7 +292,7 @@ max. Earlier entries are not backfilled.
 
 ## 2026-10-16 · PR #43 (inferred) · The salt set is keyed on the decoded [16]byte salt (DESIGN.md sec 8)
 - Decision: classifier.Run's salt set is a map[[16]byte]struct{} of the decoded salt, measured at 25.23 B per salt (BenchmarkCheckerSalts).
-- Rejected: string (a substring pins the 97-byte hash, 149.3 B; a clone is 61.3 B); uint64 (the same 25.2 B, and it misses reuse when two salts differ only in the dropped 8 bytes).
+- Rejected: string (a substring pins the 97-byte hash, 149.3 B; a clone is 61.3 B); uint64 (the same 25.2 B, but two salts that differ only in the dropped 8 bytes would be a false salt_reused).
 - Reason: canonical base64 is one-to-one, so the decoded bytes catch exactly the reuses the salt segment did.
 - Reverse: key on the salt segment string.
 - Origin: chat
@@ -300,7 +300,7 @@ max. Earlier entries are not backfilled.
 ## 2026-10-16 · PR #43 (inferred) · No last-M-windows cap on the salt set (DESIGN.md sec 8, 10)
 - Decision: the set keeps every salt for the variant's whole time in loadgen.
 - Rejected: a last-M-windows cap (a salt reused more than M windows apart goes uncaught).
-- Reason: 4 variants x 750,000 salts x 25.23 B is 72.2 MiB; with rings (no burst; one of 3,000 records adds ~12 MiB) and Evidence, ~84 MiB live. loadgen sets no GOMEMLIMIT, so at GOGC=100 the heap can reach about twice that, ~170-195 MiB, under 256Mi. The 750k, rate and window figures are planning guesses.
+- Reason: 4 variants x 750,000 salts x 25.23 B is 72.2 MiB; with rings (no burst; one of 3,000 records adds ~12 MiB) and Evidence, ~84 MiB live. loadgen sets no GOMEMLIMIT, so at GOGC=100 the heap can reach about twice live: ~170 MiB, or ~195 MiB with a 3,000-record burst, under 256Mi. The 750k, rate and window figures are planning guesses.
 - Revisit: if the measured rate or window count is well above them (STATUS Parked, Pending workstation, Q8).
 - Reverse: add a cap.
 - Origin: chat
