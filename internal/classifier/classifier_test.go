@@ -3,9 +3,11 @@ package classifier
 import (
 	"bytes"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -668,5 +670,238 @@ func TestBodyReadContract(t *testing.T) {
 				t.Fatalf("Integrity(%q) = %v, want %v", reason, got, tt.wantIntegrity)
 			}
 		})
+	}
+}
+
+// TestStrictBody: a 2xx body is one JSON object with exactly one member,
+// compared as JSON (escapes and surrounding whitespace allowed), never
+// as bytes; every other shape is malformed_body.
+func TestStrictBody(t *testing.T) {
+	p1, p2 := phc(1), phc(2)
+	hash := func(body string) Observation { return Observation{Kind: Hash, Status: 200, Body: []byte(body)} }
+	verify := func(want bool, body string) Observation {
+		return Observation{Kind: Verify, WantMatch: want, Status: 200, Body: []byte(body)}
+	}
+	// A canonical PHC string whose salt has '/' in it, with every '$'
+	// and '/' JSON-escaped.
+	slashy := withSalt(b64(bytes.Repeat([]byte{0xFF}, 16)))
+	escaped := strings.NewReplacer("$", `\u0024`, "/", `\/`).Replace(slashy)
+
+	tests := []struct {
+		name       string
+		o          Observation
+		wantReason Reason // ReasonNone means Success
+	}{
+		// Duplicate keys, both orders, for both endpoints: no value of
+		// several is ever picked.
+		{"hash dup both valid", hash(`{"hash":"` + p1 + `","hash":"` + p2 + `"}`), ReasonMalformedBody},
+		{"hash dup same value", hash(`{"hash":"` + p1 + `","hash":"` + p1 + `"}`), ReasonMalformedBody},
+		{"hash dup null first", hash(`{"hash":null,"hash":"` + p1 + `"}`), ReasonMalformedBody},
+		{"hash dup number first", hash(`{"hash":1,"hash":"` + p1 + `"}`), ReasonMalformedBody},
+		{"hash dup null second", hash(`{"hash":"` + p1 + `","hash":null}`), ReasonMalformedBody},
+		{"hash dup number second", hash(`{"hash":"` + p1 + `","hash":1}`), ReasonMalformedBody},
+		{"hash other member first", hash(`{"x":1,"hash":"` + p1 + `"}`), ReasonMalformedBody},
+		{"match dup same value", verify(true, `{"match":true,"match":true}`), ReasonMalformedBody},
+		{"match dup false then true", verify(true, `{"match":false,"match":true}`), ReasonMalformedBody},
+		{"match dup true then false", verify(false, `{"match":true,"match":false}`), ReasonMalformedBody},
+		{"match dup null first", verify(true, `{"match":null,"match":true}`), ReasonMalformedBody},
+		{"match dup number first", verify(true, `{"match":0,"match":true}`), ReasonMalformedBody},
+		{"match dup null second", verify(true, `{"match":true,"match":null}`), ReasonMalformedBody},
+		{"match dup number second", verify(true, `{"match":true,"match":0}`), ReasonMalformedBody},
+		{"match other member first", verify(true, `{"x":1,"match":true}`), ReasonMalformedBody},
+
+		// JSON-equivalent bodies are accepted.
+		{"escaped hash key", hash(`{"\u0068\u0061\u0073\u0068":"` + p1 + `"}`), ReasonNone},
+		{"escaped match key", verify(true, `{"m\u0061tch":true}`), ReasonNone},
+		{"escaped PHC characters", hash(`{"hash":"` + escaped + `"}`), ReasonNone},
+		{"hash surrounding whitespace", hash(" \t\r\n{ \"hash\" :\t\"" + p1 + "\" }\r\n\t "), ReasonNone},
+		{"match surrounding whitespace", verify(true, " \t\r\n{ \"match\" :\ttrue }\r\n\t "), ReasonNone},
+		{"hash trailing newline", hash(`{"hash":"` + p1 + "\"}\n"), ReasonNone},
+		{"match trailing newline", verify(false, "{\"match\":false}\n"), ReasonNone},
+
+		// Invalid UTF-8 anywhere, even where a lenient decoder would
+		// discard it, and a BOM.
+		{"invalid UTF-8 in hash value", hash(`{"hash":"` + p1 + "\xff\"}"), ReasonMalformedBody},
+		{"invalid UTF-8 in hash key", hash("{\"hash\xff\":\"" + p1 + `"}`), ReasonMalformedBody},
+		{"invalid UTF-8 in match key", verify(true, "{\"match\xff\":true}"), ReasonMalformedBody},
+		{"invalid UTF-8 in discarded earlier value", hash("{\"hash\":\"\xff\",\"hash\":\"" + p1 + `"}`), ReasonMalformedBody},
+		{"invalid UTF-8 in other member", hash("{\"x\":\"\xff\",\"hash\":\"" + p1 + `"}`), ReasonMalformedBody},
+		{"hash BOM", hash("\xef\xbb\xbf" + `{"hash":"` + p1 + `"}`), ReasonMalformedBody},
+		{"match BOM", verify(true, "\xef\xbb\xbf{\"match\":true}"), ReasonMalformedBody},
+		// Valid UTF-8 JSON, decoded to U+FFFD: a PHC check failure.
+		{"lone surrogate in hash", hash(`{"hash":"` + p1 + `\ud800"}`), ReasonNonCanonicalPHC},
+
+		// match must be a JSON boolean; WantMatch is what a coercing
+		// decoder would read, so leniency would show as Success.
+		{"match string", verify(true, `{"match":"true"}`), ReasonMalformedBody},
+		{"match 1", verify(true, `{"match":1}`), ReasonMalformedBody},
+		{"match 0", verify(false, `{"match":0}`), ReasonMalformedBody},
+		{"match null", verify(false, `{"match":null}`), ReasonMalformedBody},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			wantBucket := Failed
+			if tt.wantReason == ReasonNone {
+				wantBucket = Success
+			}
+			if b, reason := NewRun(nil).Classify(tt.o); b != wantBucket || reason != tt.wantReason {
+				t.Errorf("Classify(%q) = (%v, %q), want (%v, %q)", tt.o.Body, b, reason, wantBucket, tt.wantReason)
+			}
+		})
+	}
+
+	// The escaped hash records the unescaped salt.
+	r := NewRun(nil)
+	if b, reason := r.Classify(hash(`{"hash":"` + escaped + `"}`)); b != Success {
+		t.Fatalf("escaped = (%v, %q), want success", b, reason)
+	}
+	if _, reason := r.Classify(hash(`{"hash":"` + slashy + `"}`)); reason != ReasonSaltReused {
+		t.Fatalf("unescaped replay: reason = %q, want salt_reused", reason)
+	}
+}
+
+// TestGeneration0Bytes pins the exact bytes generation 0 writes
+// (internal/wrapper/server.go writeJSON: json.Encoder, so a compact
+// object and one "\n") as Success.
+func TestGeneration0Bytes(t *testing.T) {
+	encode := func(v any) []byte {
+		var buf bytes.Buffer
+		if err := json.NewEncoder(&buf).Encode(v); err != nil {
+			t.Fatal(err)
+		}
+		return buf.Bytes()
+	}
+	p := phc(1)
+	for _, tt := range []struct {
+		o    Observation
+		v    any
+		want string
+	}{
+		{Observation{Kind: Hash}, struct {
+			Hash string `json:"hash"`
+		}{p}, `{"hash":"` + p + "\"}\n"},
+		{Observation{Kind: Verify, WantMatch: true}, struct {
+			Match bool `json:"match"`
+		}{true}, "{\"match\":true}\n"},
+		{Observation{Kind: Verify, WantMatch: false}, struct {
+			Match bool `json:"match"`
+		}{false}, "{\"match\":false}\n"},
+	} {
+		if got := encode(tt.v); string(got) != tt.want {
+			t.Fatalf("encoder wrote %q, want %q", got, tt.want)
+		}
+		o := tt.o
+		o.Status = 200
+		o.Body = []byte(tt.want)
+		if b, reason := NewRun(nil).Classify(o); b != Success {
+			t.Errorf("%v %q = (%v, %q), want success", o.Kind, o.Body, b, reason)
+		}
+	}
+}
+
+// TestNon200Success: a 2xx other than 200 passes through every
+// integrity check, its hash salt recorded, and then latency, before it
+// is bad_status.
+func TestNon200Success(t *testing.T) {
+	hash := func(status int, saltByte byte) Observation {
+		return Observation{Kind: Hash, Status: status, Body: hashBody(phc(saltByte))}
+	}
+	verify := Observation{Kind: Verify, WantMatch: true, Body: []byte(`{"match":true}`)}
+	for _, status := range []int{201, 202, 203, 204, 206, 299} {
+		t.Run(fmt.Sprint(status), func(t *testing.T) {
+			r := NewRun(nil)
+			if b, reason := r.Classify(hash(status, 1)); b != Failed || reason != ReasonBadStatus {
+				t.Fatalf("hash = (%v, %q), want (failed, bad_status)", b, reason)
+			}
+			if b, reason := r.Classify(hash(200, 1)); b != Failed || reason != ReasonSaltReused {
+				t.Fatalf("200 after it, same salt = (%v, %q), want (failed, salt_reused)", b, reason)
+			}
+			v := verify
+			v.Status = status
+			if b, reason := r.Classify(v); b != Failed || reason != ReasonBadStatus {
+				t.Fatalf("verify = (%v, %q), want (failed, bad_status)", b, reason)
+			}
+		})
+	}
+
+	late := hash(201, 3)
+	late.Latency = HangTimeout + 1
+	lateVerify := verify
+	lateVerify.Status, lateVerify.Latency = 201, HangTimeout+1
+	for _, o := range []Observation{late, lateVerify} {
+		if b, reason := NewRun(nil).Classify(o); b != Failed || reason != ReasonOverHangTimeout {
+			t.Errorf("late 201 %v = (%v, %q), want (failed, over_hang_timeout)", o.Kind, b, reason)
+		}
+	}
+
+	r := NewRun(nil)
+	if b, reason := r.Classify(hash(200, 4)); b != Success {
+		t.Fatalf("200 = (%v, %q), want success", b, reason)
+	}
+	if b, reason := r.Classify(hash(201, 4)); b != Failed || reason != ReasonSaltReused {
+		t.Fatalf("201 with reused salt = (%v, %q), want (failed, salt_reused)", b, reason)
+	}
+
+	badHash := hash(201, 5)
+	badHash.Body = []byte(`{"hash":"` + phc(5) + `","x":1}`)
+	badVerify := verify
+	badVerify.Status, badVerify.Body = 201, []byte(`{"match":1}`)
+	for _, o := range []Observation{badHash, badVerify} {
+		if b, reason := NewRun(nil).Classify(o); b != Failed || reason != ReasonMalformedBody {
+			t.Errorf("201 bad body %v = (%v, %q), want (failed, malformed_body)", o.Kind, b, reason)
+		}
+	}
+}
+
+// TestMaxBodyBytes: a 2xx hash or verify body may be exactly
+// MaxBodyBytes long, not one byte more; other bodies are not
+// size-checked.
+func TestMaxBodyBytes(t *testing.T) {
+	pad := func(body []byte, n int) []byte {
+		return append(bytes.Clone(body), bytes.Repeat([]byte(" "), n-len(body))...)
+	}
+	for _, tt := range []struct {
+		o          Observation
+		n          int
+		wantBucket Bucket
+		wantReason Reason
+	}{
+		{Observation{Kind: Hash, Status: 200, Body: hashBody(phc(1))}, MaxBodyBytes, Success, ReasonNone},
+		{Observation{Kind: Hash, Status: 200, Body: hashBody(phc(1))}, MaxBodyBytes + 1, Failed, ReasonMalformedBody},
+		{Observation{Kind: Verify, WantMatch: true, Status: 200, Body: []byte(`{"match":true}`)}, MaxBodyBytes, Success, ReasonNone},
+		{Observation{Kind: Verify, WantMatch: true, Status: 200, Body: []byte(`{"match":true}`)}, MaxBodyBytes + 1, Failed, ReasonMalformedBody},
+		{Observation{Kind: Hash, Status: 503, Header: retryAfter("1"), Body: []byte("{}")}, MaxBodyBytes + 1, GracefulShed, ReasonNone},
+		{Observation{Kind: Verify, Status: 503, Header: retryAfter("1"), Body: []byte("{}")}, 4 * MaxBodyBytes, GracefulShed, ReasonNone},
+		{Observation{Kind: Hash, Status: 500, Body: []byte("{}")}, MaxBodyBytes + 1, Failed, ReasonBadStatus},
+		{Observation{Kind: Negative, Status: 400, Body: []byte("{}")}, MaxBodyBytes + 1, Success, ReasonNone},
+		{Observation{Kind: Negative, Status: 200, Body: []byte("{}")}, MaxBodyBytes + 1, Failed, ReasonNegativeAccepted},
+	} {
+		o := tt.o
+		o.Body = pad(o.Body, tt.n)
+		if b, reason := NewRun(nil).Classify(o); b != tt.wantBucket || reason != tt.wantReason {
+			t.Errorf("%v %d, %d-byte body: Classify = (%v, %q), want (%v, %q)", o.Kind, o.Status, len(o.Body), b, reason, tt.wantBucket, tt.wantReason)
+		}
+	}
+
+	// The cap comes first among a 2xx's checks: an over-cap body is
+	// malformed_body late or non-200, is never decoded (its salt is not
+	// recorded) and never reaches the Verifier.
+	over := Observation{Kind: Hash, Status: 200, Body: pad(hashBody(phc(2)), MaxBodyBytes+1), FullVerify: true}
+	late := over
+	late.Latency = HangTimeout + 1
+	created := over
+	created.Status = 201
+	v := &fakeVerifier{match: true}
+	r := NewRun(v.verify)
+	for _, o := range []Observation{over, late, created} {
+		if b, reason := r.Classify(o); b != Failed || reason != ReasonMalformedBody {
+			t.Errorf("over cap, status %d, latency %v: Classify = (%v, %q), want (failed, malformed_body)", o.Status, o.Latency, b, reason)
+		}
+	}
+	if b, reason := r.Classify(Observation{Kind: Hash, Status: 200, Body: hashBody(phc(2))}); b != Success {
+		t.Errorf("salt of an over-cap body = (%v, %q), want success", b, reason)
+	}
+	if v.calls.Load() != 0 {
+		t.Errorf("Verifier calls = %d, want 0", v.calls.Load())
 	}
 }

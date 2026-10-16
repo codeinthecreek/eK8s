@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 // Bucket is a response's classification (DESIGN.md sec 8). The zero
@@ -44,10 +45,10 @@ const (
 
 	ReasonTransportError  Reason = "transport_error"   // Observation.Err != nil
 	ReasonOverHangTimeout Reason = "over_hang_timeout" // Latency > HangTimeout
-	ReasonBadStatus       Reason = "bad_status"        // neither 2xx nor 503 (negative: see Classify)
+	ReasonBadStatus       Reason = "bad_status"        // neither 200 nor 503 (negative: see Classify)
 	ReasonBare503         Reason = "bare_503"          // 503 without Retry-After
 	ReasonBadRetryAfter   Reason = "bad_retry_after"   // 503 with an unparseable Retry-After
-	ReasonMalformedBody   Reason = "malformed_body"    // 2xx body breaks the HTTP contract
+	ReasonMalformedBody   Reason = "malformed_body"    // 2xx body breaks the HTTP contract or MaxBodyBytes
 	ReasonWrongMatch      Reason = "wrong_match"       // verify: match != WantMatch
 	ReasonNonCanonicalPHC Reason = "non_canonical_phc" // hash: not the canonical encoding
 	ReasonSaltReused      Reason = "salt_reused"       // hash: salt already seen in this Run
@@ -63,10 +64,12 @@ const (
 // variant.
 //
 // ReasonMalformedBody is on the list because, under the caller's
-// contract on Observation.Body, Classify sees it only for a body read
-// to a clean EOF: a caller whose body read failed, or was cut short by
-// a size cap, sets Observation.Err, which classifies as
-// ReasonTransportError. Classify cannot check that contract.
+// contract on Observation.Body, Classify sees it only for a body the
+// caller read without error: a caller whose body read failed sets
+// Observation.Err, which classifies as ReasonTransportError. Classify
+// cannot check that contract. It does check MaxBodyBytes: a 2xx body
+// over it is the wrapper's doing, not the transport's, so it is
+// malformed_body.
 func Integrity(reason Reason) bool {
 	switch reason {
 	case ReasonVerifyMismatch, ReasonVerifyError, ReasonWrongMatch,
@@ -117,10 +120,14 @@ type Observation struct {
 	Status int
 	Header http.Header
 
-	// Body is the whole response body, read to a clean EOF. A caller
-	// whose read failed, or stopped at a size cap, must set Err instead
-	// of passing what it got: a cut-short body is a transport error,
-	// never malformed_body (an integrity failure, see Integrity).
+	// Body is the response body. The caller reads at most
+	// MaxBodyBytes+1 bytes and passes what it read with Err nil,
+	// whether or not it hit that cap: a 2xx body longer than
+	// MaxBodyBytes is malformed_body (an integrity failure, see
+	// Integrity); a non-2xx body is not size-checked. A caller whose
+	// read failed must set Err instead of passing what it got: a body
+	// cut short by a failed read is a transport error, never
+	// malformed_body.
 	Body []byte
 
 	// Latency is measured by the caller, from send to full body read;
@@ -128,7 +135,8 @@ type Observation struct {
 	Latency time.Duration
 
 	// Err is any transport error (connection refused/reset, timeout,
-	// body read failure, body over the caller's size cap).
+	// body read failure). Reaching the MaxBodyBytes+1 read cap is not
+	// one.
 	Err error
 }
 
@@ -183,13 +191,15 @@ func (r *Run) Reserve(encoded string) error {
 // o.Kind is invalid, or if o.FullVerify is set and the Run has no
 // Verifier: both are caller bugs, not response properties.
 //
-// The order is: a transport error; then the checks that can yield an
-// integrity reason (see Integrity), at any latency, since a late
-// fail-open or faked result is still a bypass; then latency over
-// HangTimeout; then the ordinary buckets. HangTimeout decides only
-// whether a response that passes them can be Success or GracefulShed.
-// A 2xx hash's canonical salt is recorded on time or late, so a late
-// hash cannot be replayed on time.
+// The order is: a transport error; then, for a 2xx, the checks that
+// can yield an integrity reason (see Integrity), at any latency, since
+// a late fail-open or faked result is still a bypass: the MaxBodyBytes
+// cap, then the body; then latency over HangTimeout; then the ordinary
+// buckets. HangTimeout decides only whether a response that passes
+// them can be Success or GracefulShed. Only 200 is Success: any other
+// 2xx that passes the checks before it is bad_status. A 2xx hash's
+// canonical salt is recorded whatever its status or latency, so a late
+// or non-200 hash cannot be replayed as an on-time 200.
 //
 // A Negative's body is never read: any 2xx is negative_accepted; past
 // the latency check, a 503 with exactly one valid Retry-After is
@@ -238,20 +248,23 @@ func (r *Run) Classify(o Observation) (Bucket, Reason) {
 		}
 		return GracefulShed, ReasonNone
 	}
-	if !is2xx(o.Status) {
+	if o.Status != http.StatusOK {
 		return Failed, ReasonBadStatus
 	}
 	return Success, ReasonNone
 }
 
 // integrity2xx runs every check of a 2xx response that can yield an
-// integrity reason, whatever its latency, and returns the first that
-// fires, or ReasonNone. For a hash it records the salt.
+// integrity reason, whatever its status or latency, and returns the
+// first that fires, or ReasonNone. For a hash it records the salt.
 func (r *Run) integrity2xx(o Observation) Reason {
-	switch o.Kind {
-	case Negative:
+	if o.Kind == Negative {
 		return ReasonNegativeAccepted
-	case Verify:
+	}
+	if len(o.Body) > MaxBodyBytes {
+		return ReasonMalformedBody
+	}
+	if o.Kind == Verify {
 		var match bool
 		if !decodeField(o.Body, "match", &match) {
 			return ReasonMalformedBody
@@ -316,24 +329,32 @@ func validRetryAfter(v string) bool {
 	return err == nil
 }
 
-// decodeField decodes body as exactly one JSON object whose only key is
-// name (matched case-sensitively, unlike encoding/json's struct fields),
-// with a non-null value of v's type, and no trailing data.
+// decodeField decodes body as exactly one JSON object with exactly one
+// member, whose key is name (after unescaping, matched case-sensitively,
+// unlike encoding/json's struct fields) and whose value is non-null and
+// of v's type, with nothing but JSON whitespace around it. A second
+// member, a duplicate of name included, is rejected: the walk never
+// keeps one value of several. The body must be valid UTF-8, which
+// encoding/json would otherwise quietly replace with U+FFFD.
 func decodeField[T any](body []byte, name string, v *T) bool {
+	if !utf8.Valid(body) {
+		return false
+	}
 	dec := json.NewDecoder(bytes.NewReader(body))
-	var obj map[string]json.RawMessage
-	if err := dec.Decode(&obj); err != nil || len(obj) != 1 {
+	if tok, err := dec.Token(); err != nil || tok != json.Delim('{') {
 		return false
 	}
-	if _, err := dec.Token(); err != io.EOF {
-		return false
-	}
-	raw, ok := obj[name]
-	if !ok {
+	if tok, err := dec.Token(); err != nil || tok != name {
 		return false
 	}
 	var p *T
-	if err := json.Unmarshal(raw, &p); err != nil || p == nil {
+	if err := dec.Decode(&p); err != nil || p == nil {
+		return false
+	}
+	if tok, err := dec.Token(); err != nil || tok != json.Delim('}') {
+		return false
+	}
+	if _, err := dec.Token(); err != io.EOF {
 		return false
 	}
 	*v = *p
