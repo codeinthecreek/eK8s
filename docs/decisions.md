@@ -848,56 +848,56 @@ max. Earlier entries are not backfilled.
 - Reverse: add it to the contract and the classifier.
 - Origin: chat
 
-## 2026-10-16 · PR #41 (inferred) · Open-loop schedule and record times (DESIGN.md sec 10)
+## 2026-10-16 · PR #41 · Open-loop schedule and record times (DESIGN.md sec 10)
 - Decision: one scheduler goroutine per target; send i is intended at start + i/r, from the index; each send is its own goroutine; a late send goes out at once with its lag recorded; a send is skipped only for a due /verify with ErrOutOfPairs; no in-flight cap. Monotonic times are durations since a process-start base; IntendedWall is the window's wall start + i/r in UTC, monotonic reading stripped; ActualMono is taken just before client.Do and Latency runs to the full body read.
 - Rejected: sleeping one period between sends (drift accumulates); skipping late sends (hides lag); a fixed worker pool (turns closed-loop when saturated).
 - Reason: the intended time does not depend on earlier sends, so lag measures loadgen alone and a slow variant cannot throttle its own load.
 - Reverse: DESIGN.md sec 10 edit; scheduler in loadgen.
 - Origin: chat
 
-## 2026-10-16 · PR #41 (inferred) · Records carry the recorded pairs; Checker.Pairs is dropped (DESIGN.md sec 10)
+## 2026-10-16 · PR #41 · Records carry the recorded pairs; Checker.Pairs is dropped (DESIGN.md sec 10)
 - Decision: Check returns the recorded pair with the Verdict and the record carries it (Seq, Target, RunID, Index, Kind, Class, times, Verdict, Skipped, Fault, Pair, Evidence); Checker.pairs and Pairs() go; the sender builds a new Stream per window.
 - Rejected: a separate drained pair store (a second store needing its own gap detection); Checker.Pairs never clearing (grows for a variant's whole life).
 - Reason: ring gap detection then covers the pairs, and a pair lives only as long as its record.
 - Reverse: restore Checker.pairs and Pairs(); a drained store.
 - Origin: chat
 
-## 2026-10-16 · PR #41 (inferred) · Integrity records carry evidence, the first 8 per target per window or burst (DESIGN.md sec 9, 10)
+## 2026-10-16 · PR #41 · Integrity records carry evidence, the first 8 per target per window or burst (DESIGN.md sec 9, 10)
 - Decision: a record whose reason is an integrity reason carries the request body, the response status and the response body (at most MaxBodyBytes+1), for the first 8 such records per target per window or burst; later ones carry the verdict only.
 - Rejected: evidence on every integrity record (a variant failing every request fills memory); no evidence (the host cannot confirm loadgen-side reasons, sec 9).
 - Reason: sec 9 culls on the first host-confirmed failure, so a few records per window are enough. What the host checks per reason is settled in the orchestrator design.
 - Reverse: change the count in loadgen; DESIGN.md sec 10 edit.
 - Origin: chat
 
-## 2026-10-16 · PR #41 (inferred) · A Check error is a record Fault that excludes the half (extends the PR #29 global-exclusion entry; DESIGN.md sec 10, 11) (extended by the PR #41 build-fault entry)
+## 2026-10-16 · PR #41 · A Check error is a record Fault that excludes the half (extends the PR #29 global-exclusion entry; DESIGN.md sec 10, 11) (extended by the PR #41 build-fault entry)
 - Decision: a Checker.Check error yields a record with Fault set and its Verdict ignored; the half is excluded for all variants, like a skipped send.
 - Rejected: recording the zero Verdict (charges a loadgen bug to the variant as failed); dropping the record (hides the fault and undercounts sends).
 - Reason: a Check error is loadgen's, so it must neither count against a variant nor vanish.
 - Reverse: DESIGN.md sec 10, 11 edit; drop the trigger in the orchestrator.
 - Origin: chat
 
-## 2026-10-16 · PR #41 (inferred) · Client timeout 3 x HangTimeout + 1s, pinned to WriteTimeout by a go/parser test (extends the PR #30 client-timeout entry; DESIGN.md sec 10)
+## 2026-10-16 · PR #41 · Client timeout 3 x HangTimeout + 1s, pinned to WriteTimeout by a go/parser test (extends the PR #30 client-timeout entry; DESIGN.md sec 10)
 - Decision: one http.Client over a clone of http.DefaultTransport with DisableKeepAlives true and Proxy nil, Content-Type application/json; Timeout = 3*classifier.HangTimeout + 1s (7s), a loadgen const; a go/parser test fails unless cmd/service/main.go's WriteTimeout field still reads 3 * classifier.HangTimeout.
 - Rejected: exporting WriteTimeout from internal/classifier (a protected-path change for one constant); a bare 7s with no check (drifts silently).
 - Reason: the test turns a silent drift of the "timeout > WriteTimeout" rule into a failing build. Proxy nil keeps variant traffic off any environment proxy.
 - Reverse: DESIGN.md sec 10 edit; drop the const and the test.
 - Origin: chat
 
-## 2026-10-16 · PR #41 (inferred) · One record ring per target, owned with its Checker (amends the PR #36 ring wording; DESIGN.md sec 10)
+## 2026-10-16 · PR #41 · One record ring per target, owned with its Checker (amends the PR #36 ring wording; DESIGN.md sec 10)
 - Decision: one ring per target, made and dropped with that target's Checker (PR 4); capacity round(r x W) + the largest burst n; Seq is assigned when a record is written; Read(since) returns the records from since onward with a gap flag if the oldest retained Seq is past since; a gap on any target excludes the half for all variants; a window is done only when every send has completed or timed out; PR 4 drops a target only after its records are read.
 - Rejected: one ring for all targets (a burst competes with streams for space; its lifecycle is separate from the Checker's).
 - Reason: a culled target's records and memory go with its Checker, and no target's sends can evict another target's records.
 - Reverse: DESIGN.md sec 10 edit; one shared ring.
 - Origin: chat
 
-## 2026-10-16 · PR #41 (inferred) · Loadgen follows no redirect; a 3xx is the variant's own response (DESIGN.md sec 10)
+## 2026-10-16 · PR #41 · Loadgen follows no redirect; a 3xx is the variant's own response (DESIGN.md sec 10)
 - Decision: loadgen's client sets CheckRedirect to return http.ErrUseLastResponse, so a 3xx comes back as the response and classifies as bad_status.
 - Rejected: net/http's default (follows up to 10 redirects and re-sends the POST body on 307 and 308).
 - Reason: a variant could answer 307 to a peer variant's Service, which loadgen's egress allows, and score the peer's real hash as its own; host verification passes it, and the peer's salts sit in the peer's Checker.
 - Reverse: drop CheckRedirect in loadgen/send.go; DESIGN.md sec 10 edit.
 - Origin: Code
 
-## 2026-10-16 · PR #41 (inferred) · A request loadgen cannot build or generate is a Fault too (extends the PR #41 Check-fault entry; DESIGN.md sec 10, 11)
+## 2026-10-16 · PR #41 · A request loadgen cannot build or generate is a Fault too (extends the PR #41 Check-fault entry; DESIGN.md sec 10, 11)
 - Decision: a failed request build, and a request-generator error other than ErrOutOfPairs, give a Fault record with nothing sent and Check not called; a Fault excludes the half like a Check error.
 - Rejected: charging a failed build to the variant as transport_error (loadgen's own bad URL would count against the variant).
 - Reason: only the variant's own behaviour may count against it.
