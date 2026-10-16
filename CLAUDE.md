@@ -41,6 +41,9 @@ Applies to every session in this repo.
 - Log each non-trivial decision in `docs/decisions.md`: date, PR,
   decision, rejected alternative, reason, how to reverse. Max 5 lines per
   entry, not counting the `Origin:` line.
+- `docs/decisions.md` holds entries from PR #32 on; older ones are in
+  `docs/decisions-archive.md`, which no rule requires reading. To check
+  for a prior decision, grep both.
 - End every task with the packet its next step needs (`docs/handoff.md`,
   "Which packet"); the packet carries items (a)-(g) and there is no
   separate prose report. If the task prompt says "no packet", end with
@@ -52,16 +55,21 @@ Applies to every session in this repo.
   (g) confirmation that `docs/STATUS.md` was updated in this PR.
 - One logical change per commit; the message explains why, not what.
 - Every PR updates `docs/STATUS.md` (Now/Next/Parked/Recent) in the
-  same PR; a PR that changes what is built also updates the status
-  section of docs/overview.md.
-- A PR that edits DESIGN.md or the generation-0 wrapper (internal/wrapper/)
-  also checks docs/overview.md and README.md and fixes anything it now
-  contradicts, in the same PR.
+  same PR. Recent keeps the last 5 merged PRs; drop older lines (git log
+  has them).
+- A PR that edits DESIGN.md or internal/wrapper/ does not open
+  docs/overview.md or README.md. It adds
+  `- overview.md: stale since #<N> (<what changed>)` to docs/STATUS.md
+  Next, or extends that line if present. overview.md and README.md are
+  refreshed only when I ask, in a PR that rereads DESIGN.md, fixes them,
+  and removes the line.
 - At the start of every PR, reconcile `docs/STATUS.md` and
   `docs/decisions.md` with `git log origin/main`: move merged items from
-  Now to Recent with their real PR numbers, and replace "(inferred)" PR
-  numbers that git log now confirms. Do it in the same PR as the task,
-  not a separate one, but in its own commit, first (before the task's
+  Now to Recent with their real PR numbers, and fix "(inferred)" PR
+  numbers that git log now confirms, found with
+  `grep -n '(inferred)' docs/decisions.md`; do not otherwise read
+  decisions.md for the reconcile. Do it in the same PR as the task, not
+  a separate one, but in its own commit, first (before the task's
   commit).
 - Material for my planning/review chat goes in the packet formats in
   `docs/handoff.md`: by default at the end of every task, or on request
