@@ -178,7 +178,7 @@ max. Earlier entries are not backfilled.
 - Reverse: restrict records() to Success.
 - Origin: chat
 
-## 2026-10-15 · PR #39 · The salt set lasts a variant's whole time in loadgen; the Checker's lifecycle belongs to PR 4 (DESIGN.md sec 8, 10) (sizing moved: PR 3 benchmarks, the key type and any cap go to the classifier cleanup PR, docs/STATUS.md Next)
+## 2026-10-15 · PR #39 · The salt set lasts a variant's whole time in loadgen; the Checker's lifecycle belongs to PR 4 (DESIGN.md sec 8, 10) (sizing moved: PR 3 benchmarks, the key type and any cap go to the classifier cleanup PR, docs/STATUS.md Next) (key type and cap settled by the PR #43 salt-key and no-cap entries)
 - Decision: one Checker per variant for as long as loadgen serves it; the control API (PR 4) owns when it is made and dropped. No cap yet; PR 3 sizes it.
 - Rejected: a salt set per window (a salt reused across windows goes uncaught).
 - Reason: DESIGN.md sec 8 puts the set across windows, so a mutant cannot replay an earlier window's hash.
@@ -288,4 +288,26 @@ max. Earlier entries are not backfilled.
 - Rejected: per-PR overview checks (reads ~32 KB of overview on every DESIGN or wrapper PR).
 - Reason: usage windows are hit regularly, and reading decisions.md (~103 KB) for every reconcile and overview.md (~32 KB) on every DESIGN or wrapper PR were the largest fixed reads per PR; the stale line keeps overview drift visible without the read.
 - Reverse: restore the three CLAUDE.md bullets and drop the archive bullet; merge docs/decisions-archive.md back into docs/decisions.md.
+- Origin: chat
+
+## 2026-10-16 · PR #43 (inferred) · The salt set is keyed on the decoded [16]byte salt (DESIGN.md sec 8)
+- Decision: classifier.Run's salt set is a map[[16]byte]struct{} of the decoded salt, measured at 25.23 B per salt (BenchmarkCheckerSalts).
+- Rejected: string (a substring pins the 97-byte hash, 149.3 B; a clone is 61.3 B); uint64 (the same 25.2 B, and it misses reuse when two salts differ only in the dropped 8 bytes).
+- Reason: canonical base64 is one-to-one, so the decoded bytes catch exactly the reuses the salt segment did.
+- Reverse: key on the salt segment string.
+- Origin: chat
+
+## 2026-10-16 · PR #43 (inferred) · No last-M-windows cap on the salt set (DESIGN.md sec 8, 10)
+- Decision: the set keeps every salt for the variant's whole time in loadgen.
+- Rejected: a last-M-windows cap (a salt reused more than M windows apart goes uncaught).
+- Reason: 4 variants x 750,000 salts x 25.23 B is 72.2 MiB; with rings (no burst; one of 3,000 records adds ~12 MiB) and Evidence, ~84 MiB live. loadgen sets no GOMEMLIMIT, so at GOGC=100 the heap can reach about twice that, ~170-195 MiB, under 256Mi. The 750k, rate and window figures are planning guesses.
+- Revisit: if the measured rate or window count is well above them (STATUS Parked, Pending workstation, Q8).
+- Reverse: add a cap.
+- Origin: chat
+
+## 2026-10-16 · PR #43 (inferred) · Stage 4 shares Stage 2's classifier Run on purpose (DESIGN.md sec 8)
+- Decision: gate Stage 4 classifies through the Run Stage 2 made, not a new one.
+- Rejected: a fresh Run for Stage 4 (salts repeated across the two boots go uncaught).
+- Reason: Stage 4 FullVerifies every /hash answer, so a replayed Stage 2 hash already fails as verify_mismatch; the shared salt set adds catching a salt that repeats across the two boots (for example a fixed-seed salt RNG).
+- Reverse: give Stage 4 its own NewRun.
 - Origin: chat
