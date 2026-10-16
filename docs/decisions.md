@@ -283,7 +283,7 @@ max. Earlier entries are not backfilled.
 - Reverse: loadgen/send.go returns the build error as resp.Err; for a generator error, drop the `err != nil` case in run.go's schedule and say what replaces it (the zero Request would otherwise be sent).
 - Origin: Code
 
-## 2026-10-16 · PR #42 (inferred) · Cut per-PR doc reads: reconcile greps decisions.md, pre-#32 entries archived, Recent capped at 5, overview refreshed on request
+## 2026-10-16 · PR #42 · Cut per-PR doc reads: reconcile greps decisions.md, pre-#32 entries archived, Recent capped at 5, overview refreshed on request
 - Decision: the reconcile greps decisions.md instead of reading it; entries before #32 are in docs/decisions-archive.md; STATUS Recent keeps the last 5 PRs; overview.md and README.md refresh only on request, with a stale line in STATUS Next; docs/workflow/ is frozen until extraction.
 - Rejected: per-PR overview checks (reads ~32 KB of overview on every DESIGN or wrapper PR).
 - Reason: usage windows are hit regularly, and reading decisions.md (~103 KB) for every reconcile and overview.md (~32 KB) on every DESIGN or wrapper PR were the largest fixed reads per PR; the stale line keeps overview drift visible without the read.
