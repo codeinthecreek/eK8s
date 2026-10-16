@@ -51,8 +51,11 @@ func newInterop(client *http.Client, label string) *interop {
 	return &interop{client: &c, label: label, run: classifier.NewRun(realVerify)}
 }
 
-// freshPassword returns a random password that is never in the pool, so
-// a candidate has no pool pair to replay for /hash.
+// freshPassword returns a random password from rand.Text, which the Go
+// docs say holds at least 128 bits of randomness, enough to make the
+// likelihood of collisions vanishingly small. Nothing checks the result
+// against the pool; a candidate has no pool pair to replay for /hash
+// because a collision is that unlikely.
 func freshPassword() string { return rand.Text() }
 
 // boundaryPasswords returns fresh passwords at the contract's limits, 1

@@ -104,6 +104,8 @@ func Run(ctx context.Context, cfg Config) (r Report, err error) {
 	// Stage 4 against a separate race build, never deployed; the Stage 2
 	// process goes first, so the two never compete for the host.
 	sb.stop()
+	// Stage 4 shares Stage 2's Run on purpose: a race build whose salts
+	// repeat Stage 2's (say, a fixed-seed salt RNG) is salt_reused.
 	_, err = runStage4(ctx, &r, tc, tree, cfg.RepoRoot, work, relay, s.run)
 	return r, err
 }

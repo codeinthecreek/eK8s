@@ -86,7 +86,7 @@ type Kind int
 const (
 	Hash     Kind = iota + 1 // POST /hash
 	Verify                   // POST /verify
-	Negative                 // POST /verify that must be rejected (a contract negative)
+	Negative                 // POST /hash or /verify that must be rejected (a contract negative)
 )
 
 func (k Kind) String() string {
