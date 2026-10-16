@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -144,13 +143,13 @@ type Observation struct {
 // pass the fixed core's Verify; this package cannot import it.
 type Verifier func(password, encoded string) (bool, error)
 
-// Run classifies the responses of one run. It remembers every canonical
-// salt seen in a 2xx hash body, on time or late, and every salt passed
-// to Reserve, so a reused salt classifies as Failed. A variant's run
-// starts at its Stage 5 burst and continues through promotion to cull,
-// not one observation window, so hashes cached in the burst or an
-// earlier window cannot be replayed later (DESIGN.md sec 8). A Run is
-// safe for concurrent use.
+// Run classifies the responses of one run. It remembers the salt of
+// each 2xx /hash answer whose body passes the body checks and whose
+// hash is canonical, on time or late and whatever the later checks
+// find, so a second response with that salt is salt_reused. The salt
+// set spans every response the Run classifies; the caller sets the
+// Run's lifetime (loadgen keeps one per variant for as long as it
+// serves it, DESIGN.md sec 8, 10). A Run is safe for concurrent use.
 type Run struct {
 	verify Verifier
 
@@ -162,29 +161,6 @@ type Run struct {
 // verify may be nil if no observation sets FullVerify.
 func NewRun(verify Verifier) *Run {
 	return &Run{verify: verify, salts: make(map[string]struct{})}
-}
-
-// ErrNotCanonical is returned by Reserve for a hash that is not the
-// canonical PHC string at the fixed parameters.
-var ErrNotCanonical = errors.New("classifier: not a canonical PHC string at the fixed parameters")
-
-// Reserve records encoded's salt in the Run without classifying
-// anything, so a later hash response carrying that salt classifies as
-// salt_reused. loadgen reserves every hash it sends to /verify (DESIGN.md
-// sec 8, sec 10), so a mutant cannot answer /hash with one it was sent.
-//
-// If encoded is not canonical (Reserve uses the same check as a hash
-// response), Reserve records nothing and returns ErrNotCanonical: such a
-// string can never come back as a successful hash response, since that
-// would classify as non_canonical_phc first. Reserving an
-// already-recorded salt is a no-op.
-func (r *Run) Reserve(encoded string) error {
-	salt, ok := canonicalSalt(encoded)
-	if !ok {
-		return ErrNotCanonical
-	}
-	r.recordSalt(salt)
-	return nil
 }
 
 // Classify returns o's bucket and, for Failed, the reason. It panics if
