@@ -816,16 +816,16 @@ response (section 8) with `internal/classifier` and no verifier, one salt
 set per variant for as long as loadgen serves it. It records the
 (password, hash) pair of a `/hash` request answered 2xx, 200 or not,
 whose hash passed every check it makes, on time or late (those hashes
-are verified on the host too). The sender reads `MaxBodyBytes`+1 bytes
-and passes them with no error: a 2xx body over the cap is
-`malformed_body`, and only a failed read is a transport error.
-The orchestrator reads the pairs through the control API after the window
-and fully verifies them on the host (section 8). Loadgen's build never
-depends, directly or transitively, on `internal/hashcore`,
-`internal/classifier/testvectors`, `gate/` or any Argon2 package, and a
-`go list -deps` test checks this. Its `_test.go` files may import
-hashcore to check that each negative gets the intended hashcore error;
-they are not in the binary.
+are verified on the host too); the pair rides on that request's record.
+The sender reads `MaxBodyBytes`+1 bytes and passes them with no error: a
+2xx body over the cap is `malformed_body`, and only a failed read is a
+transport error. The orchestrator reads the pairs, on the records,
+through the control API after the window and fully verifies them on the
+host (section 8). Loadgen's build never depends, directly or
+transitively, on `internal/hashcore`, `internal/classifier/testvectors`,
+`gate/` or any Argon2 package, and a `go list -deps` test checks this.
+Its `_test.go` files may import hashcore to check that each negative
+gets the intended hashcore error; they are not in the binary.
 
 **Two operating modes, one generator component:**
 - Sustained mode, for the multi-minute observation window (baseline +
@@ -847,51 +847,87 @@ and frozen for the run; a new `r` means a new run, and one run is one
 comparability epoch (section 9). Until C0 is measured, a provisional `r` comes from a
 workstation Argon2 benchmark; the CI smoke run uses `r` = 2.
 
+**Schedule.** One scheduler goroutine per target. Send i is intended at
+start + i/`r`, computed from the index and never from a running sleep, so
+drift cannot accumulate. Each send runs in its own goroutine, so a slow
+response delays no later send. A late send goes out at once and its lag is
+recorded; sends are never skipped to catch up. A window is round(`r` x W)
+sends; a burst uses the same scheduler with its own rate and count n. A
+send is skipped only when a `/verify` is due and the stream has no pair
+left (`ErrOutOfPairs`); it becomes a skipped record. In-flight requests
+are not capped.
+
 **Schedule lag and global exclusion.** Every send records its intended and
 actual send time. A scoring half is excluded for all variants (loadgen is
 one shared process) when lag p99 exceeds 10 ms, any lag exceeds 100 ms, a
-send is skipped, or the record ring has a gap (records overwritten before
-the orchestrator read them). The ring holds one full window plus one
-Stage 5 burst, and the orchestrator reads it only in gaps. The thresholds
+send is skipped, a `Check` call fails (a loadgen fault, not the variant's
+verdict), or a record ring has a gap (records overwritten before the
+orchestrator read them; a gap on any target excludes the half for all
+variants). Each target has its own ring, made and dropped with that
+target's `Checker`, with room for round(`r` x W) records plus the largest
+burst n. `Read(since)` returns the records from `since` onward, with a
+gap flag if the oldest retained `Seq` is past `since`. The orchestrator
+reads the rings only in gaps, and a window is done only when every send
+has completed or timed out; a target is dropped only after its records
+have been read. The thresholds
 are starting guesses (section 15). CFS throttling of loadgen is logged as
 a diagnostic, not a trigger. After 3 consecutive excluded halves the
 orchestrator flags the run and halts.
 
 **Records, not summaries; loadgen has no halves.** Loadgen returns raw
-per-request records, each carrying its per-request verdict (section 8),
-and the recorded (password, hash) pairs. Each record carries its intended
-send time in wall-clock time (assigns it to a half) and in monotonic time
-(lag, latency), plus its actual send time. The orchestrator assigns each
+per-request records, each carrying its per-request verdict (section 8)
+and, for a `/hash` the host must verify, its recorded (password, hash)
+pair. Each record carries its intended send time in wall-clock time
+(assigns it to a half) and in monotonic time (lag, latency), plus its
+actual send time. Monotonic times are durations since a process-start
+base, so they compare only within one `boot_id`. The intended monotonic
+time comes from the index; the intended wall-clock time is the window's
+wall-clock start + i/`r`, in UTC with the monotonic reading stripped. The
+actual time is taken immediately before `client.Do`, and latency runs
+from there to the full body read. The orchestrator assigns each
 record to a half by intended send time, against its own stress-ng switch
 times, and computes every per-half statistic (lag p99, `success_rate`,
 `p95_latency`, verdict counts) and every exclusion decision. Loadgen and
 the orchestrator read one clock: the kind node is a container on the host.
+
+**Evidence.** A record whose reason is an integrity reason (section 9)
+carries the request body, the response status and the response body (at
+most `MaxBodyBytes`+1 bytes), for the first 8 such records per target per
+window or burst; later ones carry the verdict only, so a variant that
+fails every request cannot fill loadgen's memory. Section 9 requires the
+host to confirm an integrity failure before it culls; what the host
+checks per reason is settled with the orchestrator design.
 
 **Runs in the cluster**, as one long-lived Deployment in namespace
 `ek8s-system` serving every variant's stream and every Stage 5 burst.
 Guaranteed QoS, 750m CPU / 256Mi, in the shared pool; the static CPU
 manager is used only if the workstation run excludes more than about 5%
 of halves for lag. It reaches each variant by Service DNS (section 11)
-with HTTP keep-alives disabled, so every request opens its own
+with HTTP keep-alives disabled and no proxy (one `http.Client` over a
+clone of `http.DefaultTransport` with `Proxy` nil), sending
+`Content-Type: application/json`, so every request opens its own
 connection: kube-proxy balances per connection, so a kept-alive stream
 would pin to one replica, and HPA's second pod and readiness changes
 would act only on new connections. Its HTTP client timeout is longer
-than cmd/service's fixed `WriteTimeout` (3 x `HangTimeout`, 6s), e.g.
-`WriteTimeout` + 1s, so every response the service can ever write is
-observed and classified: a shorter timeout would turn a slow fail-open
-or faked result, one a real client waiting longer would receive, into a
-`transport_error` instead of an integrity failure (section 8, "Integrity
-reasons apply at any latency"). No host ports are published; the gate and orchestrator stay on
-the host and drive the cluster through the API server on loopback.
+than cmd/service's fixed `WriteTimeout` (3 x `HangTimeout`, 6s): 3 x
+`HangTimeout` + 1s (7s), a loadgen constant, and a `go/parser` test fails
+unless cmd/service/main.go's `WriteTimeout` field still reads
+`3 * classifier.HangTimeout`. So every response the service can ever
+write is observed and classified: a shorter timeout would turn a slow
+fail-open or faked result, one a real client waiting longer would
+receive, into a `transport_error` instead of an integrity failure
+(section 8, "Integrity reasons apply at any latency"). No host ports are
+published; the gate and orchestrator stay on the host and drive the
+cluster through the API server on loopback.
 
 **Control API.** A listener on a separate port behind a ClusterIP Service,
 reached from the host through the API server's service proxy. Loadgen
 holds no Kubernetes API credentials. Through it the orchestrator and gate
 add and remove targets, hand over a window's `/verify` pairs, start a
-window or a burst, read records, their per-request verdicts and recorded
-(password, hash) pairs, run the per-half policy canary (section 11), and
-read `boot_id`. "Verdicts" means per-request verdicts only. The owner
-approved this in-cluster listener (2026-10-13).
+window or a burst, read records (each with its per-request verdict and
+recorded (password, hash) pair), run the per-half policy canary (section
+11), and read `boot_id`. "Verdicts" means per-request verdicts only. The
+owner approved this in-cluster listener (2026-10-13).
 
 **Restart.** A variant's salt set lives only in loadgen's memory: no
 journal, no restore. A restart empties it, which only loses detection
@@ -1000,10 +1036,10 @@ the orchestrator design.
 
 **Excluded windows.** The orchestrator marks a window excluded from
 scoring for a loadgen restart during it (section 10) or a loadgen
-exclusion trigger (lag, a skipped send, a ring gap, a policy canary that
-connects). Probe Events (readiness failures, restarts) are
-diagnostics only, never a reason to exclude: a variant's own readiness
-behaviour is part of what is scored.
+exclusion trigger (lag, a skipped send, a `Check` fault, a ring gap, a
+policy canary that connects). Probe Events (readiness failures,
+restarts) are diagnostics only, never a reason to exclude: a variant's
+own readiness behaviour is part of what is scored.
 
 **Readiness probe.** `/readyz` every 2s, `timeoutSeconds` 2,
 `failureThreshold` 3. Under a 1-CPU limit with hashes in flight a 1s
