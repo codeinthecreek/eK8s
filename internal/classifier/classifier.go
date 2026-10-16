@@ -154,13 +154,13 @@ type Run struct {
 	verify Verifier
 
 	mu    sync.Mutex
-	salts map[string]struct{}
+	salts map[[saltLength]byte]struct{}
 }
 
 // NewRun returns a Run that uses verify for FullVerify observations.
 // verify may be nil if no observation sets FullVerify.
 func NewRun(verify Verifier) *Run {
-	return &Run{verify: verify, salts: make(map[string]struct{})}
+	return &Run{verify: verify, salts: make(map[[saltLength]byte]struct{})}
 }
 
 // Classify returns o's bucket and, for Failed, the reason. It panics if
@@ -285,7 +285,7 @@ func singleValidRetryAfter(h http.Header) bool {
 }
 
 // recordSalt adds salt to the Run's set and reports whether it was new.
-func (r *Run) recordSalt(salt string) bool {
+func (r *Run) recordSalt(salt [saltLength]byte) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if _, seen := r.salts[salt]; seen {
@@ -348,24 +348,34 @@ const (
 	keyLength      = 32
 )
 
-// canonicalSalt returns encoded's salt segment if encoded is the
-// canonical PHC string at exactly the fixed parameters.
-func canonicalSalt(encoded string) (string, bool) {
+// canonicalSalt returns encoded's decoded salt if encoded is the
+// canonical PHC string at exactly the fixed parameters. The canonical
+// encoding is one-to-one, so the decoded bytes tell salts apart exactly
+// as the salt segment does, and as an array they keep no part of
+// encoded alive.
+func canonicalSalt(encoded string) ([saltLength]byte, bool) {
 	segs := strings.Split(encoded, "$")
 	if len(segs) != 6 || segs[0] != "" ||
 		segs[1] != variantSegment || segs[2] != versionSegment || segs[3] != paramsSegment {
-		return "", false
+		return [saltLength]byte{}, false
 	}
-	if !canonicalBase64(segs[4], saltLength) || !canonicalBase64(segs[5], keyLength) {
-		return "", false
+	salt, ok := canonicalBase64(segs[4], saltLength)
+	if !ok {
+		return [saltLength]byte{}, false
 	}
-	return segs[4], true
+	if _, ok := canonicalBase64(segs[5], keyLength); !ok {
+		return [saltLength]byte{}, false
+	}
+	return [saltLength]byte(salt), true
 }
 
-// canonicalBase64 reports whether s is the unpadded standard base64
-// encoding of exactly n bytes. Re-encoding catches what decoding
-// tolerates: ignored CR/LF and non-zero trailing bits.
-func canonicalBase64(s string, n int) bool {
+// canonicalBase64 returns the bytes s decodes to if s is the unpadded
+// standard base64 encoding of exactly n bytes. Re-encoding catches what
+// decoding tolerates: ignored CR/LF and non-zero trailing bits.
+func canonicalBase64(s string, n int) ([]byte, bool) {
 	b, err := base64.RawStdEncoding.DecodeString(s)
-	return err == nil && len(b) == n && base64.RawStdEncoding.EncodeToString(b) == s
+	if err != nil || len(b) != n || base64.RawStdEncoding.EncodeToString(b) != s {
+		return nil, false
+	}
+	return b, true
 }

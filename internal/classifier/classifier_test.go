@@ -409,6 +409,63 @@ func TestSaltNotRecordedWhenNonCanonical(t *testing.T) {
 	}
 }
 
+// TestSaltKeyUsesAllBytes: salts that differ only in one half are
+// distinct, whichever half it is.
+func TestSaltKeyUsesAllBytes(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		from int // first byte index that differs
+	}{
+		{"last 8 bytes differ", 8},
+		{"first 8 bytes differ", 0},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			a := bytes.Repeat([]byte{0x11}, 16)
+			b := bytes.Clone(a)
+			for i := tt.from; i < tt.from+8; i++ {
+				b[i] = 0x22
+			}
+			r := NewRun(nil)
+			for _, salt := range [][]byte{a, b} {
+				if got, reason := r.Classify(Observation{Kind: Hash, Status: 200, Body: hashBody(withSalt(b64(salt)))}); got != Success {
+					t.Fatalf("salt %x = (%v, %q), want success", salt, got, reason)
+				}
+			}
+		})
+	}
+}
+
+// TestNonCanonicalSaltSameBytes: a salt segment with non-zero trailing
+// bits decodes to the same 16 bytes as salt16 but is not its canonical
+// encoding, so it is non_canonical_phc, never salt_reused, and records
+// nothing.
+func TestNonCanonicalSaltSameBytes(t *testing.T) {
+	// salt16 ends in "Q"; "R" sets a trailing bit the decoder ignores.
+	loose := withSalt(salt16[:21] + "R")
+	hash := func(encoded string) Observation { return Observation{Kind: Hash, Status: 200, Body: hashBody(encoded)} }
+
+	r := NewRun(nil)
+	if b, reason := r.Classify(hash(withSalt(salt16))); b != Success {
+		t.Fatalf("canonical = (%v, %q), want success", b, reason)
+	}
+	if b, reason := r.Classify(hash(loose)); b != Failed || reason != ReasonNonCanonicalPHC {
+		t.Fatalf("same bytes, loose encoding = (%v, %q), want (failed, non_canonical_phc)", b, reason)
+	}
+	if b, reason := r.Classify(hash(phc(2))); b != Success {
+		t.Fatalf("new salt after it = (%v, %q), want success", b, reason)
+	}
+
+	// In the other order: the loose encoding records nothing, so the
+	// canonical one is still new.
+	r = NewRun(nil)
+	if b, reason := r.Classify(hash(loose)); b != Failed || reason != ReasonNonCanonicalPHC {
+		t.Fatalf("loose encoding first = (%v, %q), want (failed, non_canonical_phc)", b, reason)
+	}
+	if b, reason := r.Classify(hash(withSalt(salt16))); b != Success {
+		t.Fatalf("canonical after it = (%v, %q), want success", b, reason)
+	}
+}
+
 // TestConcurrentSaltReuse must pass under -race: of n concurrent
 // identical hash responses exactly one is a success.
 func TestConcurrentSaltReuse(t *testing.T) {
@@ -436,6 +493,33 @@ func TestConcurrentSaltReuse(t *testing.T) {
 	}
 	if v.calls.Load() != 1 {
 		t.Fatalf("Verifier calls = %d, want 1", v.calls.Load())
+	}
+}
+
+// TestConcurrentDistinctSalts must pass under -race: n goroutines on one
+// Run each record their own salt, then find it already recorded. n is
+// 256, every salt phc can make, so the set grows through several
+// resizes while other goroutines read and write it.
+func TestConcurrentDistinctSalts(t *testing.T) {
+	const n = 256
+	r := NewRun(nil)
+	var wg sync.WaitGroup
+	for i := range n {
+		wg.Go(func() {
+			o := Observation{Kind: Hash, Status: 200, Body: hashBody(phc(byte(i)))}
+			if b, reason := r.Classify(o); b != Success {
+				t.Errorf("salt %d = (%v, %q), want success", i, b, reason)
+			}
+			if b, reason := r.Classify(o); b != Failed || reason != ReasonSaltReused {
+				t.Errorf("salt %d replayed = (%v, %q), want (failed, salt_reused)", i, b, reason)
+			}
+		})
+	}
+	wg.Wait()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(r.salts) != n {
+		t.Fatalf("salt set holds %d, want %d", len(r.salts), n)
 	}
 }
 
