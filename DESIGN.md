@@ -1023,15 +1023,20 @@ fitness scoring (section 9) is what does the ranking.
 **Namespace lifecycle:**
 - **Created** by gate Stage 5, when the candidate is deployed for its
   gate probe, labelled `ek8s.io/role: variant`.
-- **Stage 5 fail:** the namespace is deleted (cascading everything in
-  it).
+- **Stage 5 fail:** the orchestrator reads the burst's records, then
+  DELETEs the target (section 10), then the namespace is deleted
+  (cascading everything in it); otherwise the target's Checker, salt set
+  and Ring stay in loadgen's memory, outside the PR #43 memory sum.
 - **Stage 5 pass:** nothing changes in the cluster. The orchestrator marks
   the variant live and names it in window starts (through loadgen's
   control API, section 10); the target already exists from Stage 5, and
   loadgen builds its URL from the id. The pod keeps running but is idle
   until its first window, which starts cold like every other; no
   redeploy. It takes traffic from the next observation window on.
-- **Culled after scoring:** the namespace is deleted.
+- **Culled after scoring:** the orchestrator reads the variant's last
+  records, then DELETEs its target, then the namespace is deleted; the
+  DELETE is what frees the target's Checker, salt set and Ring, which
+  stay outside the PR #43 memory sum while loadgen holds them.
 
 **Why the original relabel-in-place design was dropped:** it could never
 have worked. A Service only selects pods in its own namespace, so a

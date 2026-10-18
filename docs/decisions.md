@@ -329,6 +329,7 @@ max. Earlier entries are not backfilled.
 
 ## 2026-10-18 · PR #44 (inferred) · DELETE /targets/{id}?through=S is refused while records past S are unread or the target is in a run (DESIGN.md sec 10)
 - Decision: DELETE answers 409 while records past S are unread or the target is in a run. It implements the drop rule of the PR #41 ring entry (a target is dropped only after its records are read).
+- Reason: a target's records go with its ring, so a DELETE before they are read would lose them, and one during a run would drop a Checker that still has sends in flight.
 - Reverse: DESIGN.md sec 10 edit; drop the through check and the 409s in loadgen/control.go.
 - Origin: chat
 
@@ -342,6 +343,7 @@ max. Earlier entries are not backfilled.
 ## 2026-10-18 · PR #44 (inferred) · Window batch size P = ceil(0.48N + sqrt(N ln(1e9)/2)), capped at N (DESIGN.md sec 10)
 - Decision: a window batch holds P pairs, N being the window's send count, so one stream runs out of pairs with probability at most 1e-9 per window (Hoeffding).
 - Rejected: a fixed margin (it does not grow with N).
+- Reason: only /verify sends use a pair, so a window needs P pairs rather than N; this P keeps the shortfall at 1e-9 per window whatever N is, and the cap at N means no send can run out.
 - Reverse: change P in loadgen/config.go; DESIGN.md sec 10 edit.
 - Origin: Code
 
@@ -354,20 +356,25 @@ max. Earlier entries are not backfilled.
 ## 2026-10-18 · PR #44 (inferred) · Policy canary mechanics (amends the mechanics in the PR #31 FailOpen entry; DESIGN.md sec 11)
 - Decision: POST /canary dials -canary-addr, an IP literal; refused only for a timeout, ECONNREFUSED, EHOSTUNREACH or ENETUNREACH; EAGAIN and any other error give error, which excludes like connected; the dial is detached from the request's context.
 - Rejected: any dial error as refused (a local failure would hide a fail-open policy); a DNS name (a failed lookup would read as refused).
+- Reason: refused must mean the policy dropped the connection, so every other outcome reads as connected or error, which exclude the half; a dial detached from the request cannot turn its caller's deadline into refused.
 - Reverse: DESIGN.md sec 11 edit; loadgen/canary.go.
 - Origin: chat
 
 ## 2026-10-18 · PR #44 (inferred) · Wire format and request limits (DESIGN.md sec 10)
 - Decision: separate wire structs; buckets and reasons as names; a skipped or fault record carries no bucket or reason; records pages of at most 1,000; every uploaded pair must carry password, hash and match; upload body cap max(window_pairs, burst_pairs) x 1161 + 4 KiB (1024-byte password, 97-byte hash, 40 bytes of names, per pair), start body 64 KiB.
+- Reason: the wire shape is the orchestrator's contract, so it does not follow internal struct or enum changes; the caps bound what one request can make loadgen hold, the upload cap being the largest batch at its largest pair size.
 - Reverse: DESIGN.md sec 10 edit; loadgen/control_http.go and control_run.go.
 - Origin: Code
 
 ## 2026-10-18 · PR #44 (inferred) · The loadgen binary: required flags, fixed :9090, cancel-then-wait shutdown (DESIGN.md sec 10, 15)
 - Decision: every flag required, with no default; the listener is the fixed :9090; on SIGTERM, cancel every run, then wait up to 10 s (Control.Wait) for requests and in-flight sends to be recorded; server read and write timeouts of 2 minutes.
+- Reason: a missing flag fails at start-up instead of running with a value nobody chose; a fixed :9090 matches the control Service's named targetPort, so listener and Service cannot drift and there is no second listener to configure; a send outlives its run's context, so cancel-then-wait is what lets every in-flight send be recorded before exit.
 - Reverse: cmd/loadgen/main.go; DESIGN.md sec 10, 15 edits.
 - Origin: Code
 
 ## 2026-10-18 · PR #44 (inferred) · The control API is tested in-process; kind-level checks wait for PR 5 (DESIGN.md sec 10)
 - Decision: httptest, with gen-0 wrapper handlers and the real hashcore in e2e_test.go; kind-level checks (STATUS Next, loadgen PR 5) come with the deployment.
+- Rejected: kind-level checks in this PR (there is no loadgen deployment until PR 5).
+- Reason: the control API's behavior needs no cluster, and httptest runs it with the real classifier, hashcore and gen-0 wrapper handlers.
 - Reverse: add kind-level checks to PR 5's smoke script.
 - Origin: chat
