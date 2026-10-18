@@ -1,8 +1,10 @@
 package loadgen
 
-// Exported for hashcore_test.go, an external test package (loadgen_test)
-// so that its hashcore import is confined to that test. This file is
-// compiled only into this package's tests.
+import "time"
+
+// Exported for hashcore_test.go and e2e_test.go, in an external test
+// package (loadgen_test) so that their hashcore imports are confined to
+// those tests. This file is compiled only into this package's tests.
 
 // Form is one form of a negative class.
 type Form struct {
@@ -35,3 +37,10 @@ const (
 	SaltLen = saltLen
 	KeyLen  = keyLen
 )
+
+// WithBurstDuration returns c with D, a burst's length, set to d, so
+// that a burst ends quickly.
+func WithBurstDuration(c Config, d time.Duration) Config {
+	c.burstDuration = d
+	return c
+}
