@@ -2,6 +2,7 @@ package loadgen
 
 import (
 	"cmp"
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
@@ -15,31 +16,43 @@ import (
 // serves, by variant id, and its boot_id. It is made with NewControl and
 // served by Handler, and is safe for concurrent use.
 //
-// mu guards targets and each target's busy flag. A target's Ring and
-// Checker have their own locks. Control never calls Ring.Read, Ring.ReadN
-// or a Checker method while holding mu, so a long read never stalls the
-// API; it calls Ring.Next under mu where a check must agree with what mu
-// then changes.
+// mu guards targets, each target's busy flag and pending batch, runs,
+// each run's target states, and active. A target's Ring and Checker have
+// their own locks. Control never calls Ring.Read, Ring.ReadN or a Checker
+// method while holding mu, so a long read never stalls the API; it calls
+// Ring.Next under mu where a check must agree with what mu then changes.
 type Control struct {
 	cfg    Config
-	sender *Sender // sends every run, so all records share its base
-	bootID string  // 16 random bytes in hex, one per process
+	ctx    context.Context // the process's: every run's context derives from it
+	sender *Sender         // sends every run, so all records share its base
+	bootID string          // 16 random bytes in hex, one per process
 
 	// Fixed at NewControl, from cfg.
 	windowSends, windowPairs int
 	burstSends, burstPairs   int
 	ringCap                  int
+	pairsCap                 int64 // a pairs upload's body cap, in bytes
 
 	mu      sync.Mutex
 	targets map[string]*target
+	runs    map[string]*run // every run started, by run_id, for the process's life
+	active  *run            // the run still sending, nil for none
 }
 
 // target is one variant Control serves. busy is set while a run sends to
-// it, and is guarded by Control.mu. Only a run adds to the Ring, and only
-// while the target is busy, so a target that is not busy gets no Add.
+// it; pending is the batch its next run will send, nil for none. Both are
+// guarded by Control.mu. Only a run adds to the Ring, and only while the
+// target is busy, so a target that is not busy gets no Add.
 type target struct {
 	Target
-	busy bool
+	busy    bool
+	pending *batch
+}
+
+// batch is one upload of /verify pairs, for run runID.
+type batch struct {
+	runID string
+	pairs []Pair
 }
 
 // apiError is an error the control API answers with its status.
@@ -55,12 +68,17 @@ func apiErrorf(status int, format string, args ...any) error {
 }
 
 // NewControl returns a Control with no targets, which will send with s.
-// It errors if cfg.Validate does.
-func NewControl(cfg Config, s *Sender) (*Control, error) {
+// ctx is the process's context: every run's context derives from it,
+// never from a request's, so cancelling ctx cancels every run. It errors
+// if cfg.Validate does.
+func NewControl(ctx context.Context, cfg Config, s *Sender) (*Control, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
-	c := &Control{cfg: cfg, sender: s, bootID: newBootID(), targets: make(map[string]*target)}
+	c := &Control{
+		cfg: cfg, ctx: ctx, sender: s, bootID: newBootID(),
+		targets: make(map[string]*target), runs: make(map[string]*run),
+	}
 	var err error
 	if c.windowSends, err = cfg.WindowSends(); err != nil {
 		return nil, err
@@ -77,6 +95,7 @@ func NewControl(cfg Config, s *Sender) (*Control, error) {
 	if c.ringCap, err = cfg.RingCapacity(); err != nil {
 		return nil, err
 	}
+	c.pairsCap = int64(max(c.windowPairs, c.burstPairs))*maxPairJSON + pairsSlack
 	return c, nil
 }
 

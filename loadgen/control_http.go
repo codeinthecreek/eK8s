@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -18,6 +19,9 @@ const bootIDHeader = "Ek8s-Boot-Id"
 // its default limit.
 const maxRecordsPage = 1000
 
+// maxStartBody is a start request's body cap, in bytes.
+const maxStartBody = 64 << 10
+
 // Handler returns the control API's HTTP handler (DESIGN.md sec 10).
 // Every response, the ServeMux's own 404 and 405 included, carries
 // boot_id in the Ek8s-Boot-Id header, and every JSON body carries it as
@@ -29,6 +33,10 @@ func (c *Control) Handler() http.Handler {
 	mux.HandleFunc("PUT /targets/{id}", c.handlePutTarget)
 	mux.HandleFunc("DELETE /targets/{id}", c.handleDeleteTarget)
 	mux.HandleFunc("GET /targets/{id}/records", c.handleRecords)
+	mux.HandleFunc("PUT /targets/{id}/pairs/{run_id}", c.handlePutPairs)
+	mux.HandleFunc("POST /runs/{run_id}/start", c.handleStart)
+	mux.HandleFunc("GET /runs/{run_id}", c.handleRun)
+	mux.HandleFunc("POST /runs/{run_id}/cancel", c.handleCancel)
 	mux.HandleFunc("POST /canary", c.handleCanary)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set(bootIDHeader, c.bootID)
@@ -87,6 +95,73 @@ type wireRecords struct {
 type wireCanary struct {
 	BootID string `json:"boot_id"`
 	Result string `json:"result"`
+}
+
+type wireUpload struct {
+	Pairs []wireUploadPair `json:"pairs"`
+}
+
+// wireUploadPair's fields are pointers so that an absent or null field
+// is refused, not read as "" or false: a missing match would turn a
+// mismatch pair into a match.
+type wireUploadPair struct {
+	Password *string `json:"password"`
+	Hash     *string `json:"hash"`
+	Match    *bool   `json:"match"`
+}
+
+// missing returns the name of the first field p lacks, "" for none.
+func (p wireUploadPair) missing() string {
+	switch {
+	case p.Password == nil:
+		return "password"
+	case p.Hash == nil:
+		return "hash"
+	case p.Match == nil:
+		return "match"
+	}
+	return ""
+}
+
+type wireUploaded struct {
+	BootID string `json:"boot_id"`
+	Count  int    `json:"count"`
+}
+
+type wireStart struct {
+	Kind    string   `json:"kind"`
+	Targets []string `json:"targets"`
+}
+
+type wireStarted struct {
+	BootID    string    `json:"boot_id"`
+	RunID     string    `json:"run_id"`
+	StartWall time.Time `json:"start_wall"`
+}
+
+type wireRun struct {
+	BootID    string                   `json:"boot_id"`
+	RunID     string                   `json:"run_id"`
+	Kind      string                   `json:"kind"`
+	StartWall time.Time                `json:"start_wall"`
+	Targets   map[string]wireRunTarget `json:"targets"`
+}
+
+type wireRunTarget struct {
+	State string `json:"state"`
+	Error string `json:"error,omitempty"`
+}
+
+// startWall is a run's start as the wire carries it: UTC, without the
+// monotonic reading, so it equals its records' first IntendedWall.
+func startWall(start time.Time) time.Time { return start.Round(0).UTC() }
+
+func (c *Control) toWireRun(v runView) wireRun {
+	ts := make(map[string]wireRunTarget, len(v.targets))
+	for id, s := range v.targets {
+		ts[id] = wireRunTarget{s.state, s.err}
+	}
+	return wireRun{c.bootID, v.id, string(v.kind), startWall(v.start), ts}
 }
 
 // wireRecord is a Record on the wire; its fields mean what Record's do.
@@ -232,6 +307,102 @@ func (c *Control) handleRecords(w http.ResponseWriter, r *http.Request) {
 		wrs[i] = toWireRecord(rec)
 	}
 	c.writeJSON(w, http.StatusOK, wireRecords{c.bootID, wrs, gap, next})
+}
+
+// PUT /targets/{id}/pairs/{run_id}, body {pairs: [{password, hash, match}]}.
+// The run_id is checked before the body is read. Every pair must carry
+// all three fields; their values are not checked.
+func (c *Control) handlePutPairs(w http.ResponseWriter, r *http.Request) {
+	runID := r.PathValue("run_id")
+	if !validRunID(runID) {
+		c.writeError(w, badRunID(runID))
+		return
+	}
+	var body wireUpload
+	if err := decodeBody(w, r, c.pairsCap, &body); err != nil {
+		c.writeError(w, err)
+		return
+	}
+	pairs := make([]Pair, len(body.Pairs))
+	for i, p := range body.Pairs {
+		if f := p.missing(); f != "" {
+			c.writeError(w, apiErrorf(http.StatusBadRequest, "loadgen: pair %d has no %s", i, f))
+			return
+		}
+		pairs[i] = Pair{*p.Password, *p.Hash, *p.Match}
+	}
+	n, err := c.putPairs(r.PathValue("id"), runID, pairs)
+	if err != nil {
+		c.writeError(w, err)
+		return
+	}
+	c.writeJSON(w, http.StatusCreated, wireUploaded{c.bootID, n})
+}
+
+// POST /runs/{run_id}/start, body {kind, targets}.
+func (c *Control) handleStart(w http.ResponseWriter, r *http.Request) {
+	runID := r.PathValue("run_id")
+	if !validRunID(runID) {
+		c.writeError(w, badRunID(runID))
+		return
+	}
+	var body wireStart
+	if err := decodeBody(w, r, maxStartBody, &body); err != nil {
+		c.writeError(w, err)
+		return
+	}
+	v, err := c.startRun(runID, runKind(body.Kind), body.Targets)
+	if err != nil {
+		c.writeError(w, err)
+		return
+	}
+	c.writeJSON(w, http.StatusOK, wireStarted{c.bootID, runID, startWall(v.start)})
+}
+
+// GET /runs/{run_id}
+func (c *Control) handleRun(w http.ResponseWriter, r *http.Request) {
+	v, err := c.runStatus(r.PathValue("run_id"))
+	if err != nil {
+		c.writeError(w, err)
+		return
+	}
+	c.writeJSON(w, http.StatusOK, c.toWireRun(v))
+}
+
+// POST /runs/{run_id}/cancel; the body is ignored.
+func (c *Control) handleCancel(w http.ResponseWriter, r *http.Request) {
+	v, err := c.cancelRun(r.PathValue("run_id"))
+	if err != nil {
+		c.writeError(w, err)
+		return
+	}
+	c.writeJSON(w, http.StatusOK, c.toWireRun(v))
+}
+
+func badRunID(id string) error {
+	return apiErrorf(http.StatusBadRequest, "loadgen: run_id %q, want 1 to 64 of A-Z a-z 0-9 . _ -, not starting with .", id)
+}
+
+// decodeBody decodes r's body, one JSON value, into v. It refuses with
+// 400 a body that is not valid JSON, has fields v lacks, or has anything
+// but white space after the value, and with 413 one over limit bytes.
+func decodeBody(w http.ResponseWriter, r *http.Request, limit int64, v any) error {
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, limit))
+	dec.DisallowUnknownFields()
+	err := dec.Decode(v)
+	if err == nil {
+		if _, err = dec.Token(); err == io.EOF {
+			return nil
+		}
+		if err == nil {
+			err = errors.New("data after the JSON value")
+		}
+	}
+	var tooLarge *http.MaxBytesError
+	if errors.As(err, &tooLarge) {
+		return apiErrorf(http.StatusRequestEntityTooLarge, "loadgen: body over %d bytes", limit)
+	}
+	return apiErrorf(http.StatusBadRequest, "loadgen: decoding the body: %v", err)
 }
 
 // POST /canary. The dial is detached from the request's context, so only

@@ -18,7 +18,7 @@ import (
 
 func newTestControl(t *testing.T, cfg Config) *Control {
 	t.Helper()
-	c, err := NewControl(cfg, NewSender())
+	c, err := NewControl(t.Context(), cfg, NewSender())
 	if err != nil {
 		t.Fatalf("NewControl: %v", err)
 	}
@@ -81,7 +81,7 @@ func (c *Control) setBusy(id string, busy bool) {
 func TestNewControlRefusesConfig(t *testing.T) {
 	cfg := validConfig()
 	cfg.BurstRate = 0
-	if _, err := NewControl(cfg, NewSender()); err == nil {
+	if _, err := NewControl(t.Context(), cfg, NewSender()); err == nil {
 		t.Error("NewControl with burst rate 0: nil error")
 	}
 }

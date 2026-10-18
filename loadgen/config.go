@@ -1,6 +1,7 @@
 package loadgen
 
 import (
+	"cmp"
 	"fmt"
 	"math"
 	"net/netip"
@@ -53,12 +54,16 @@ type Config struct {
 	// (the API server's ClusterIP, DESIGN.md sec 11). A name is refused:
 	// a failed lookup would read as refused and hide a fail-open policy.
 	CanaryAddr string
+
+	// burstDuration is D for tests, so that a burst ends quickly; zero
+	// means the const burstDuration. No flag sets it.
+	burstDuration time.Duration
 }
 
 // Validate reports the first rule c breaks: the window must hold 1 to
-// maxRecords sends (WindowSends); the burst must be valid (BurstSends);
-// the ring must fit (RingCapacity); TargetURL and CanaryAddr must be as
-// their fields describe.
+// maxRecords sends (WindowSends); the burst must be valid (BurstSends),
+// burstDuration included; the ring must fit (RingCapacity); TargetURL and
+// CanaryAddr must be as their fields describe.
 func (c Config) Validate() error {
 	if _, err := c.WindowSends(); err != nil {
 		return err
@@ -161,17 +166,22 @@ func windowPairs(n int) int {
 }
 
 // BurstSends returns n, the sends in a Stage 5 burst:
-// round(BurstRate x burstDuration). It errors when BurstRate is not
-// positive and finite, when n is over maxBurstSends (the PR #43 no-cap
-// memory sum, docs/decisions.md, covers no more), or when BurstCounts
-// refuses n (too small to hold its negatives).
+// round(BurstRate x D), D the const burstDuration unless a test set the
+// burstDuration field. It errors when BurstRate is not positive and
+// finite, when the field is negative, when n is over maxBurstSends (the
+// PR #43 no-cap memory sum, docs/decisions.md, covers no more), or when
+// BurstCounts refuses n (too small to hold its negatives).
 func (c Config) BurstSends() (int, error) {
 	if !(c.BurstRate > 0) || math.IsInf(c.BurstRate, 1) {
 		return 0, fmt.Errorf("loadgen: burst rate %v, want a positive finite rate", c.BurstRate)
 	}
-	x := math.Round(c.BurstRate * burstDuration.Seconds())
+	if c.burstDuration < 0 {
+		return 0, fmt.Errorf("loadgen: burst duration %v, want zero (the default) or positive", c.burstDuration)
+	}
+	d := cmp.Or(c.burstDuration, burstDuration)
+	x := math.Round(c.BurstRate * d.Seconds())
 	if x > maxBurstSends {
-		return 0, fmt.Errorf("loadgen: burst rate %v over %v is %v sends, over the %d the memory sum covers", c.BurstRate, burstDuration, x, maxBurstSends)
+		return 0, fmt.Errorf("loadgen: burst rate %v over %v is %v sends, over the %d the memory sum covers", c.BurstRate, d, x, maxBurstSends)
 	}
 	n := int(x)
 	if _, _, _, err := BurstCounts(n); err != nil {

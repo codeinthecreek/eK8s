@@ -36,6 +36,7 @@ func TestConfigValidateAccepts(t *testing.T) {
 		"largest burst":         func(c *Config) { c.BurstRate = 100 },  // n = 3,000
 		"one-send window":       func(c *Config) { c.Rate, c.Window = 1, time.Second },
 		"fractional burst rate": func(c *Config) { c.BurstRate = 0.5 }, // n = 15
+		"test burst duration":   func(c *Config) { c.BurstRate, c.burstDuration = 200, 100*time.Millisecond },
 	} {
 		c := validConfig()
 		mod(&c)
@@ -62,6 +63,7 @@ func TestConfigValidateRefuses(t *testing.T) {
 		"burst n = 0":        func(c *Config) { c.BurstRate = 0.01 },   // round(0.3)
 		"burst n = 3,001":    func(c *Config) { c.BurstRate = 100.02 }, // round(3000.6)
 		"burst rate huge":    func(c *Config) { c.BurstRate = 1e300 },
+		"burst duration neg": func(c *Config) { c.burstDuration = -time.Second },
 		"ring over max":      func(c *Config) { c.Rate, c.Window = maxRecords, time.Second },
 		"canary empty":       func(c *Config) { c.CanaryAddr = "" },
 		"canary name":        func(c *Config) { c.CanaryAddr = "kubernetes.default:443" },
@@ -245,6 +247,11 @@ func TestConfigCounts(t *testing.T) {
 	if n, err := c.RingCapacity(); err != nil || n != 600+240 {
 		t.Errorf("RingCapacity = %d, %v; want 840, nil", n, err)
 	}
+	c.burstDuration = 10 * time.Second
+	if n, err := c.BurstSends(); err != nil || n != 80 {
+		t.Errorf("BurstSends at D = 10s = %d, %v; want 80, nil", n, err)
+	}
+	c.burstDuration = 0
 	c.BurstRate = 100
 	if n, err := c.BurstSends(); err != nil || n != maxBurstSends {
 		t.Errorf("BurstSends at b = 100 = %d, %v; want %d, nil", n, err, maxBurstSends)
