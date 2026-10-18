@@ -47,14 +47,15 @@ const (
 	stateError     = "error"     // it returned another error, before sending anything
 )
 
-// run is one window or burst. id, kind, start and cancel are fixed when
-// it starts; targets, each target's state by id, is guarded by
+// run is one window or burst. id, kind, start, cancel and done are fixed
+// when it starts; targets, each target's state by id, is guarded by
 // Control.mu.
 type run struct {
 	id      string
 	kind    runKind
 	start   time.Time // carries its monotonic reading, for the schedule
 	cancel  context.CancelFunc
+	done    chan struct{} // closed once no target is running
 	targets map[string]targetState
 }
 
@@ -131,7 +132,7 @@ func (c *Control) startRun(runID string, kind runKind, ids []string) (runView, e
 		return runView{}, err
 	}
 	ctx, cancel := context.WithCancel(c.ctx)
-	r := &run{id: runID, kind: kind, start: time.Now().Add(startLead), cancel: cancel, targets: make(map[string]targetState, len(ts))}
+	r := &run{id: runID, kind: kind, start: time.Now().Add(startLead), cancel: cancel, done: make(chan struct{}), targets: make(map[string]targetState, len(ts))}
 	batches := make([][]Pair, len(ts))
 	for i, t := range ts {
 		batches[i], t.pending, t.busy = t.pending.pairs, nil, true
@@ -211,6 +212,7 @@ func (c *Control) finish(r *run, t *target, err error) {
 	}
 	c.active = nil
 	r.cancel()
+	close(r.done)
 }
 
 // runStatus returns run id.
@@ -236,4 +238,25 @@ func (c *Control) cancelRun(id string) (runView, error) {
 	}
 	r.cancel()
 	return r.view(), nil
+}
+
+// Wait blocks until no run is active, and returns nil, or until ctx
+// ends, and returns ctx's error. A run that starts while it waits is
+// waited for too. To end every run, cancel the context NewControl took,
+// then Wait: no run launches another send, and Wait returns once every
+// send in flight is recorded.
+func (c *Control) Wait(ctx context.Context) error {
+	for {
+		c.mu.Lock()
+		r := c.active
+		c.mu.Unlock()
+		if r == nil {
+			return nil
+		}
+		select {
+		case <-r.done:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 }

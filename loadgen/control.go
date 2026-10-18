@@ -99,6 +99,9 @@ func NewControl(ctx context.Context, cfg Config, s *Sender) (*Control, error) {
 	return c, nil
 }
 
+// BootID returns c's boot_id, which every response carries.
+func (c *Control) BootID() string { return c.bootID }
+
 // newBootID returns 16 crypto/rand bytes in hex.
 func newBootID() string {
 	b := make([]byte, 16)

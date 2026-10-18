@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -581,6 +582,37 @@ func TestCancelRun(t *testing.T) {
 	mustCall(t, h, "DELETE", fmt.Sprintf("/targets/1?through=%d", next-1), http.StatusOK)
 }
 
+// TestWait checks that Wait returns at once with no run active, waits
+// while a cancelled run's send is in flight, and returns once that send
+// is recorded.
+func TestWait(t *testing.T) {
+	sh := newShedder(t, true)
+	c := newTestControl(t, longConfig(sh.url))
+	if err := c.Wait(t.Context()); err != nil {
+		t.Fatalf("Wait with no run = %v, want nil", err)
+	}
+	h := c.Handler()
+	mustCall(t, h, "PUT", "/targets/1", http.StatusCreated)
+	upload(t, h, "1", "w1", c.windowPairs)
+	start(t, h, "w1", "window", "1")
+	waitFor(t, "a send in flight", func() bool { return sh.seen.Load() > 0 })
+	mustCall(t, h, "POST", "/runs/w1/cancel", http.StatusOK)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+	if err := c.Wait(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Wait with a send held = %v, want %v", err, context.DeadlineExceeded)
+	}
+	sh.release()
+	if err := c.Wait(t.Context()); err != nil {
+		t.Fatalf("Wait = %v, want nil", err)
+	}
+	c.wantIdle(t)
+	if next, seen := c.target("1").Ring.Next(), sh.seen.Load(); next != uint64(seen) {
+		t.Errorf("after Wait, %d records, want one per request sent (%d)", next, seen)
+	}
+}
+
 // TestRunBaseContext checks that a run's context derives from the
 // Control's: cancelling it cancels a run under way, and a run started
 // after it is cancelled sends nothing.
@@ -613,7 +645,7 @@ func TestRunBaseContext(t *testing.T) {
 // its message.
 func TestRunError(t *testing.T) {
 	c := newTestControl(t, runConfig("http://127.0.0.1:1"))
-	r := &run{id: "w1", kind: windowRun, cancel: func() {}, targets: map[string]targetState{"1": {state: stateRunning}}}
+	r := &run{id: "w1", kind: windowRun, cancel: func() {}, done: make(chan struct{}), targets: map[string]targetState{"1": {state: stateRunning}}}
 	tg := &target{busy: true}
 	tg.ID = "1"
 	c.runs["w1"], c.active = r, r
@@ -622,6 +654,11 @@ func TestRunError(t *testing.T) {
 	wantStates(t, v, map[string]wireRunTarget{"1": {State: stateError, Error: "loadgen: boom"}})
 	if tg.busy || c.active != nil {
 		t.Errorf("after the error: busy %v, active %v", tg.busy, c.active)
+	}
+	select {
+	case <-r.done:
+	default:
+		t.Error("after the error, the run's done is open")
 	}
 	b, _ := json.Marshal(c.toWireRun(r.view()))
 	if !strings.Contains(string(b), `"error":"loadgen: boom"`) {
