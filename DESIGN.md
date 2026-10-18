@@ -501,9 +501,10 @@ already provides.
 Procedure:
 - Deploy the candidate into its own namespace, `ek8s-v<id>` (section 11),
   with the same resource requests/limits every variant gets (the
-  per-namespace LimitRange). Its Service is **not** yet on the load
-  generator's target list -- it must not receive live traffic before
-  passing.
+  per-namespace LimitRange). Before the burst the orchestrator registers
+  it as a loadgen target (a PUT, section 10), so the burst's salts enter
+  its salt set. A registered target gets no traffic until a start names
+  it, so it receives no live traffic before passing.
 - Wait for the candidate's Deployment to report Ready before sending a
   single request (prevents a startup race from being misclassified as a
   gate failure).
@@ -511,12 +512,16 @@ Procedure:
   multi-minute observation-window duration -- Stage 5 only needs a
   boolean pass/fail, not statistical confidence) directly at the
   candidate's own Service, started through the long-lived loadgen's
-  control API (section 10). No live stream targets it, so this traffic
+  control API (section 10). The burst rate is b = 2 x C0 (= 4r) and it
+  lasts a fixed D = 30 s; its size n = round(b x D) follows from b and
+  is not a second input. No live stream targets it, so this traffic
   never mixes with anything currently live. Stage 5 runs in a gap between
   observation windows (section 11), so it never overlaps a scored window.
   The burst's `/verify` pairs are generated on the host before it, as for
   a window (section 10). Contract negatives (section 8) are at least 5% of
-  the burst, every negative class (section 8) at least once.
+  the burst, every negative class (section 8) at least once. On a Stage 5
+  fail, the orchestrator DELETEs the candidate's target after it has read
+  the burst's records.
 - The existing stress-ng Deployment provides contention (kind is
   single-node, so contention is a global resource -- no second stress-ng
   instance needed). The orchestrator owns stress state (section 11): it
@@ -536,10 +541,11 @@ Procedure:
 
 Pass iff both hold. On pass, there is no shared Service to relabel into:
 **the variant stays in the namespace Stage 5 created** and becomes live
-when the orchestrator adds its Service to the load generator's target
-list. Still no redeploy -- the image is already loaded and the pod is
-already running. It is idle until its first window, which starts cold like
-every other. (Full namespace lifecycle in section 11.)
+when the orchestrator names it in window starts (section 10); its target
+already exists in loadgen from Stage 5. Still no redeploy -- the image is
+already loaded and the pod is already running. It is idle until its first
+window, which starts cold like every other. (Full namespace lifecycle in
+section 11.)
 
 **Shared node, handled by scheduling:** live variants share the single
 kind node with whatever else is running, and a Stage 5 probe (or a gate
@@ -789,6 +795,22 @@ pool stays gate-only (section 5).
   the rejection path under load, the specification-gaming gap described
   in section 8.
 
+A window batch holds P = ceil(0.48 N + sqrt(N ln(1e9) / 2)) pairs, capped
+at N, where N is the window's send count: a stream draws `/verify` on
+each send with probability 0.48, so by Hoeffding's inequality one stream
+runs out of pairs in one window with probability at most 1e-9. A start
+needs each target's batch to hold at least P (a window) or the burst's
+`/verify` count (a burst), both given by `GET /config`, and refuses a
+shorter batch. A batch is per target, uploaded separately, and consumed
+at start. At most one batch is pending per target: an upload under
+another `run_id` replaces it. An upload is refused while its target is in
+a run, and under a `run_id` a run already used. A batch left pending
+under a `run_id` that has since been used is never sent, and the next
+upload replaces it. Every pair must carry `password`, `hash` and `match`.
+The upload body is capped at max(window pairs, burst pairs) x 1161 + 4 KiB
+(a 1024-byte password, a 97-byte hash and the field names, per pair), and
+a start body at 64 KiB.
+
 **Contract negatives** (section 8): all five classes in sustained
 traffic -- `/verify` with a malformed hash and with a well-formed hash
 at non-exact parameters, an empty password, a password over 1024 bytes,
@@ -840,7 +862,8 @@ gets the intended hashcore error; they are not in the binary.
   (section 9). Total offered load therefore scales with live population
   (up to 4 streams during probation, section 11); `r` must be sized for
   that plus stress-ng.
-- A short, bounded-count burst for the Stage 5 gate probe.
+- A short, bounded-count burst for the Stage 5 gate probe, at its own
+  rate b for a fixed D (below).
 Same request-mix logic and classifier in both; only duration and target
 rate differ. Loadgen sends nothing outside a window or a Stage 5 burst
 (section 11).
@@ -851,6 +874,12 @@ sheds at most 1% with p95 at most `HangTimeout`/4. It is measured once,
 and frozen for the run; a new `r` means a new run, and one run is one
 comparability epoch (section 9). Until C0 is measured, a provisional `r` comes from a
 workstation Argon2 benchmark; the CI smoke run uses `r` = 2.
+
+**The burst shape** is frozen per run like `r`: its rate b is set by the
+start-up flag `-burst-rate` (b = 2 x C0 = 4r, section 15), its duration D
+is the fixed 30 s, and its size is n = round(b x D). The ring's largest
+burst is n (below). Start-up refuses n > 3,000, because the memory sum
+(docs/decisions.md, PR #43 no-cap entry) covers no more.
 
 **Schedule.** One scheduler goroutine per target. Send i is intended at
 start + i/`r`, computed from the index and never from a running sleep, so
@@ -870,8 +899,8 @@ could not build or generate: a loadgen fault, not the variant's
 verdict), or a record ring has a gap (records overwritten before the
 orchestrator read them; a gap on any target excludes the half for all
 variants). Each target has its own ring, made and dropped with that
-target's `Checker`, with room for round(`r` x W) records plus the largest
-burst n. `Read(since)` returns the records from `since` onward, with a
+target's `Checker`, with room for round(`r` x W) records plus the
+burst's n. `Read(since)` returns the records from `since` onward, with a
 gap flag if the oldest retained `Seq` is past `since`. The orchestrator
 reads the rings only in gaps, and a window is done only when every send
 has completed or timed out; a target is dropped only after its records
@@ -928,14 +957,47 @@ failure (section 8, "Integrity reasons apply at any latency"). No host
 ports are published; the gate and orchestrator stay on the host and
 drive the cluster through the API server on loopback.
 
-**Control API.** A listener on a separate port behind a ClusterIP Service,
-reached from the host through the API server's service proxy. Loadgen
-holds no Kubernetes API credentials. Through it the orchestrator and gate
-add and remove targets, hand over a window's `/verify` pairs, start a
-window or a burst, read records (each with its per-request verdict and
-recorded (password, hash) pair), run the per-half policy canary (section
-11), and read `boot_id`. "Verdicts" means per-request verdicts only. The
-owner approved this in-cluster listener (2026-10-13).
+**Control API.** A listener on a separate port, the fixed `:9090`, behind
+a ClusterIP Service, reached from the host through the API server's
+service proxy. Loadgen holds no Kubernetes API credentials. Through it
+the orchestrator and gate add and remove targets, hand over a window's
+`/verify` pairs, start a window or a burst, read records (each with its
+per-request verdict and recorded (password, hash) pair), run the
+per-half policy canary (section 11), and read `boot_id`. "Verdicts" means
+per-request verdicts only. The owner approved this in-cluster listener
+(2026-10-13).
+
+The endpoints are `GET /config`, `GET /targets`, `PUT` and `DELETE
+/targets/{id}`, `GET /targets/{id}/records`, `PUT
+/targets/{id}/pairs/{run_id}`, `POST /runs/{run_id}/start`, `GET
+/runs/{run_id}`, `POST /runs/{run_id}/cancel` and `POST /canary`.
+`boot_id` is on every response, as the `Ek8s-Boot-Id` header and in every
+JSON body; the mux's own 404 and 405 bodies are plain text, with the
+header only. A target is named by its id only: loadgen builds the URL
+from its `-target-url` template, and checks the id against the variant id
+format. Every flag (`-rate`, `-window`, `-burst-rate`, `-target-url`,
+`-canary-addr`) is required, with no default.
+
+Runs:
+- One run is active at a time. A `run_id` cannot start with a dot, and is
+  never reused within a boot.
+- A start is all or nothing: if any named target cannot start, none does
+  and no batch is consumed. Loadgen picks the start time (now + 200 ms).
+- A target's state in a run is `running`, `done`, `cancelled` or `error`.
+  Cancel ends the run's context, and a target leaves `running` only after
+  every send it launched is recorded.
+- The orchestrator reads records only when no target is `running`, and
+  excludes the run on `cancelled` or `error`.
+- `DELETE ?through=S` is refused while records past S are unread or the
+  target is in a run.
+
+Records come in pages of at most 1,000. The wire format has snake_case
+names, buckets and reasons as names, durations in ns, times in RFC 3339
+UTC and bytes in base64. An absent reason means none, and a skipped or
+fault record carries no bucket or reason.
+
+On SIGTERM loadgen cancels every run, then waits up to 10 s for its
+requests and for the sends in flight to be recorded.
 
 **Restart.** A variant's salt set lives only in loadgen's memory: no
 journal, no restore. A restart empties it, which only loses detection
@@ -964,11 +1026,11 @@ fitness scoring (section 9) is what does the ranking.
 - **Stage 5 fail:** the namespace is deleted (cascading everything in
   it).
 - **Stage 5 pass:** nothing changes in the cluster. The orchestrator marks
-  the variant live and adds `<svc>.ek8s-v<id>.svc.cluster.local` to the
-  load generator's target list (through its control API, section 10). The
-  pod keeps running but is idle until its first window, which starts
-  cold like every other; no redeploy. It takes traffic from the next
-  observation window on.
+  the variant live and names it in window starts (through loadgen's
+  control API, section 10); the target already exists from Stage 5, and
+  loadgen builds its URL from the id. The pod keeps running but is idle
+  until its first window, which starts cold like every other; no
+  redeploy. It takes traffic from the next observation window on.
 - **Culled after scoring:** the namespace is deleted.
 
 **Why the original relabel-in-place design was dropped:** it could never
@@ -1014,9 +1076,15 @@ includes variant egress denial, now a containment measure only: fitness
 integrity no longer relies on it, since no `/verify` pair is shared
 across variants (section 10). So at the start of each half the
 orchestrator calls loadgen's control API for the policy canary: loadgen
-makes one connection attempt its own policy must refuse (the API server's
-ClusterIP, 1s timeout) and returns connected or refused; if connected,
-enforcement is off and the half is excluded.
+makes one connection attempt its own policy must refuse and returns
+connected, refused or error. It dials the `-canary-addr` flag, the API
+server's ClusterIP, which must be an IP literal (a failed lookup would
+read as refused), with a 1s timeout. The result is refused only for a
+timeout, ECONNREFUSED, EHOSTUNREACH or ENETUNREACH. EAGAIN, which on
+connect is local, and any other error give error, which the orchestrator
+treats like connected: enforcement is not shown to be on, and the half is
+excluded. The dial is detached from the request's context, so a caller's
+deadline cannot read as refused. The canary is allowed during a run.
 The orchestrator also checks the kindnet DaemonSet is Ready, as a cheap
 first look; Ready alone does not show the queue is being read.
 
@@ -1082,9 +1150,9 @@ probation is the binding case for the section 2 budget).
 4. **Gate** (section 7): fail at any stage -> log which stage, discard,
    return to step 1 (cap consecutive failures before flagging the lineage
    stalled -- do not halt the whole run on one bad mutation).
-5. **Provisional promotion**: pass -> mark live and add the variant's
-   Service to the load generator's target list (see Namespace lifecycle
-   above). Population is briefly 4, not 3 (see Probation below).
+5. **Provisional promotion**: pass -> mark live and name the variant in
+   window starts (see Namespace lifecycle above). Population is briefly
+   4, not 3 (see Probation below).
 6. **Observe**: one full observation window (baseline + stress-active
    halves), same shape as any live variant's.
 7. **Verify, score & cull**: after the window, fully verify its hashes on
@@ -1346,7 +1414,10 @@ independent of whether the stagnation logic is itself working correctly.
   variant, the `/hash` repeat share (1%), the `/hash` password floor (16
   characters), the `/hash` password length distribution (uniform, 16 to
   1024), the sampled verification share after K (10% of a variant's
-  hashes per window)) are all explicitly
+  hashes per window), the Stage 5 burst factor (2 x C0) and duration (D =
+  30 s), the 200 ms run start lead, the 1e-9 bound on a stream running out
+  of `/verify` pairs, the 10 s shutdown bound, and the control API
+  server's 2-minute read and write timeouts) are all explicitly
   starting guesses pending real telemetry, not derived values -- expect to
   tune all of them once the loop is running.
 - Workstation measurements still to take (they bound the gap between
