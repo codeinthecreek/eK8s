@@ -400,6 +400,26 @@ func TestStartRefusals(t *testing.T) {
 	wantStates(t, waitRun(t, h, "b1"), map[string]wireRunTarget{"4": {State: stateDone}})
 }
 
+// TestStartCap checks the start body cap on both sides: a body of
+// exactly 64 KiB starts the run, and one byte more is 413 and takes no
+// batch.
+func TestStartCap(t *testing.T) {
+	sh := newShedder(t, false)
+	c := newTestControl(t, runConfig(sh.url))
+	h := c.Handler()
+	mustCall(t, h, "PUT", "/targets/1", http.StatusCreated)
+	upload(t, h, "1", "w1", c.windowPairs)
+	padded := func(n int) []byte {
+		b := startJSON("window", "1")
+		return append(b, bytes.Repeat([]byte(" "), n-len(b))...)
+	}
+
+	errorBody(t, callBody(h, "POST", "/runs/w1/start", padded(64<<10+1)), http.StatusRequestEntityTooLarge)
+	c.wantPending(t, "1", "w1", c.windowPairs)
+	mustCallBody(t, h, "POST", "/runs/w1/start", padded(64<<10), http.StatusOK)
+	wantStates(t, waitRun(t, h, "w1"), map[string]wireRunTarget{"1": {State: stateDone}})
+}
+
 // TestStartAllOrNothing checks that a start refused on one target takes
 // no other target's batch, and that it starts once fixed.
 func TestStartAllOrNothing(t *testing.T) {

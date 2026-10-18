@@ -27,6 +27,7 @@ func TestConfigValidateAccepts(t *testing.T) {
 	for name, mod := range map[string]func(*Config){
 		"production":            func(*Config) {},
 		"httptest path":         func(c *Config) { c.TargetURL = "http://127.0.0.1:43210/v{id}" },
+		"path on :8080":         func(c *Config) { c.TargetURL = "http://127.0.0.1:8080/v{id}" },
 		"deeper path":           func(c *Config) { c.TargetURL = "http://127.0.0.1:43210/a/v{id}/b" },
 		"https":                 func(c *Config) { c.TargetURL = "https://hasher.ek8s-v{id}.svc.cluster.local:8443" },
 		"no port":               func(c *Config) { c.TargetURL = "http://hasher.ek8s-v{id}.svc.cluster.local" },
@@ -115,6 +116,10 @@ func TestConfigValidateTargetURL(t *testing.T) {
 		"space in path":       "http://127.0.0.1:8080/a b/v{id}",
 		"bad port":            "http://hasher.ek8s-v{id}:http",
 		"newline":             "http://hasher.ek8s-v{id}:8080\n",
+		"digit before, host":  "http://hasher.ek8s-v1{id}.svc.cluster.local:8080",
+		"digit after, host":   "http://hasher.ek8s-v{id}0.svc.cluster.local:8080",
+		"digit before, path":  "http://127.0.0.1:8080/v1{id}",
+		"digit after, path":   "http://127.0.0.1:8080/v{id}9",
 	} {
 		c := validConfig()
 		c.TargetURL = tmpl

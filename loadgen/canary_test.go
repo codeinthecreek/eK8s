@@ -76,3 +76,24 @@ func TestCanaryEndpoint(t *testing.T) {
 		t.Errorf("POST /canary = %+v, want %+v", got, want)
 	}
 }
+
+// TestCanaryEndpointDetached checks that POST /canary dials detached from
+// the request's context: with that context already cancelled, a dial to
+// a listener still reads connected, not error.
+func TestCanaryEndpointDetached(t *testing.T) {
+	srv := httptest.NewServer(http.NotFoundHandler())
+	defer srv.Close()
+	cfg := validConfig()
+	cfg.CanaryAddr = srv.Listener.Addr().String()
+	c := newTestControl(t, cfg)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	rec := httptest.NewRecorder()
+	c.Handler().ServeHTTP(rec, httptest.NewRequest("POST", "/canary", nil).WithContext(ctx))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST /canary = %d %s, want 200", rec.Code, rec.Body)
+	}
+	if got, want := decode[wireCanary](t, rec), (wireCanary{c.bootID, canaryConnected}); got != want {
+		t.Errorf("POST /canary with a cancelled request context = %+v, want %+v", got, want)
+	}
+}

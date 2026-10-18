@@ -390,7 +390,7 @@ func TestE2ESaltReused(t *testing.T) {
 		t.Fatal(err)
 	}
 	// 60 sends, so that at least 10 /hash records exceed the Evidence cap
-	// but for a chance under 1e-9.
+	// but for a chance under 2e-8.
 	cfg := e2eConfigFor("http://127.0.0.1:1", 30, 2*time.Second)
 	n, err := cfg.WindowSends()
 	if err != nil {

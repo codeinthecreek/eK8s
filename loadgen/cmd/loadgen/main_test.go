@@ -202,17 +202,24 @@ func TestRunServes(t *testing.T) {
 }
 
 // TestRunCancelsRuns checks that ctx's end cancels a run in progress: run
-// returns nil, after its in-flight sends are recorded, long before the
-// 60 s window would end.
+// does not return while a send is in flight, returns nil once that send
+// is answered and recorded, and does so long before the 60 s window
+// would end.
 func TestRunCancelsRuns(t *testing.T) {
 	var seen atomic.Int64
+	hold := make(chan struct{}) // the first send is answered only once closed
+	var once sync.Once
+	release := func() { once.Do(func() { close(hold) }) }
 	variant := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		seen.Add(1)
 		io.Copy(io.Discard, r.Body)
+		if seen.Add(1) == 1 {
+			<-hold
+		}
 		w.Header().Set("Retry-After", "1")
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}))
 	defer variant.Close()
+	defer release() // before Close, which waits for the held handler
 	url := useListener(t)
 	_, cancel, done := startRun(t, validArgs(variant.URL))
 
@@ -236,13 +243,22 @@ func TestRunCancelsRuns(t *testing.T) {
 		}
 	}
 
-	t0 := time.Now()
+	// The first send is now held at the variant. A send outlives its
+	// run's context, so run must wait for it (well under the sender's
+	// 7 s client timeout).
 	cancel()
+	select {
+	case err := <-done:
+		t.Fatalf("run returned %v while a send was in flight, want it to wait for the send", err)
+	case <-time.After(time.Second):
+	}
+	t0 := time.Now()
+	release()
 	if err := waitRun(t, done); err != nil {
 		t.Fatalf("run = %v, want nil", err)
 	}
 	if d := time.Since(t0); d > 5*time.Second {
-		t.Errorf("run returned %v after ctx ended, want well under the window's 60 s", d)
+		t.Errorf("run returned %v after the held send was answered, want well under the window's 60 s", d)
 	}
 	n := seen.Load()
 	time.Sleep(1500 * time.Millisecond) // past the next send's time, at 1/s

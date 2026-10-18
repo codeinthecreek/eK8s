@@ -48,7 +48,8 @@ type Config struct {
 	BurstRate float64
 	// TargetURL is a variant's base URL with idPlaceholder where its id
 	// goes, e.g. http://hasher.ek8s-v{id}.svc.cluster.local:8080. It
-	// takes exactly one placeholder, in the host or the path.
+	// takes exactly one placeholder, in the host or the path, with no
+	// digit next to it: in v1{id}, id 2 would name variant 12.
 	TargetURL string
 	// CanaryAddr is the policy canary's target, an IP literal host:port
 	// (the API server's ClusterIP, DESIGN.md sec 11). A name is refused:
@@ -80,7 +81,9 @@ func (c Config) Validate() error {
 	return validCanaryAddr(c.CanaryAddr)
 }
 
-// validTargetURL checks a TargetURL template: exactly one placeholder;
+// validTargetURL checks a TargetURL template: exactly one placeholder,
+// with no ASCII digit immediately before or after it, so that no two ids
+// give the same URL (in v1{id}, id 2 and variant 12 would share one);
 // with an id in it, an absolute http or https URL with a host, in
 // canonical form (it formats back to itself), with no userinfo, query,
 // fragment or trailing slash; and the id must not change the port, so
@@ -88,6 +91,10 @@ func (c Config) Validate() error {
 func validTargetURL(tmpl string) error {
 	if n := strings.Count(tmpl, idPlaceholder); n != 1 {
 		return fmt.Errorf("loadgen: target URL %q holds %d %s, want exactly one", tmpl, n, idPlaceholder)
+	}
+	i := strings.Index(tmpl, idPlaceholder)
+	if digitAt(tmpl, i-1) || digitAt(tmpl, i+len(idPlaceholder)) {
+		return fmt.Errorf("loadgen: target URL %q has a digit next to %s, so two ids could name one variant", tmpl, idPlaceholder)
 	}
 	if strings.ContainsAny(tmpl, "?#") {
 		return fmt.Errorf("loadgen: target URL %q has a query or fragment", tmpl)
@@ -116,6 +123,9 @@ func validTargetURL(tmpl string) error {
 	}
 	return nil
 }
+
+// digitAt reports whether s has an ASCII digit at index i.
+func digitAt(s string, i int) bool { return i >= 0 && i < len(s) && '0' <= s[i] && s[i] <= '9' }
 
 // validCanaryAddr checks that addr is an IP literal host:port with a
 // nonzero port.
