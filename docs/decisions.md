@@ -311,3 +311,63 @@ max. Earlier entries are not backfilled.
 - Reason: Stage 4 FullVerifies every /hash answer, so a replayed Stage 2 hash already fails as verify_mismatch; the shared salt set adds catching a salt that repeats across the two boots (for example a fixed-seed salt RNG).
 - Reverse: give Stage 4 its own NewRun.
 - Origin: chat
+
+## 2026-10-18 · PR #44 (inferred) · The Stage 5 burst shape is fixed per run (DESIGN.md sec 7, 10, 15)
+- Decision: b = 2 x C0 (= 4r), D = 30 s constant, n = round(b x D), derived from -burst-rate; start-up refuses n > 3,000.
+- Rejected: per-call n and rate through the API (gate results would not compare within a run); n as a second flag (it could disagree with b).
+- Reason: one shape per run keeps every candidate's Stage 5 result comparable, and a single flag leaves n no way to disagree with b.
+- Revisit: raise the 3,000 limit only with a new memory sum (PR #43 no-cap entry); the factor 2 and D after the workstation run (Q8).
+- Reverse: DESIGN.md sec 7, 10, 15 edits; loadgen/config.go.
+- Origin: chat
+
+## 2026-10-18 · PR #44 (inferred) · Targets are named by id: loadgen builds the URL, and the target is PUT before the Stage 5 burst (amends DESIGN.md sec 7 and sec 11 target-list wording)
+- Decision: loadgen builds each URL from the -target-url template and the id; the target is PUT before its Stage 5 burst; "live" means named in window starts.
+- Rejected: a URL in the PUT (an id/URL mismatch would silently score one variant's responses as another's); adding the target only after a pass (the burst's salts would miss its set).
+- Reason: the URL follows from the id, so no request can pair one variant's id with another's URL; and the burst's salts enter the candidate's own salt set.
+- Reverse: DESIGN.md sec 7, 11 edits; take the URL in the PUT.
+- Origin: chat
+
+## 2026-10-18 · PR #44 (inferred) · DELETE /targets/{id}?through=S is refused while records past S are unread or the target is in a run (DESIGN.md sec 10)
+- Decision: DELETE answers 409 while records past S are unread or the target is in a run. It implements the drop rule of the PR #41 ring entry (a target is dropped only after its records are read).
+- Reverse: DESIGN.md sec 10 edit; drop the through check and the 409s in loadgen/control.go.
+- Origin: chat
+
+## 2026-10-18 · PR #44 (inferred) · Runs: per-target pair batches, one active run, an all-or-nothing start chosen by loadgen (DESIGN.md sec 10)
+- Decision: batches are per target, uploaded separately and consumed at start, one pending per target; one active run, and a run_id never reused within a boot; a start is all or nothing at now + 200 ms, chosen by loadgen; per-target states and cancel.
+- Rejected: pairs inside the start request (one large request); an orchestrator-chosen start time; leaving run overlap to the orchestrator.
+- Reason: only loadgen sees its active run, the run_ids it has used and its own clock, so it enforces no overlap, no reuse and one shared start itself.
+- Reverse: DESIGN.md sec 10 edit; loadgen/control_run.go.
+- Origin: chat
+
+## 2026-10-18 · PR #44 (inferred) · Window batch size P = ceil(0.48N + sqrt(N ln(1e9)/2)), capped at N (DESIGN.md sec 10)
+- Decision: a window batch holds P pairs, N being the window's send count, so one stream runs out of pairs with probability at most 1e-9 per window (Hoeffding).
+- Rejected: a fixed margin (it does not grow with N).
+- Reverse: change P in loadgen/config.go; DESIGN.md sec 10 edit.
+- Origin: Code
+
+## 2026-10-18 · PR #44 (inferred) · boot_id on every control API response (DESIGN.md sec 10)
+- Decision: boot_id is the Ek8s-Boot-Id header and a field in every JSON body; the mux's 404 and 405 carry the header only.
+- Reason: a restart loses targets, batches and records, and the header lets the orchestrator see it on any answer.
+- Reverse: DESIGN.md sec 10 edit; drop the header and the body field.
+- Origin: chat
+
+## 2026-10-18 · PR #44 (inferred) · Policy canary mechanics (amends the mechanics in the PR #31 FailOpen entry; DESIGN.md sec 11)
+- Decision: POST /canary dials -canary-addr, an IP literal; refused only for a timeout, ECONNREFUSED, EHOSTUNREACH or ENETUNREACH; EAGAIN and any other error give error, which excludes like connected; the dial is detached from the request's context.
+- Rejected: any dial error as refused (a local failure would hide a fail-open policy); a DNS name (a failed lookup would read as refused).
+- Reverse: DESIGN.md sec 11 edit; loadgen/canary.go.
+- Origin: chat
+
+## 2026-10-18 · PR #44 (inferred) · Wire format and request limits (DESIGN.md sec 10)
+- Decision: separate wire structs; buckets and reasons as names; a skipped or fault record carries no bucket or reason; records pages of at most 1,000; every uploaded pair must carry password, hash and match; upload body cap max(window_pairs, burst_pairs) x 1161 + 4 KiB (1024-byte password, 97-byte hash, 40 bytes of names, per pair), start body 64 KiB.
+- Reverse: DESIGN.md sec 10 edit; loadgen/control_http.go and control_run.go.
+- Origin: Code
+
+## 2026-10-18 · PR #44 (inferred) · The loadgen binary: required flags, fixed :9090, cancel-then-wait shutdown (DESIGN.md sec 10, 15)
+- Decision: every flag required, with no default; the listener is the fixed :9090; on SIGTERM, cancel every run, then wait up to 10 s (Control.Wait) for requests and in-flight sends to be recorded; server read and write timeouts of 2 minutes.
+- Reverse: cmd/loadgen/main.go; DESIGN.md sec 10, 15 edits.
+- Origin: Code
+
+## 2026-10-18 · PR #44 (inferred) · The control API is tested in-process; kind-level checks wait for PR 5 (DESIGN.md sec 10)
+- Decision: httptest, with gen-0 wrapper handlers and the real hashcore in e2e_test.go; kind-level checks (STATUS Next, loadgen PR 5) come with the deployment.
+- Reverse: add kind-level checks to PR 5's smoke script.
+- Origin: chat
