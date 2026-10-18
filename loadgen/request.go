@@ -43,6 +43,9 @@ const (
 	KindNegative Kind = "negative" // a contract negative (DESIGN.md sec 8), /hash or /verify
 )
 
+// String returns k as the control API's records carry it.
+func (k Kind) String() string { return string(k) }
+
 // Pair is one host-generated /verify pair (DESIGN.md sec 10).
 type Pair struct {
 	Password string

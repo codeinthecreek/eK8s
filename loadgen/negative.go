@@ -18,6 +18,9 @@ const (
 	InvalidJSON     NegativeClass = "invalid_json"      // /hash or /verify, body not one valid request object
 )
 
+// String returns c as the control API's records carry it.
+func (c NegativeClass) String() string { return string(c) }
+
 // negativeClasses is the rotation order.
 var negativeClasses = [...]NegativeClass{MalformedHash, NonExactParams, EmptyPassword, PasswordTooLong, InvalidJSON}
 
