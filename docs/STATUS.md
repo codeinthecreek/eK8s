@@ -4,7 +4,7 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 *(inferred)* are guesses, not read from the repo; correct them.
 
 ## Now
-- claude/loadgen-control-api (PR #44, inferred): loadgen PR 4, the control API on :9090 (config, targets, records, runs, canary, binary, end-to-end test); DESIGN.md sec 7, 10, 11, 15; ten decisions.md entries.
+- claude/loadgen-deploy (inferred): loadgen PR 5, the deployment; reconcile commit only so far, design in progress.
 
 ## Next
 - Extract docs/workflow/ into its own repo (links inside it are relative and stay within the folder); then decide whether eK8s's own CLAUDE.md, handoff.md and reviewer.md are regenerated from the templates (docs/decisions.md, PR #32 entry).
@@ -34,8 +34,8 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 - TestScheduleSlowNext flake: lag 23.4 ms against its 20 ms bound; 2 failures under local load (one in a mutation run, one in a solo -count=30 run); 120 of 120 passes otherwise. Recheck the bound against PR #41's mutant lags.
 
 ## Recent
+- #44 Loadgen PR 4, the control API on :9090: config, targets, records, runs, canary, binary, end-to-end test; DESIGN.md sec 7, 10, 11, 15; ten decisions.md entries (2026-10-18)
 - #43 Classifier cleanup: drop Run.Reserve and ErrNotCanonical; test that a failed FullVerify keeps its salt; fix the Negative, freshPassword and Stage 4 doc comments; key the salt set on the decoded 16-byte salt (25.23 B per salt, was 149.3 B), with DESIGN.md sec 8 and three decisions.md entries (2026-10-16)
 - #42 Cut per-PR doc reads, docs-only: decisions.md entries before #32 move to docs/decisions-archive.md; the reconcile greps decisions.md instead of reading it; Recent capped at 5; overview.md/README.md refresh on request; docs/workflow/ frozen until extraction (2026-10-16)
 - #41 Loadgen PR 3 of 5, open-loop sender and records: per-target Ring and Record (pairs ride on records), the HTTP client and send (no keep-alives, no proxy, no redirects, WriteTimeout + 1s pinned by a go/parser test), RunWindow/RunBurst on an index-based open-loop schedule with Evidence, Skipped and Fault records, memory benchmarks; DESIGN.md sec 10, 11 and eight decisions.md entries (2026-10-16)
 - #40 Classifier strictness, security-relevant: classifier rejects 2xx bodies that do not match the spec exactly (S1-S5: single member, duplicate keys, JSON-equivalent forms, only 200 is success, 4 KiB MaxBodyBytes); gate and loadgen follow the cap contract (MaxBodyBytes+1 read, Err only for a failed read); loadgen records() adds bad_status; tests and mutation checks (2026-10-16)
-- #39 Loadgen PR 2 of 5, response checks: `Checker` (one classifier Run with no Verifier per variant, safe for concurrent use), `Verdict`, `HashPair` and a `Response` the sender fills; a pair is recorded only for a 2xx /hash whose reason is none or over_hang_timeout; tests plus mutation checks on that rule and the Kind mapping (all killed but one inert); DESIGN.md sec 10 and four decisions.md entries (2026-10-15)
