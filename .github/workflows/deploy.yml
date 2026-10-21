@@ -4,7 +4,10 @@ name: deploy smoke
 # deploy/variant-smoke.sh (one variant bundle and a loadgen stand-in:
 # readiness, ingress from loadgen only, the control port through the API
 # server's proxy only, loadgen's and the variant's egress, endpoints of a
-# terminating pod, namespace deletion). It proves the mechanics (pinned
+# terminating pod, namespace deletion), then deploy/loadgen-smoke.sh
+# (loadgen itself: readiness, memory limits, the policy canary, its one
+# listener, every control endpoint through the API server's proxy, the
+# largest upload). It proves the mechanics (pinned
 # images, kustomizations, metrics-server, stress-ng on and off, the
 # variant bundle, ek8s-system), not the full-size numbers: those need the workstation
 # (docs/STATUS.md, Parked). workflow_dispatch only works once this file is
@@ -16,6 +19,9 @@ on:
       # variant-smoke.sh deploys generation 0's image built from these.
       - 'cmd/service/**'
       - 'internal/wrapper/**'
+      # loadgen-smoke.sh builds loadgen's image from these.
+      - 'loadgen/**'
+      - 'internal/classifier/**'
       - '.github/workflows/deploy.yml'
   workflow_dispatch:
 
@@ -66,6 +72,7 @@ jobs:
       - run: deploy/up.sh
       - run: deploy/smoke.sh
       - run: deploy/variant-smoke.sh
+      - run: deploy/loadgen-smoke.sh
       - name: Dump cluster state
         if: failure()
         run: |
