@@ -12,11 +12,14 @@ stress/               namespace ek8s-stress: stress-ng Deployment (0 replicas),
                       its dose ConfigMap, a deny-all NetworkPolicy
 stress-ci/            overlay of stress/ at CI size (500m / 512Mi, 1 CPU worker)
 ek8s-system/          namespace ek8s-system: loadgen's control Service and
-                      its NetworkPolicy (no loadgen Deployment yet)
+                      its NetworkPolicy (not its Deployment)
+loadgen/              loadgen's Deployment: template + Go renderer (cmd/render)
 variant/              the per-variant bundle: templates + Go renderer
 up.sh                 create the cluster (if absent) and apply the above
+loadgen-up.sh <r>     build loadgen's image, load it and apply its Deployment
 smoke.sh              infra smoke test (run after up.sh)
 variant-smoke.sh      variant bundle smoke test (run after up.sh)
+loadgen-smoke.sh      loadgen smoke test (run after up.sh; deploys loadgen)
 ```
 
 ## Cluster
@@ -114,6 +117,7 @@ fails under the restriction with "loopback: Failed RTM_NEWADDR".
 ```
 deploy/up.sh      # create cluster ek8s if absent; load stress-ng; apply infra
 deploy/smoke.sh   # node reservation, metrics-server, stress-ng on and off
+deploy/loadgen-up.sh 2   # build and deploy loadgen at r = 2 (see loadgen below)
 kind delete cluster --name ek8s   # tear down
 ```
 
@@ -138,9 +142,10 @@ Paths are relative to deploy/. The reserved value must equal the kind
 config's kubeReserved + systemReserved CPU; the stress minimum must sit
 below the stress-ng CPU limit (3 CPU full size, 500m CI size).
 
-CI (`.github/workflows/deploy.yml`) runs up.sh, smoke.sh and
-variant-smoke.sh at CI size on
-every pull request touching deploy/ or the workflow; the repo is private, so
+CI (`.github/workflows/deploy.yml`) runs up.sh, smoke.sh,
+variant-smoke.sh and loadgen-smoke.sh at CI size on
+every pull request touching deploy/, cmd/service/, internal/wrapper/,
+loadgen/, internal/classifier/ or the workflow; the repo is private, so
 its ubuntu-latest runner has 2 CPU / 8 GB, too small for the full-size
 reservation and stress dose. On failure it dumps `kubectl get pods -A`,
 `kubectl describe node` and the failing pods' events. It proves the
@@ -198,8 +203,9 @@ namespace and the smoke pods for inspection. CI runs it after smoke.sh.
 
 ## ek8s-system
 
-Namespace `ek8s-system` (Pod Security `restricted`), where loadgen will
-run (DESIGN.md sec 10). up.sh applies it; no loadgen Deployment yet.
+Namespace `ek8s-system` (Pod Security `restricted`), where loadgen runs
+(DESIGN.md sec 10). up.sh applies it; loadgen's Deployment is not part of
+it (see loadgen below).
 
 | Object | What it holds |
 |--------|---------------|
@@ -211,6 +217,44 @@ never applies policy to traffic from a root-owned socket on the node. That
 covers every root process on the node (the API server, the kubelet, the
 control plane, root hostNetwork pods), all of which can already exec into
 loadgen (DESIGN.md sec 11).
+
+## loadgen
+
+Deployment `loadgen` in `ek8s-system`, rendered from
+`loadgen/deployment.yaml.tmpl` by package `deploy/loadgen` and applied by
+`loadgen-up.sh`, not by the ek8s-system kustomization. One replica,
+strategy `Recreate`, 750m CPU / 256Mi Guaranteed, a `tcpSocket` readiness
+probe on the container port `control` (9090) and no liveness probe, a 15 s
+grace period, `GOMEMLIMIT` from the downward API, no service-account
+token (DESIGN.md sec 10). The renderer takes only the rate `r` and an
+image `ek8s-loadgen:<12 hex>`; it fills `-rate`, `-window` and
+`-burst-rate` from `r` alone (b = 4r, W = 5 min), refuses an r not in its
+shortest decimal form, and refuses anything loadgen itself would refuse
+(such as r above 19).
+
+```
+deploy/loadgen-up.sh 2   # r = 2, the smoke run's rate
+go run ./deploy/loadgen/cmd/render -rate 2 -image ek8s-loadgen:0123456789ab
+kubectl --context kind-ek8s -n ek8s-system delete deployment loadgen   # remove it
+```
+
+`loadgen-up.sh <r>` builds loadgen (`CGO_ENABLED=0`), tags the image with
+the first 12 hex of the binary's sha256, kind-loads it, applies the
+rendered Deployment and waits for the rollout. It refuses to run without
+`ek8s-system` from up.sh.
+
+`loadgen-smoke.sh` deploys loadgen at r = 2 and checks: the pod is Ready;
+its start line shows the memory limit and `GOMEMLIMIT` (90%) it was sized
+for; the policy canary reads refused from its pod; 9090 is its only
+listening socket (read from an ephemeral container's `/proc/net`) and no UDP
+socket is bound; every control endpoint works through the API server's
+service proxy, including a refused `DELETE` during a run and a cancelled
+run's records; and at r = 19 (the largest rate) the largest pair upload is
+accepted. It targets id 999999 and refuses to start if `ek8s-v999999`
+exists, so no variant is sent load; it refuses to start beside an
+existing `app=loadgen` pod, and deletes its Deployment on exit
+(describing the pod and printing loadgen's log first on failure). CI runs
+it after variant-smoke.sh.
 
 ## stress-ng
 
