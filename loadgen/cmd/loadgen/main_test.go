@@ -7,10 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -138,6 +140,7 @@ func TestRunFlagErrors(t *testing.T) {
 		flagCase{"no flags", "flag -rate is required", nil},
 		flagCase{"rate not a number", `invalid value "abc" for flag -rate`, with("-rate", "abc")},
 		flagCase{"rate zero", "rate 0 and window 1m0s must both be positive", with("-rate", "0")},
+		flagCase{"rate over maxRate", "over the 19 the memory sum covers", with("-rate", strconv.FormatFloat(math.Nextafter(19, math.Inf(1)), 'g', -1, 64))},
 		flagCase{"window negative", "rate 1 and window -1s must both be positive", with("-window", "-1s")},
 		flagCase{"window not a duration", `invalid value "60" for flag -window`, with("-window", "60")},
 		flagCase{"burst too large", "over the 3000 the memory sum covers", with("-burst-rate", "1000")},

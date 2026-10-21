@@ -49,10 +49,11 @@ func newShedder(t *testing.T, held bool) *shedder {
 func (sh *shedder) release() { sh.once.Do(func() { close(sh.hold) }) }
 
 // runConfig returns a Config whose targets are url/v{id}: a window of
-// testSends (50) sends at testRate (200/s), and a burst of 20 at 200/s.
+// testSends (50) sends at testRate (200/s), over maxRate, and a burst of
+// 20 at 200/s.
 func runConfig(url string) Config {
 	c := validConfig()
-	c.Rate, c.Window = testRate, testWindow
+	c.Rate, c.Window, c.maxRate = testRate, testWindow, testRate
 	c.BurstRate, c.burstDuration = 200, 100*time.Millisecond
 	c.TargetURL = url + "/v{id}"
 	return c

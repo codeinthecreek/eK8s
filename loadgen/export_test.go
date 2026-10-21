@@ -44,3 +44,10 @@ func WithBurstDuration(c Config, d time.Duration) Config {
 	c.burstDuration = d
 	return c
 }
+
+// WithMaxRate returns c with the largest r it accepts set to r, so that
+// a test can run a short window fast.
+func WithMaxRate(c Config, r float64) Config {
+	c.maxRate = r
+	return c
+}
