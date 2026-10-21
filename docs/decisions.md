@@ -387,7 +387,7 @@ max. Earlier entries are not backfilled.
 - Origin: chat
 
 ## 2026-10-21 · PR #45 (inferred) · loadgen's only listener is control 9090, checked three ways (DESIGN.md sec 10, 11)
-- Decision: a go/parser test counts exactly one listen call site in loadgen/ and cmd/loadgen non-test files; forbiddenDep (go list -deps, transitive) refuses net/http/pprof and expvar by exact path; the kind smoke reads /proc/net from an ephemeral container (one TCP LISTEN, :2382; no bound UDP port), which also catches a listener a dependency opens; the manifest has one containerPort.
+- Decision: a go/parser test counts exactly one listen call site in loadgen/ and cmd/loadgen non-test files; forbiddenDep (go list -deps, transitive) refuses net/http/pprof and expvar by exact path; the kind smoke reads /proc/net from an ephemeral container (one TCP LISTEN, :2382; no bound UDP port), which also catches a listener a dependency opens (the manifest also declares one containerPort).
 - Rejected: an import check in the parser test (direct imports only; forbiddenDep is transitive).
 - Reason: every root process on the node reaches any loadgen port (kindnet's root-socket bypass), so the listener set, not the policy, is the boundary.
 - Reverse: delete the three checks and the two forbiddenDep paths.
@@ -402,6 +402,7 @@ max. Earlier entries are not backfilled.
 
 ## 2026-10-21 · PR #45 (inferred) · loadgen's grace period is 15 s (DESIGN.md sec 10)
 - Decision: terminationGracePeriodSeconds: 15, its 10 s shutdown bound plus 5 s; a renderer test requires > 10.
+- Rejected: leaving the 30 s default implicit (a later edit could lower it unnoticed); an explicit 30 s (the same unless loadgen overruns its 10 s bound, and slower deletes).
 - Reason: the shutdown wait lets in-progress control requests and in-flight sends finish; it does not preserve records, which die with the process.
 - Reverse: change the template value and the test bound.
 - Origin: chat
@@ -448,3 +449,10 @@ max. Earlier entries are not backfilled.
 - Reason: same as cmd/service, whose start line variant-smoke.sh already reads.
 - Reverse: add the fields to wireConfig.
 - Origin: Code
+
+## 2026-10-21 · PR #45 (inferred) · the reviewer subagent runs once per task, on the final tree (CLAUDE.md Self-review)
+- Decision: steps and their commit-approval diffs skip the reviewer subagent; it runs once after the last step, before the push relay or any review or approval packet; on a must-fix finding Code stops and reports, and fixes only after approval.
+- Rejected: a review before every Go commit-approval diff (the previous CLAUDE.md rule); fixing must-fix findings without approval (the previous rule's "Fix").
+- Reason: one review of the final tree costs one subagent run per PR instead of one per step, and stop-and-report keeps every fix under the owner's approval.
+- Reverse: restore the previous Self-review bullet in CLAUDE.md.
+- Origin: chat

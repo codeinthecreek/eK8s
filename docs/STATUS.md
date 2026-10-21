@@ -4,7 +4,7 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 *(inferred)* are guesses, not read from the repo; correct them.
 
 ## Now
-- claude/loadgen-deploy (PR #45, inferred): loadgen PR 5, the Deployment: maxRate 19, GOMEMLIMIT, single-listener checks, the deploy/loadgen renderer, loadgen-up.sh and loadgen-smoke.sh in deploy smoke CI; DESIGN.md sec 10, 11, 15; ten decisions.md entries.
+- claude/loadgen-deploy (PR #45, inferred): loadgen PR 5, the Deployment: maxRate 19, GOMEMLIMIT, single-listener checks, the deploy/loadgen renderer, loadgen-up.sh and loadgen-smoke.sh in deploy smoke CI; DESIGN.md sec 10, 11, 15; eleven decisions.md entries.
 
 ## Next
 - Extract docs/workflow/ into its own repo (links inside it are relative and stay within the folder); then decide whether eK8s's own CLAUDE.md, handoff.md and reviewer.md are regenerated from the templates (docs/decisions.md, PR #32 entry).
