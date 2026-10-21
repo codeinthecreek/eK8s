@@ -43,8 +43,8 @@ const (
 // shutdownTimeout bounds shutdown: the control API's requests in flight
 // and then every cancelled run's sends in flight. A send ends within
 // loadgen's client timeout, cmd/service's WriteTimeout + 1 s (7 s), so
-// 10 s lets each be recorded, and stays well under Kubernetes's default
-// 30 s grace period. An upload or records page still in flight when it
+// 10 s lets each be recorded, and stays under the 15 s grace period
+// deploy/loadgen sets. An upload or records page still in flight when it
 // ends is cut off: the process is exiting, and its records die with it.
 const shutdownTimeout = 10 * time.Second
 

@@ -55,10 +55,14 @@ func listenCalls(t *testing.T, fset *token.FileSet, dir string) []string {
 	return sites
 }
 
-// TestSingleListener checks that loadgen's build opens exactly one
-// listener: the control API's on 9090 (cmd/loadgen's listen). A second
-// would be a network service the NetworkPolicy and the kind checks do
-// not cover (DESIGN.md sec 10).
+// TestSingleListener checks that the non-test files of loadgen/ and
+// loadgen/cmd/loadgen have exactly one Listen* call site, the control
+// API's in cmd/loadgen/main.go. It sees call sites only, not a method
+// value (f := net.Listen) and not other directories or dependencies;
+// forbiddenDep refuses net/http/pprof and expvar, and
+// deploy/loadgen-smoke.sh checks the pod's listening sockets. A second
+// listener would be a network service the NetworkPolicy does not cover
+// (DESIGN.md sec 10).
 func TestSingleListener(t *testing.T) {
 	fset := token.NewFileSet()
 	var sites []string

@@ -26,7 +26,7 @@ k get namespace "$sys" >/dev/null 2>&1 || die "namespace $sys missing; run deplo
 # as variant-smoke.sh builds generation 0's (gate/docker.go).
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
-CGO_ENABLED=0 go build -trimpath -o "$work/loadgen" ./loadgen/cmd/loadgen
+GOOS=linux CGO_ENABLED=0 go build -trimpath -o "$work/loadgen" ./loadgen/cmd/loadgen
 cat >"$work/Dockerfile" <<'EOF'
 FROM scratch
 COPY loadgen /loadgen

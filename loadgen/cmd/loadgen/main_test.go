@@ -63,10 +63,12 @@ func (b *lockedBuffer) String() string {
 	return b.b.String()
 }
 
-// startRun runs run in its own goroutine and returns its stderr, a
-// cancel for its ctx, and a channel that gets its error.
-func startRun(t *testing.T, args []string) (*lockedBuffer, context.CancelFunc, <-chan error) {
+// startRun runs run in its own goroutine, with env as its environment
+// (useEnv), and returns its stderr, a cancel for its ctx, and a channel
+// that gets its error.
+func startRun(t *testing.T, env map[string]string, args []string) (*lockedBuffer, context.CancelFunc, <-chan error) {
 	t.Helper()
+	useEnv(t, env)
 	stderr := new(lockedBuffer)
 	ctx, cancel := context.WithCancel(t.Context())
 	t.Cleanup(cancel)
@@ -123,6 +125,7 @@ func TestRunFlagErrors(t *testing.T) {
 		return nil, errors.New("this test must not listen")
 	}
 	t.Cleanup(func() { listen = old })
+	useEnv(t, map[string]string{})
 
 	full := validArgs("http://127.0.0.1:1")
 	type flagCase struct {
@@ -169,7 +172,7 @@ func TestRunFlagErrors(t *testing.T) {
 // ends and Shutdown has closed the listener.
 func TestRunServes(t *testing.T) {
 	url := useListener(t)
-	stderr, cancel, done := startRun(t, validArgs("http://127.0.0.1:1"))
+	stderr, cancel, done := startRun(t, map[string]string{}, validArgs("http://127.0.0.1:1"))
 
 	resp, body := do(t, "GET", url+"/config", "", http.StatusOK)
 	var cfg struct {
@@ -225,7 +228,7 @@ func TestRunCancelsRuns(t *testing.T) {
 	defer variant.Close()
 	defer release() // before Close, which waits for the held handler
 	url := useListener(t)
-	_, cancel, done := startRun(t, validArgs(variant.URL))
+	_, cancel, done := startRun(t, map[string]string{}, validArgs(variant.URL))
 
 	_, body := do(t, "GET", url+"/config", "", http.StatusOK)
 	var cfg struct {
@@ -293,6 +296,7 @@ func TestParseLimit(t *testing.T) {
 		wantErr bool
 	}{
 		{"absent", map[string]string{}, 0, false},
+		{"one", map[string]string{memLimitEnv: "1"}, 1, false},
 		{"valid", map[string]string{memLimitEnv: "268435456"}, 268435456, false},
 		{"max int64", map[string]string{memLimitEnv: strconv.FormatInt(math.MaxInt64, 10)}, math.MaxInt64, false},
 		{"zero", map[string]string{memLimitEnv: "0"}, 0, true},
@@ -342,9 +346,8 @@ func TestRunMemLimit(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			debug.SetMemoryLimit(old)
-			useEnv(t, tc.env)
 			url := useListener(t)
-			stderr, cancel, done := startRun(t, validArgs("http://127.0.0.1:1"))
+			stderr, cancel, done := startRun(t, tc.env, validArgs("http://127.0.0.1:1"))
 			do(t, "GET", url+"/config", "", http.StatusOK)
 			cancel()
 			if err := waitRun(t, done); err != nil {
