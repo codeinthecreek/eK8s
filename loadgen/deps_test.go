@@ -11,8 +11,13 @@ import (
 const modulePath = "github.com/codeinthecreek/eK8s"
 
 // forbiddenDep reports whether loadgen's build must never depend on path
-// (DESIGN.md sec 10).
+// (DESIGN.md sec 10). net/http/pprof and expvar register handlers on
+// http.DefaultServeMux when imported, so they are refused too: by exact
+// path, since the runtime itself imports internal/runtime/pprof/label.
 func forbiddenDep(path string) bool {
+	if path == "net/http/pprof" || path == "expvar" {
+		return true
+	}
 	for _, p := range []string{
 		modulePath + "/internal/hashcore",
 		modulePath + "/internal/classifier/testvectors",
@@ -36,6 +41,11 @@ func TestForbiddenDep(t *testing.T) {
 		modulePath + "/gate/cmd/gate":                     true,
 		"github.com/alexedwards/argon2id":                 true,
 		"golang.org/x/crypto/argon2":                      true,
+		"net/http/pprof":                                  true,
+		"expvar":                                          true,
+		"internal/runtime/pprof/label":                    false,
+		"runtime/pprof":                                   false,
+		"net/http":                                        false,
 		modulePath + "/internal/classifier":               false,
 		modulePath + "/gateway":                           false,
 		modulePath + "/loadgen":                           false,
