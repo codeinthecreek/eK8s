@@ -1,6 +1,8 @@
 // Command loadgen serves loadgen's control API (DESIGN.md sec 10) on
 // :9090. Its flags are its start-up configuration (loadgen.Config); all
-// are required, and none has a production default.
+// are required, and none has a production default. Its one environment
+// variable, EK8S_MEM_LIMIT_BYTES, is the pod's memory limit from the
+// downward API; absent means no limit.
 package main
 
 import (
@@ -14,6 +16,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime/debug"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -47,6 +51,35 @@ const shutdownTimeout = 10 * time.Second
 // listen opens the control API's listener. Tests replace it.
 var listen = func() (net.Listener, error) { return net.Listen("tcp", addr) }
 
+// lookupEnv reads the environment. Tests replace it.
+var lookupEnv = os.LookupEnv
+
+// memLimitEnv is the pod's memory limit in bytes, set from the downward
+// API (limits.memory).
+const memLimitEnv = "EK8S_MEM_LIMIT_BYTES"
+
+// parseLimit reads the positive integer limit name through lookup (e.g.
+// os.LookupEnv). An absent limit is 0 (unconstrained); a present one
+// must be a positive integer. Restated from cmd/service, which loadgen
+// does not import.
+func parseLimit(lookup func(string) (string, bool), name string) (int64, error) {
+	v, ok := lookup(name)
+	if !ok {
+		return 0, nil
+	}
+	n, err := strconv.ParseInt(v, 10, 64)
+	if err != nil || n <= 0 {
+		return 0, fmt.Errorf("%s=%q: must be a positive integer", name, v)
+	}
+	return n, nil
+}
+
+// goMemLimit is 90% of the pod memory limit, written so it cannot
+// overflow for any positive int64. Restated from cmd/service: the GC
+// works harder near it, before the kernel's OOM kill at the pod limit
+// would end every run and lose every record.
+func goMemLimit(limit int64) int64 { return limit - limit/10 }
+
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
 	context.AfterFunc(ctx, stop) // restore default signal handling: a second signal kills at once
@@ -55,14 +88,23 @@ func main() {
 	}
 }
 
-// run parses args, serves the control API until ctx ends, then shuts
-// down: ctx is the Control's, so its end cancels every run. It returns
-// nil after a clean shutdown. A bad flag is printed to stderr and
-// returned before anything listens.
+// run parses args and the environment, sets the Go memory limit, serves
+// the control API until ctx ends, then shuts down: ctx is the Control's,
+// so its end cancels every run. It returns nil after a clean shutdown. A
+// bad flag or environment variable is printed to stderr and returned
+// before anything listens.
 func run(ctx context.Context, args []string, stderr io.Writer) error {
 	cfg, err := parseFlags(args, stderr)
 	if err != nil {
 		return err
+	}
+	memLimit, err := parseLimit(lookupEnv, memLimitEnv)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return err
+	}
+	if memLimit > 0 {
+		debug.SetMemoryLimit(goMemLimit(memLimit))
 	}
 	c, err := loadgen.NewControl(ctx, cfg, loadgen.NewSender())
 	if err != nil {
@@ -79,7 +121,9 @@ func run(ctx context.Context, args []string, stderr io.Writer) error {
 	// password, a record or Evidence.
 	log.Info("loadgen starting", "addr", ln.Addr().String(), "boot_id", c.BootID(),
 		"rate", cfg.Rate, "window", cfg.Window, "burst_rate", cfg.BurstRate,
-		"target_url", cfg.TargetURL, "canary_addr", cfg.CanaryAddr)
+		"target_url", cfg.TargetURL, "canary_addr", cfg.CanaryAddr,
+		"mem_limit_bytes", memLimit,
+		"go_mem_limit", debug.SetMemoryLimit(-1)) // -1 reads without changing
 
 	hs := &http.Server{
 		Handler:           c.Handler(),

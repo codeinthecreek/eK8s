@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"runtime/debug"
 	"slices"
 	"strconv"
 	"strings"
@@ -267,5 +268,116 @@ func TestRunCancelsRuns(t *testing.T) {
 	time.Sleep(1500 * time.Millisecond) // past the next send's time, at 1/s
 	if got := seen.Load(); got != n {
 		t.Errorf("the variant got %d sends after run returned, want none", got-n)
+	}
+}
+
+// useEnv makes run read env as its environment.
+func useEnv(t *testing.T, env map[string]string) {
+	t.Helper()
+	old := lookupEnv
+	lookupEnv = lookupFrom(env)
+	t.Cleanup(func() { lookupEnv = old })
+}
+
+func lookupFrom(m map[string]string) func(string) (string, bool) {
+	return func(k string) (string, bool) { v, ok := m[k]; return v, ok }
+}
+
+// TestParseLimit checks EK8S_MEM_LIMIT_BYTES's parsing, with
+// cmd/service's cases.
+func TestParseLimit(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		env     map[string]string
+		want    int64
+		wantErr bool
+	}{
+		{"absent", map[string]string{}, 0, false},
+		{"valid", map[string]string{memLimitEnv: "268435456"}, 268435456, false},
+		{"max int64", map[string]string{memLimitEnv: strconv.FormatInt(math.MaxInt64, 10)}, math.MaxInt64, false},
+		{"zero", map[string]string{memLimitEnv: "0"}, 0, true},
+		{"negative", map[string]string{memLimitEnv: "-1"}, 0, true},
+		{"non-numeric", map[string]string{memLimitEnv: "abc"}, 0, true},
+		{"unit suffix", map[string]string{memLimitEnv: "256Mi"}, 0, true},
+		{"present but empty", map[string]string{memLimitEnv: ""}, 0, true},
+		{"huge overflows int64", map[string]string{memLimitEnv: "99999999999999999999"}, 0, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseLimit(lookupFrom(tc.env), memLimitEnv)
+			if tc.wantErr {
+				if err == nil || !strings.Contains(err.Error(), memLimitEnv) {
+					t.Fatalf("err = %v, want one naming %s", err, memLimitEnv)
+				}
+				return
+			}
+			if err != nil || got != tc.want {
+				t.Fatalf("parseLimit = (%d, %v), want (%d, nil)", got, err, tc.want)
+			}
+		})
+	}
+}
+
+func TestGoMemLimit(t *testing.T) {
+	if got := goMemLimit(1000); got != 900 {
+		t.Fatalf("goMemLimit(1000) = %d, want 900", got)
+	}
+	if got := goMemLimit(math.MaxInt64); got <= 0 || got >= math.MaxInt64 {
+		t.Fatalf("goMemLimit(MaxInt64) = %d, want 90%% without overflow", got)
+	}
+}
+
+// TestRunMemLimit checks that run sets the Go memory limit to 90% of
+// EK8S_MEM_LIMIT_BYTES, leaves it alone when the variable is absent, and
+// logs both values on its start-up line.
+func TestRunMemLimit(t *testing.T) {
+	old := debug.SetMemoryLimit(-1)
+	t.Cleanup(func() { debug.SetMemoryLimit(old) })
+	for _, tc := range []struct {
+		name string
+		env  map[string]string
+		want string
+	}{
+		{"absent", map[string]string{}, "mem_limit_bytes=0 go_mem_limit=" + strconv.FormatInt(old, 10)},
+		{"256 MiB", map[string]string{memLimitEnv: "268435456"}, "mem_limit_bytes=268435456 go_mem_limit=241591911"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			debug.SetMemoryLimit(old)
+			useEnv(t, tc.env)
+			url := useListener(t)
+			stderr, cancel, done := startRun(t, validArgs("http://127.0.0.1:1"))
+			do(t, "GET", url+"/config", "", http.StatusOK)
+			cancel()
+			if err := waitRun(t, done); err != nil {
+				t.Fatalf("run = %v, want nil", err)
+			}
+			first, _, _ := strings.Cut(stderr.String(), "\n")
+			if !strings.Contains(first, `msg="loadgen starting"`) || !strings.Contains(first, tc.want) {
+				t.Errorf("start-up line %q, want %q in it", first, tc.want)
+			}
+		})
+	}
+}
+
+// TestRunEnvError checks that a bad EK8S_MEM_LIMIT_BYTES makes run print
+// the error and return it before it listens or changes the limit.
+func TestRunEnvError(t *testing.T) {
+	old := listen
+	listen = func() (net.Listener, error) {
+		t.Error("run listened")
+		return nil, errors.New("this test must not listen")
+	}
+	t.Cleanup(func() { listen = old })
+	useEnv(t, map[string]string{memLimitEnv: "256Mi"})
+	limit := debug.SetMemoryLimit(-1)
+
+	var stderr bytes.Buffer
+	if err := run(t.Context(), validArgs("http://127.0.0.1:1"), &stderr); err == nil {
+		t.Fatal("run = nil, want an error")
+	}
+	if out := stderr.String(); !strings.Contains(out, memLimitEnv+`="256Mi": must be a positive integer`) {
+		t.Errorf("stderr %q, want the %s error in it", out, memLimitEnv)
+	}
+	if got := debug.SetMemoryLimit(-1); got != limit {
+		t.Errorf("Go memory limit %d after run, want %d unchanged", got, limit)
 	}
 }
