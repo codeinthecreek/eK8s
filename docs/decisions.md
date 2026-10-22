@@ -456,3 +456,10 @@ max. Earlier entries are not backfilled.
 - Reason: one review of the final tree costs one subagent run per PR instead of one per step, and stop-and-report keeps every fix under the owner's approval.
 - Reverse: restore the previous Self-review bullet in CLAUDE.md.
 - Origin: chat
+
+## 2026-10-22 · PR #45 (inferred) · the smoke's canary check waits up to 60 s for policy enforcement (DESIGN.md sec 11)
+- Decision: deploy/loadgen-smoke.sh polls POST /canary every 2 s for up to 60 s after Ready and needs refused twice in a row; connected and error mean poll again; check (1)'s later canary stays strict.
+- Rejected: asserting refused at Ready (CI read connected at a pod age of about 0.7 s).
+- Reason: kindnet enforces a new pod's policy only after a short lag, the gap the canary exists to detect; variant-smoke (f) shows the policy covers the API server path, ClusterIP and endpoint, once enforced.
+- Reverse: replace the poll in check (3) with a single assertion.
+- Origin: Code

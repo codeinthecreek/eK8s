@@ -1108,7 +1108,11 @@ on, and the half is excluded. The dial is detached from the request's
 context, so a caller's deadline cannot read as refused. The canary is
 allowed during a run. The orchestrator also checks the kindnet DaemonSet
 is Ready, as a cheap first look; Ready alone does not show the queue is
-being read.
+being read. kindnet enforces a new pod's policy only after a short lag
+(CI read connected at a pod age of about 0.7 s), so a canary soon after
+loadgen starts can read connected. After a new boot_id the orchestrator
+polls the canary until it reads refused, bounded, before starting a
+half; the deploy smoke waits the same way.
 
 **Observation windows and gaps.** Traffic flows only during observation
 windows; the gaps between windows carry no load. Builds, gate runs and
