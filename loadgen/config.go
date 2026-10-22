@@ -20,6 +20,11 @@ const burstDuration = 30 * time.Second
 // most 3,000 records; a larger n needs that sum redone first.
 const maxBurstSends = 3000
 
+// maxRate is the largest r loadgen accepts. The PR #45 W entry's memory
+// sum (docs/decisions.md) holds, with 4 targets at W = 5 min, for r of
+// at most 19; a larger r needs loadgen's heap measured first.
+const maxRate = 19
+
 // pairTailEpsilon bounds the chance that one stream runs out of /verify
 // pairs in one window (see WindowPairs). A starting guess (DESIGN.md
 // sec 15).
@@ -59,13 +64,21 @@ type Config struct {
 	// burstDuration is D for tests, so that a burst ends quickly; zero
 	// means the const burstDuration. No flag sets it.
 	burstDuration time.Duration
+	// maxRate is the largest r for tests, so that a window is short;
+	// zero means the const maxRate. No flag sets it.
+	maxRate float64
 }
 
-// Validate reports the first rule c breaks: the window must hold 1 to
-// maxRecords sends (WindowSends); the burst must be valid (BurstSends),
-// burstDuration included; the ring must fit (RingCapacity); TargetURL and
-// CanaryAddr must be as their fields describe.
+// Validate reports the first rule c breaks: Rate must be at most
+// maxRate (the const, unless a test set the maxRate field); the window
+// must hold 1 to maxRecords sends (WindowSends); the burst must be valid
+// (BurstSends), burstDuration included; the ring must fit
+// (RingCapacity); TargetURL and CanaryAddr must be as their fields
+// describe.
 func (c Config) Validate() error {
+	if limit := cmp.Or(c.maxRate, maxRate); c.Rate > limit {
+		return fmt.Errorf("loadgen: rate %v over the %v the memory sum covers", c.Rate, limit)
+	}
 	if _, err := c.WindowSends(); err != nil {
 		return err
 	}

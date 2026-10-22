@@ -1,0 +1,86 @@
+# loadgen's pod (DESIGN.md sec 10): one replica, in ek8s-system, where the
+# NetworkPolicy and the control Service select app=loadgen. Recreate, not
+# a rolling update: a surge pod would put two loadgens, with two boot_ids,
+# behind the control Service, and a second Guaranteed 750m pod may not fit.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: loadgen
+  namespace: ek8s-system
+  labels:
+    app: loadgen
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: loadgen
+  template:
+    metadata:
+      labels:
+        app: loadgen
+    spec:
+      automountServiceAccountToken: false
+      # The API server's address comes from KUBERNETES_SERVICE_HOST and
+      # _PORT, which the kubelet sets whatever this says; the links are
+      # the other services' variables.
+      enableServiceLinks: false
+      # cmd/loadgen shuts down within 10s (shutdownTimeout), under this.
+      terminationGracePeriodSeconds: 15
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: loadgen
+        # Built and kind-loaded by the deploy script; the node never pulls.
+        image: ek8s-loadgen:0123456789ab
+        imagePullPolicy: Never
+        # The start-up configuration (loadgen.Config); the renderer
+        # validated it. The canary address is the API server's ClusterIP,
+        # which the kubelet puts in the environment and the kubelet
+        # expands here, so it is not in the manifest.
+        args:
+        - -rate=2
+        - -window=5m0s
+        - -burst-rate=8
+        - -target-url=http://hasher.ek8s-v{id}.svc.cluster.local:8080
+        - -canary-addr=$(KUBERNETES_SERVICE_HOST):$(KUBERNETES_SERVICE_PORT)
+        # The control API, the only port loadgen listens on.
+        ports:
+        - name: control
+          containerPort: 9090
+          protocol: TCP
+        # Downward API only: the limit below, for cmd/loadgen's GOMEMLIMIT.
+        env:
+        - name: EK8S_MEM_LIMIT_BYTES
+          valueFrom:
+            resourceFieldRef:
+              containerName: loadgen
+              resource: limits.memory
+              divisor: "1"
+        # Requests equal limits (Guaranteed QoS): under node memory pressure
+        # loadgen is among the last pods evicted or OOM-killed. CPU is shared
+        # by request, not by QoS class. The memory limit is the one the
+        # PR #45 memory sum assumes (docs/decisions.md).
+        resources:
+          requests:
+            cpu: 750m
+            memory: 256Mi
+          limits:
+            cpu: 750m
+            memory: 256Mi
+        # Ready once the control API accepts connections. There is no
+        # liveness probe: a restart empties loadgen (targets, records, salt
+        # sets); the orchestrator's control-call timeouts see a hung one.
+        readinessProbe:
+          tcpSocket:
+            port: control
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: [ALL]

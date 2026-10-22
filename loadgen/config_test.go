@@ -38,6 +38,8 @@ func TestConfigValidateAccepts(t *testing.T) {
 		"one-send window":       func(c *Config) { c.Rate, c.Window = 1, time.Second },
 		"fractional burst rate": func(c *Config) { c.BurstRate = 0.5 }, // n = 15
 		"test burst duration":   func(c *Config) { c.BurstRate, c.burstDuration = 200, 100*time.Millisecond },
+		"rate at maxRate":       func(c *Config) { c.Rate = maxRate },
+		"test max rate":         func(c *Config) { c.Rate, c.Window, c.maxRate = 200, 250*time.Millisecond, 200 },
 	} {
 		c := validConfig()
 		mod(&c)
@@ -53,6 +55,8 @@ func TestConfigValidateRefuses(t *testing.T) {
 		"rate negative":      func(c *Config) { c.Rate = -1 },
 		"rate NaN":           func(c *Config) { c.Rate = math.NaN() },
 		"rate Inf":           func(c *Config) { c.Rate = math.Inf(1) },
+		"rate over maxRate":  func(c *Config) { c.Rate = math.Nextafter(maxRate, math.Inf(1)) },
+		"rate over test max": func(c *Config) { c.Rate, c.maxRate = math.Nextafter(200, math.Inf(1)), 200 },
 		"window 0":           func(c *Config) { c.Window = 0 },
 		"window negative":    func(c *Config) { c.Window = -time.Second },
 		"zero sends":         func(c *Config) { c.Rate, c.Window = 0.4, time.Second },
@@ -65,7 +69,7 @@ func TestConfigValidateRefuses(t *testing.T) {
 		"burst n = 3,001":    func(c *Config) { c.BurstRate = 100.02 }, // round(3000.6)
 		"burst rate huge":    func(c *Config) { c.BurstRate = 1e300 },
 		"burst duration neg": func(c *Config) { c.burstDuration = -time.Second },
-		"ring over max":      func(c *Config) { c.Rate, c.Window = maxRecords, time.Second },
+		"ring over max":      func(c *Config) { c.Rate, c.Window, c.maxRate = maxRecords, time.Second, maxRecords },
 		"canary empty":       func(c *Config) { c.CanaryAddr = "" },
 		"canary name":        func(c *Config) { c.CanaryAddr = "kubernetes.default:443" },
 		"canary localhost":   func(c *Config) { c.CanaryAddr = "localhost:443" },

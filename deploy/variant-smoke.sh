@@ -58,6 +58,10 @@ for tool in go docker kind kubectl; do
 done
 k get nodes >/dev/null || die "cluster unreachable (context $ctx); run deploy/up.sh"
 k get namespace "$sys" >/dev/null 2>&1 || die "namespace $sys missing; run deploy/up.sh"
+# The stand-in carries app=loadgen: beside a real loadgen, the Service
+# would select both.
+[ -z "$(k -n "$sys" get pods -l app=loadgen -o name)" ] ||
+	die "pods labelled app=loadgen exist in $sys (a loadgen, or a failed earlier run?); delete them first"
 [ -z "$(k -n "$sys" get pods smoke-loadgen smoke-other --ignore-not-found -o name)" ] ||
 	die "smoke pods exist in $sys (a failed earlier run?); delete them first"
 ! k get namespace "$ns" >/dev/null 2>&1 ||

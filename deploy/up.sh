@@ -2,8 +2,9 @@
 # Creates the ek8s kind cluster if it does not exist, loads the stress-ng
 # image into it and applies the cluster-wide infrastructure: metrics-server,
 # the stress-ng Deployment (left at 0 replicas, stress off) and namespace
-# ek8s-system (loadgen's Service and NetworkPolicy, no loadgen yet). Safe to
-# re-run; a re-run resets stress-ng to off. See deploy/README.md.
+# ek8s-system (loadgen's Service and NetworkPolicy; its Deployment comes from
+# loadgen-up.sh). Safe to re-run; a re-run resets stress-ng to off. See
+# deploy/README.md.
 #
 # Parameters (environment; the defaults are the full-size workstation setup,
 # CI sets the smaller ones, see .github/workflows/deploy.yml):

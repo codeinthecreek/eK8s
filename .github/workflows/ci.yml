@@ -42,11 +42,12 @@ jobs:
         with:
           # Latest patch of the go directive's minor, not go-version-file:
           # go.mod pins exactly 1.26.0, whose fixed stdlib vulns would make
-          # govulncheck noisy. Pinned exactly while actions/go-versions
-          # lags go.dev: '1.26.x' resolves to the runner's cached 1.26.8,
-          # and a version missing from that manifest is fetched from go.dev.
-          # Return to '1.26.x' once the manifest lists >= 1.26.9.
-          go-version: '1.26.9'
+          # govulncheck noisy. Pinned exactly, with go.mod's toolchain line
+          # and deploy.yml, for each Go security patch: setup-go checks the
+          # runner's tool cache first, so '1.26.x' can match an older cached
+          # patch. Unpin only with check-latest: true (re-check setup-go's
+          # resolution first).
+          go-version: '1.26.10'
       # Gate Stage 1 boots the candidate under bubblewrap.
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends bubblewrap
       # Ubuntu >= 23.10 restricts unprivileged user namespaces through

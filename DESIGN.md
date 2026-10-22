@@ -879,7 +879,9 @@ workstation Argon2 benchmark; the CI smoke run uses `r` = 2.
 start-up flag `-burst-rate` (b = 2 x C0 = 4r, section 15), its duration D
 is the fixed 30 s, and its size is n = round(b x D). The ring's largest
 burst is n (below). Start-up refuses n > 3,000, because the memory sum
-(docs/decisions.md, PR #43 no-cap entry) covers no more.
+(docs/decisions.md, PR #43 no-cap entry) covers no more. Start-up also
+refuses r > 19 (maxRate), from the memory sum (docs/decisions.md, PR #45
+W entry).
 
 **Schedule.** One scheduler goroutine per target. Send i is intended at
 start + i/`r`, computed from the index and never from a running sleep, so
@@ -957,6 +959,17 @@ failure (section 8, "Integrity reasons apply at any latency"). No host
 ports are published; the gate and orchestrator stay on the host and
 drive the cluster through the API server on loopback.
 
+**Deployment shape.** One replica, strategy `Recreate`: a rolling update
+would surge a second loadgen, with its own `boot_id`, behind the control
+Service. A `tcpSocket` readiness probe on `control` and no liveness probe
+(a restart empties loadgen's targets, records and salt sets). A 15 s
+grace period. `GOMEMLIMIT` at 90% of the memory limit, from the downward
+API as cmd/service does. No service-account token. Its only listener is
+control 9090, enforced by a `go/parser` test, a `go list -deps` test and
+a kind check of the pod's sockets, since every root process on the node
+reaches any loadgen port. The deploy step renders `-rate`, `-window` and
+`-burst-rate` from `r` alone (b = 4r, W fixed at 5 min).
+
 **Control API.** A listener on a separate port, the fixed `:9090`, behind
 a ClusterIP Service, reached from the host through the API server's
 service proxy. Loadgen holds no Kubernetes API credentials. Through it
@@ -997,7 +1010,8 @@ UTC and bytes in base64. An absent reason means none, and a skipped or
 fault record carries no bucket or reason.
 
 On SIGTERM loadgen cancels every run, then waits up to 10 s for its
-requests and for the sends in flight to be recorded.
+requests and for the sends in flight to be recorded, inside a 15 s grace
+period.
 
 **Restart.** A variant's salt set lives only in loadgen's memory: no
 journal, no restore. A restart empties it, which only loses detection
@@ -1084,14 +1098,21 @@ orchestrator calls loadgen's control API for the policy canary: loadgen
 makes one connection attempt its own policy must refuse and returns
 connected, refused or error. It dials the `-canary-addr` flag, the API
 server's ClusterIP, which must be an IP literal (a failed lookup would
-read as refused), with a 1s timeout. The result is refused only for a
-timeout, ECONNREFUSED, EHOSTUNREACH or ENETUNREACH. EAGAIN, which on
-connect is local, and any other error give error, which the orchestrator
-treats like connected: enforcement is not shown to be on, and the half is
-excluded. The dial is detached from the request's context, so a caller's
-deadline cannot read as refused. The canary is allowed during a run.
-The orchestrator also checks the kindnet DaemonSet is Ready, as a cheap
-first look; Ready alone does not show the queue is being read.
+read as refused), with a 1s timeout. The deploy sets the flag to
+`$(KUBERNETES_SERVICE_HOST):$(KUBERNETES_SERVICE_PORT)`, which kubelet
+injects and expands even with `enableServiceLinks: false`. The result is
+refused only for a timeout, ECONNREFUSED, EHOSTUNREACH or ENETUNREACH.
+EAGAIN, which on connect is local, and any other error give error, which
+the orchestrator treats like connected: enforcement is not shown to be
+on, and the half is excluded. The dial is detached from the request's
+context, so a caller's deadline cannot read as refused. The canary is
+allowed during a run. The orchestrator also checks the kindnet DaemonSet
+is Ready, as a cheap first look; Ready alone does not show the queue is
+being read. kindnet enforces a new pod's policy only after a short lag
+(CI read connected at a pod age of about 0.7 s), so a canary soon after
+loadgen starts can read connected. After a new boot_id the orchestrator
+polls the canary until it reads refused, bounded, before starting a
+half; the deploy smoke waits the same way.
 
 **Observation windows and gaps.** Traffic flows only during observation
 windows; the gaps between windows carry no load. Builds, gate runs and
@@ -1421,7 +1442,9 @@ independent of whether the stagnation logic is itself working correctly.
   1024), the sampled verification share after K (10% of a variant's
   hashes per window), the Stage 5 burst factor (2 x C0) and duration (D =
   30 s), the 200 ms run start lead, the 1e-9 bound on a stream running out
-  of `/verify` pairs, the 10 s shutdown bound, and the control API
+  of `/verify` pairs, the 10 s shutdown bound, loadgen's 15 s grace
+  period, the window length W (5 min), maxRate (19, from the memory sum,
+  pending a workstation heap measurement), and the control API
   server's 2-minute read and write timeouts) are all explicitly
   starting guesses pending real telemetry, not derived values -- expect to
   tune all of them once the loop is running.
