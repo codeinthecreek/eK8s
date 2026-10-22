@@ -46,7 +46,7 @@ jobs:
           # lags go.dev: '1.26.x' resolves to the runner's cached 1.26.8,
           # and a version missing from that manifest is fetched from go.dev.
           # Return to '1.26.x' once the manifest lists >= 1.26.9.
-          go-version: '1.26.9'
+          go-version: '1.26.10'
       # Gate Stage 1 boots the candidate under bubblewrap.
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends bubblewrap
       # Ubuntu >= 23.10 restricts unprivileged user namespaces through

@@ -58,7 +58,7 @@ jobs:
       # Same pin as ci.yml (see the comment there).
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.26.9'
+          go-version: '1.26.10'
       - name: Install kind and kubectl (checksum-verified)
         run: |
           curl -fsSLo kind "https://github.com/kubernetes-sigs/kind/releases/download/${KIND_VERSION}/kind-linux-amd64"
