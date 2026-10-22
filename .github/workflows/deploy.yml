@@ -99,6 +99,8 @@ jobs:
           k get networkpolicies,limitranges,hpa -A || true
           k -n ek8s-v999999 get endpointslices -o yaml || true
           k -n ek8s-system get services,endpointslices -o wide || true
+          # kindnet enforces the NetworkPolicies: its log around a failure.
+          k -n kube-system logs ds/kindnet --since=10m || true
           k get events -A --sort-by=.lastTimestamp | tail -n 50 || true
       - name: Delete cluster
         if: always()

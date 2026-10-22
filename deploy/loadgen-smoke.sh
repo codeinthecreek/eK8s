@@ -4,7 +4,8 @@
 #   (5) the pod becomes Ready;
 #   (6) its start line carries the memory limit and GOMEMLIMIT, 90% of it;
 #   (3) its canary address is the API server's ClusterIP and port, and the
-#       policy canary reads refused (DESIGN.md sec 11);
+#       policy canary reads refused within 60s, then once more
+#       (DESIGN.md sec 11);
 #   (4) its network namespace has one listening socket, TCP 9090, and no
 #       bound UDP socket, checked before any run (a run's DNS lookups
 #       open UDP sockets);
@@ -164,13 +165,40 @@ ok "(6) start line: mem_limit_bytes=268435456 go_mem_limit=241591911"
 
 # --- (3) the canary address is the API server's ClusterIP and port, as
 # the kubelet expanded them into the args; the canary reads refused.
+# kindnet enforces a new pod's policy only after a short lag (seen in CI:
+# connected at about 0.7s), so the smoke waits for enforcement rather than
+# asserting it at Ready: the canary is exactly what detects that gap.
+# connected and error both mean poll again, every 2s for up to 60s; the
+# first refused must be followed by another, so a flapping policy fails.
 api=$(k -n default get service kubernetes -o jsonpath='{.spec.clusterIP}:{.spec.ports[0].port}')
 [[ " $start " == *" canary_addr=$api "* ]] || die "(3) start line's canary_addr is not $api: $start"
 cfg=$(config)
-canary=$(api_post /canary) || die "(3) POST /canary failed"
 boot=$(boot_of "$cfg")
-want "(3) POST /canary" "$canary" "{\"boot_id\":\"$boot\",\"result\":\"refused\"}"
-ok "(3) canary_addr=$api; POST /canary: refused"
+created=$(k -n "$sys" get pod "$pod" -o jsonpath='{.metadata.creationTimestamp}') || die "(3) cannot read $pod's creationTimestamp"
+[ -n "$created" ] && created=$(date -d "$created" +%s) || die "(3) $pod's creationTimestamp is not a time: '$created'"
+# canary: POST /canary, its boot_id /config's; prints its result.
+canary() {
+	local body
+	body=$(api_post /canary) || die "(3) POST /canary failed"
+	same_boot "(3) POST /canary" "$body"
+	[[ $body =~ ^\{\"boot_id\":\"[0-9a-f]{32}\",\"result\":\"(connected|refused|error)\"\}$ ]] ||
+		die "(3) POST /canary: $(short "$body")"
+	echo "${BASH_REMATCH[1]}"
+}
+deadline=$((SECONDS + 60)) misses=0
+while :; do
+	result=$(canary)
+	age=$(($(date +%s) - created))
+	echo "loadgen-smoke.sh: (3) POST /canary at pod age ${age}s: $result"
+	[ "$result" = refused ] && break
+	misses=$((misses + 1))
+	[ "$SECONDS" -lt "$deadline" ] || die "(3) POST /canary not refused in 60s: $misses results, each above"
+	sleep 2
+done
+result=$(canary)
+[ "$result" = refused ] ||
+	die "(3) POST /canary at pod age $(($(date +%s) - created))s: $result, after refused at ${age}s"
+ok "(3) canary_addr=$api; POST /canary refused at pod age ${age}s after $misses not refused, and again"
 
 # --- (4) loadgen's network namespace, which an ephemeral container
 # shares: one listening TCP socket, on 9090 (2382 hex), and no UDP socket
