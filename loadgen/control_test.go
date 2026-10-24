@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/codeinthecreek/eK8s/internal/classifier"
+	"github.com/codeinthecreek/eK8s/loadgen/wire"
 )
 
 func newTestControl(t *testing.T, cfg Config) *Control {
@@ -58,7 +59,7 @@ func errorBody(t *testing.T, rec *httptest.ResponseRecorder, want int) string {
 	if rec.Code != want {
 		t.Fatalf("status %d %s, want %d", rec.Code, rec.Body, want)
 	}
-	e := decode[wireError](t, rec)
+	e := decode[wire.Error](t, rec)
 	if e.Error == "" {
 		t.Errorf("error body %s has no error", rec.Body)
 	}
@@ -88,8 +89,8 @@ func TestNewControlRefusesConfig(t *testing.T) {
 
 func TestConfigEndpoint(t *testing.T) {
 	c := newTestControl(t, validConfig())
-	got := decode[wireConfig](t, mustCall(t, c.Handler(), "GET", "/config", http.StatusOK))
-	want := wireConfig{
+	got := decode[wire.Config](t, mustCall(t, c.Handler(), "GET", "/config", http.StatusOK))
+	want := wire.Config{
 		BootID: c.bootID, Rate: 2, WindowS: 300, BurstRate: 8, BurstSends: 240,
 		WindowSends: 600, WindowPairs: windowPairs(600), BurstPairs: 112, RingCapacity: 840,
 	}
@@ -101,8 +102,8 @@ func TestConfigEndpoint(t *testing.T) {
 func TestPutTarget(t *testing.T) {
 	c := newTestControl(t, validConfig())
 	h := c.Handler()
-	got := decode[wirePutTarget](t, mustCall(t, h, "PUT", "/targets/7", http.StatusCreated))
-	if want := (wirePutTarget{c.bootID, "7", 0}); got != want {
+	got := decode[wire.PutTarget](t, mustCall(t, h, "PUT", "/targets/7", http.StatusCreated))
+	if want := (wire.PutTarget{BootID: c.bootID, ID: "7", Next: 0}); got != want {
 		t.Errorf("first PUT = %+v, want %+v", got, want)
 	}
 	tg := c.target("7")
@@ -112,8 +113,8 @@ func TestPutTarget(t *testing.T) {
 	ring, checker := tg.Ring, tg.Checker
 	ring.Add(Record{})
 	ring.Add(Record{})
-	got = decode[wirePutTarget](t, mustCall(t, h, "PUT", "/targets/7", http.StatusOK))
-	if want := (wirePutTarget{c.bootID, "7", 2}); got != want {
+	got = decode[wire.PutTarget](t, mustCall(t, h, "PUT", "/targets/7", http.StatusOK))
+	if want := (wire.PutTarget{BootID: c.bootID, ID: "7", Next: 2}); got != want {
 		t.Errorf("second PUT = %+v, want %+v", got, want)
 	}
 	if tg := c.target("7"); tg.Ring != ring || tg.Checker != checker {
@@ -151,7 +152,7 @@ func TestDeleteTarget(t *testing.T) {
 	}
 	c.setBusy("3", false)
 
-	got := decode[wireBootID](t, mustCall(t, h, "DELETE", "/targets/3?through=1", http.StatusOK))
+	got := decode[wire.BootID](t, mustCall(t, h, "DELETE", "/targets/3?through=1", http.StatusOK))
 	if got.BootID != c.bootID {
 		t.Errorf("DELETE body boot_id %q, want %q", got.BootID, c.bootID)
 	}
@@ -160,7 +161,7 @@ func TestDeleteTarget(t *testing.T) {
 	if n := len(c.targetList()); n != 0 {
 		t.Errorf("%d targets after DELETE, want 0", n)
 	}
-	got2 := decode[wirePutTarget](t, mustCall(t, h, "PUT", "/targets/3", http.StatusCreated))
+	got2 := decode[wire.PutTarget](t, mustCall(t, h, "PUT", "/targets/3", http.StatusCreated))
 	if got2.Next != 0 || c.target("3").Ring == ring {
 		t.Errorf("PUT after DELETE: next %d, same Ring %v; want a new, empty Ring", got2.Next, c.target("3").Ring == ring)
 	}
@@ -175,7 +176,7 @@ func TestDeleteTarget(t *testing.T) {
 // Seqs (from first, consecutive, n of them).
 func readPage(t *testing.T, c *Control, query string, first uint64, n int, gap bool, next uint64) {
 	t.Helper()
-	page := decode[wireRecords](t, mustCall(t, c.Handler(), "GET", "/targets/1/records?"+query, http.StatusOK))
+	page := decode[wire.Records](t, mustCall(t, c.Handler(), "GET", "/targets/1/records?"+query, http.StatusOK))
 	if page.BootID != c.bootID || page.Gap != gap || page.Next != next || len(page.Records) != n {
 		t.Fatalf("%s: boot_id %q, gap %v, next %d, %d records; want %q, %v, %d, %d",
 			query, page.BootID, page.Gap, page.Next, len(page.Records), c.bootID, gap, next, n)
@@ -232,15 +233,15 @@ func TestRecordsGap(t *testing.T) {
 func TestTargetsOrder(t *testing.T) {
 	c := newTestControl(t, validConfig())
 	h := c.Handler()
-	if got := decode[wireTargets](t, mustCall(t, h, "GET", "/targets", http.StatusOK)); got.Targets == nil || len(got.Targets) != 0 {
+	if got := decode[wire.Targets](t, mustCall(t, h, "GET", "/targets", http.StatusOK)); got.Targets == nil || len(got.Targets) != 0 {
 		t.Errorf("GET /targets with none = %+v, want an empty list", got)
 	}
 	for _, id := range []string{"10", "9", "100", "0", "2", "19", "1"} {
 		mustCall(t, h, "PUT", "/targets/"+id, http.StatusCreated)
 	}
 	c.target("9").Ring.Add(Record{})
-	got := decode[wireTargets](t, mustCall(t, h, "GET", "/targets", http.StatusOK))
-	want := []wireTarget{{"0", 0}, {"1", 0}, {"2", 0}, {"9", 1}, {"10", 0}, {"19", 0}, {"100", 0}}
+	got := decode[wire.Targets](t, mustCall(t, h, "GET", "/targets", http.StatusOK))
+	want := []wire.Target{{ID: "0", Next: 0}, {ID: "1", Next: 0}, {ID: "2", Next: 0}, {ID: "9", Next: 1}, {ID: "10", Next: 0}, {ID: "19", Next: 0}, {ID: "100", Next: 0}}
 	if got.BootID != c.bootID || fmt.Sprint(got.Targets) != fmt.Sprint(want) {
 		t.Errorf("GET /targets = %+v, want boot_id %q and %v", got, c.bootID, want)
 	}
@@ -344,7 +345,7 @@ func TestBootID(t *testing.T) {
 			t.Errorf("%s: %s header %q, want %q", name, bootIDHeader, got, c.bootID)
 		}
 		if tc.json {
-			if got := decode[wireBootID](t, rec).BootID; got != c.bootID {
+			if got := decode[wire.BootID](t, rec).BootID; got != c.bootID {
 				t.Errorf("%s: body boot_id %q, want %q", name, got, c.bootID)
 			}
 		}

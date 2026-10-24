@@ -9,6 +9,8 @@ import (
 	"net/url"
 	"strconv"
 	"time"
+
+	"github.com/codeinthecreek/eK8s/loadgen/wire"
 )
 
 // bootIDHeader is the header that carries boot_id on every control API
@@ -44,74 +46,8 @@ func (c *Control) Handler() http.Handler {
 	})
 }
 
-// The wire format: snake_case names; buckets, reasons, kinds and
-// negative classes as strings; durations as integer nanoseconds (_ns);
-// times as RFC 3339 with nanoseconds, UTC; byte fields base64.
-
-type wireError struct {
-	BootID string `json:"boot_id"`
-	Error  string `json:"error"`
-}
-
-type wireBootID struct {
-	BootID string `json:"boot_id"`
-}
-
-type wireConfig struct {
-	BootID       string  `json:"boot_id"`
-	Rate         float64 `json:"r"`
-	WindowS      float64 `json:"window_s"`
-	BurstRate    float64 `json:"burst_rate"`
-	BurstSends   int     `json:"burst_sends"`
-	WindowSends  int     `json:"window_sends"`
-	WindowPairs  int     `json:"window_pairs"`
-	BurstPairs   int     `json:"burst_pairs"`
-	RingCapacity int     `json:"ring_capacity"`
-}
-
-type wireTarget struct {
-	ID   string `json:"id"`
-	Next uint64 `json:"next"`
-}
-
-type wireTargets struct {
-	BootID  string       `json:"boot_id"`
-	Targets []wireTarget `json:"targets"`
-}
-
-type wirePutTarget struct {
-	BootID string `json:"boot_id"`
-	ID     string `json:"id"`
-	Next   uint64 `json:"next"`
-}
-
-type wireRecords struct {
-	BootID  string       `json:"boot_id"`
-	Records []wireRecord `json:"records"`
-	Gap     bool         `json:"gap"`
-	Next    uint64       `json:"next"`
-}
-
-type wireCanary struct {
-	BootID string `json:"boot_id"`
-	Result string `json:"result"`
-}
-
-type wireUpload struct {
-	Pairs []wireUploadPair `json:"pairs"`
-}
-
-// wireUploadPair's fields are pointers so that an absent or null field
-// is refused, not read as "" or false: a missing match would turn a
-// mismatch pair into a match.
-type wireUploadPair struct {
-	Password *string `json:"password"`
-	Hash     *string `json:"hash"`
-	Match    *bool   `json:"match"`
-}
-
 // missing returns the name of the first field p lacks, "" for none.
-func (p wireUploadPair) missing() string {
+func missing(p wire.UploadPair) string {
 	switch {
 	case p.Password == nil:
 		return "password"
@@ -123,82 +59,20 @@ func (p wireUploadPair) missing() string {
 	return ""
 }
 
-type wireUploaded struct {
-	BootID string `json:"boot_id"`
-	Count  int    `json:"count"`
-}
-
-type wireStart struct {
-	Kind    string   `json:"kind"`
-	Targets []string `json:"targets"`
-}
-
-type wireStarted struct {
-	BootID    string    `json:"boot_id"`
-	RunID     string    `json:"run_id"`
-	StartWall time.Time `json:"start_wall"`
-}
-
-type wireRun struct {
-	BootID    string                   `json:"boot_id"`
-	RunID     string                   `json:"run_id"`
-	Kind      string                   `json:"kind"`
-	StartWall time.Time                `json:"start_wall"`
-	Targets   map[string]wireRunTarget `json:"targets"`
-}
-
-type wireRunTarget struct {
-	State string `json:"state"`
-	Error string `json:"error,omitempty"`
-}
-
 // startWall is a run's start as the wire carries it: UTC, without the
 // monotonic reading, so it equals its records' first IntendedWall.
 func startWall(start time.Time) time.Time { return start.Round(0).UTC() }
 
-func (c *Control) toWireRun(v runView) wireRun {
-	ts := make(map[string]wireRunTarget, len(v.targets))
+func (c *Control) toWireRun(v runView) wire.Run {
+	ts := make(map[string]wire.RunTarget, len(v.targets))
 	for id, s := range v.targets {
-		ts[id] = wireRunTarget{s.state, s.err}
+		ts[id] = wire.RunTarget{State: s.state, Error: s.err}
 	}
-	return wireRun{c.bootID, v.id, string(v.kind), startWall(v.start), ts}
+	return wire.Run{BootID: c.bootID, RunID: v.id, Kind: string(v.kind), StartWall: startWall(v.start), Targets: ts}
 }
 
-// wireRecord is a Record on the wire; its fields mean what Record's do.
-// A Skipped or Fault record has no Bucket or Reason, so that a loadgen
-// problem cannot be counted as a variant failure.
-type wireRecord struct {
-	Seq            uint64        `json:"seq"`
-	Target         string        `json:"target"`
-	RunID          string        `json:"run_id"`
-	Index          int           `json:"index"`
-	Kind           string        `json:"kind"`
-	Class          string        `json:"class,omitempty"` // negatives only
-	IntendedWall   time.Time     `json:"intended_wall"`
-	IntendedMonoNS int64         `json:"intended_mono_ns"`
-	ActualMonoNS   int64         `json:"actual_mono_ns"`
-	LatencyNS      int64         `json:"latency_ns"`
-	Bucket         string        `json:"bucket,omitempty"`
-	Reason         string        `json:"reason,omitempty"`
-	Skipped        bool          `json:"skipped"`
-	Fault          string        `json:"fault"`
-	Pair           *wirePair     `json:"pair,omitempty"`
-	Evidence       *wireEvidence `json:"evidence,omitempty"`
-}
-
-type wirePair struct {
-	Password string `json:"password"`
-	Hash     string `json:"hash"`
-}
-
-type wireEvidence struct {
-	RequestBody []byte `json:"request_body"`
-	Status      int    `json:"status"`
-	Body        []byte `json:"body"`
-}
-
-func toWireRecord(r Record) wireRecord {
-	w := wireRecord{
+func toWireRecord(r Record) wire.Record {
+	w := wire.Record{
 		Seq:            r.Seq,
 		Target:         r.Target,
 		RunID:          r.RunID,
@@ -218,17 +92,17 @@ func toWireRecord(r Record) wireRecord {
 		w.Class = r.Class.String()
 	}
 	if r.Pair != nil {
-		w.Pair = &wirePair{r.Pair.Password, r.Pair.Hash}
+		w.Pair = &wire.Pair{Password: r.Pair.Password, Hash: r.Pair.Hash}
 	}
 	if r.Evidence != nil {
-		w.Evidence = &wireEvidence{r.Evidence.RequestBody, r.Evidence.Status, r.Evidence.Body}
+		w.Evidence = &wire.Evidence{RequestBody: r.Evidence.RequestBody, Status: r.Evidence.Status, Body: r.Evidence.Body}
 	}
 	return w
 }
 
 // GET /config
 func (c *Control) handleConfig(w http.ResponseWriter, r *http.Request) {
-	c.writeJSON(w, http.StatusOK, wireConfig{
+	c.writeJSON(w, http.StatusOK, wire.Config{
 		BootID:       c.bootID,
 		Rate:         c.cfg.Rate,
 		WindowS:      c.cfg.Window.Seconds(),
@@ -244,11 +118,11 @@ func (c *Control) handleConfig(w http.ResponseWriter, r *http.Request) {
 // GET /targets
 func (c *Control) handleTargets(w http.ResponseWriter, r *http.Request) {
 	list := c.targetList()
-	ts := make([]wireTarget, len(list))
+	ts := make([]wire.Target, len(list))
 	for i, t := range list {
-		ts[i] = wireTarget{t.id, t.next}
+		ts[i] = wire.Target{ID: t.id, Next: t.next}
 	}
-	c.writeJSON(w, http.StatusOK, wireTargets{c.bootID, ts})
+	c.writeJSON(w, http.StatusOK, wire.Targets{BootID: c.bootID, Targets: ts})
 }
 
 // PUT /targets/{id}; the body is ignored.
@@ -263,7 +137,7 @@ func (c *Control) handlePutTarget(w http.ResponseWriter, r *http.Request) {
 	if created {
 		status = http.StatusCreated
 	}
-	c.writeJSON(w, status, wirePutTarget{c.bootID, id, next})
+	c.writeJSON(w, status, wire.PutTarget{BootID: c.bootID, ID: id, Next: next})
 }
 
 // DELETE /targets/{id}?through=S
@@ -277,7 +151,7 @@ func (c *Control) handleDeleteTarget(w http.ResponseWriter, r *http.Request) {
 		c.writeError(w, err)
 		return
 	}
-	c.writeJSON(w, http.StatusOK, wireBootID{c.bootID})
+	c.writeJSON(w, http.StatusOK, wire.BootID{BootID: c.bootID})
 }
 
 // GET /targets/{id}/records?since=S[&limit=L]
@@ -302,11 +176,11 @@ func (c *Control) handleRecords(w http.ResponseWriter, r *http.Request) {
 		c.writeError(w, err)
 		return
 	}
-	wrs := make([]wireRecord, len(recs))
+	wrs := make([]wire.Record, len(recs))
 	for i, rec := range recs {
 		wrs[i] = toWireRecord(rec)
 	}
-	c.writeJSON(w, http.StatusOK, wireRecords{c.bootID, wrs, gap, next})
+	c.writeJSON(w, http.StatusOK, wire.Records{BootID: c.bootID, Records: wrs, Gap: gap, Next: next})
 }
 
 // PUT /targets/{id}/pairs/{run_id}, body {pairs: [{password, hash, match}]}.
@@ -318,14 +192,14 @@ func (c *Control) handlePutPairs(w http.ResponseWriter, r *http.Request) {
 		c.writeError(w, badRunID(runID))
 		return
 	}
-	var body wireUpload
+	var body wire.Upload
 	if err := decodeBody(w, r, c.pairsCap, &body); err != nil {
 		c.writeError(w, err)
 		return
 	}
 	pairs := make([]Pair, len(body.Pairs))
 	for i, p := range body.Pairs {
-		if f := p.missing(); f != "" {
+		if f := missing(p); f != "" {
 			c.writeError(w, apiErrorf(http.StatusBadRequest, "loadgen: pair %d has no %s", i, f))
 			return
 		}
@@ -336,7 +210,7 @@ func (c *Control) handlePutPairs(w http.ResponseWriter, r *http.Request) {
 		c.writeError(w, err)
 		return
 	}
-	c.writeJSON(w, http.StatusCreated, wireUploaded{c.bootID, n})
+	c.writeJSON(w, http.StatusCreated, wire.Uploaded{BootID: c.bootID, Count: n})
 }
 
 // POST /runs/{run_id}/start, body {kind, targets}.
@@ -346,7 +220,7 @@ func (c *Control) handleStart(w http.ResponseWriter, r *http.Request) {
 		c.writeError(w, badRunID(runID))
 		return
 	}
-	var body wireStart
+	var body wire.Start
 	if err := decodeBody(w, r, maxStartBody, &body); err != nil {
 		c.writeError(w, err)
 		return
@@ -356,7 +230,7 @@ func (c *Control) handleStart(w http.ResponseWriter, r *http.Request) {
 		c.writeError(w, err)
 		return
 	}
-	c.writeJSON(w, http.StatusOK, wireStarted{c.bootID, runID, startWall(v.start)})
+	c.writeJSON(w, http.StatusOK, wire.Started{BootID: c.bootID, RunID: runID, StartWall: startWall(v.start)})
 }
 
 // GET /runs/{run_id}
@@ -409,7 +283,7 @@ func decodeBody(w http.ResponseWriter, r *http.Request, limit int64, v any) erro
 // the dial timeout and the policy decide the result: a caller's deadline
 // cannot read as refused.
 func (c *Control) handleCanary(w http.ResponseWriter, r *http.Request) {
-	c.writeJSON(w, http.StatusOK, wireCanary{c.bootID, canary(context.WithoutCancel(r.Context()), c.cfg.CanaryAddr)})
+	c.writeJSON(w, http.StatusOK, wire.Canary{BootID: c.bootID, Result: canary(context.WithoutCancel(r.Context()), c.cfg.CanaryAddr)})
 }
 
 // uintParam returns query parameter name, which must be a decimal uint64.
@@ -432,7 +306,7 @@ func (c *Control) writeError(w http.ResponseWriter, err error) {
 	if errors.As(err, &ae) {
 		status = ae.status
 	}
-	c.writeJSON(w, status, wireError{c.bootID, err.Error()})
+	c.writeJSON(w, status, wire.Error{BootID: c.bootID, Error: err.Error()})
 }
 
 // writeJSON answers with status and v as JSON. It encodes v whole before
@@ -441,7 +315,7 @@ func (c *Control) writeJSON(w http.ResponseWriter, status int, v any) {
 	b, err := json.Marshal(v)
 	if err != nil {
 		status = http.StatusInternalServerError
-		b, _ = json.Marshal(wireError{c.bootID, "loadgen: encoding the response: " + err.Error()})
+		b, _ = json.Marshal(wire.Error{BootID: c.bootID, Error: "loadgen: encoding the response: " + err.Error()})
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)

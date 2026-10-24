@@ -92,3 +92,36 @@ func TestBuildDeps(t *testing.T) {
 		t.Errorf("loadgen's build depends on forbidden packages: %s", strings.Join(bad, ", "))
 	}
 }
+
+// TestWireDeps checks that loadgen/wire's build depends, directly or
+// transitively, on the standard library only, so that any client of the
+// control API can import it. It lists with TestBuildDeps's settings.
+func TestWireDeps(t *testing.T) {
+	cmd := exec.Command("go", "list", "-deps", "-f", "{{.ImportPath}} {{.Standard}}", modulePath+"/loadgen/wire")
+	cmd.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS=linux")
+	out, err := cmd.Output()
+	if err != nil {
+		var ee *exec.ExitError
+		if errors.As(err, &ee) {
+			t.Fatalf("go list: %v\n%s", err, ee.Stderr)
+		}
+		t.Fatalf("go list: %v", err)
+	}
+	listed := false
+	var bad []string
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		path, std, _ := strings.Cut(line, " ")
+		switch {
+		case path == modulePath+"/loadgen/wire":
+			listed = true
+		case std != "true":
+			bad = append(bad, path)
+		}
+	}
+	if !listed {
+		t.Fatalf("go list output does not list %s/loadgen/wire:\n%s", modulePath, out)
+	}
+	if len(bad) > 0 {
+		t.Errorf("loadgen/wire's build depends on packages outside the standard library: %s", strings.Join(bad, ", "))
+	}
+}

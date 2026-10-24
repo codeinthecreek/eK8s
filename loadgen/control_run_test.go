@@ -16,6 +16,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/codeinthecreek/eK8s/loadgen/wire"
 )
 
 // shedder is a fake variant: it answers every request 503 with
@@ -85,9 +87,9 @@ func mustCallBody(t *testing.T, h http.Handler, method, target string, body []by
 }
 
 func pairsJSON(pairs []Pair) []byte {
-	var u wireUpload
+	var u wire.Upload
 	for _, p := range pairs {
-		u.Pairs = append(u.Pairs, wireUploadPair{&p.Password, &p.Hash, &p.Match})
+		u.Pairs = append(u.Pairs, wire.UploadPair{Password: &p.Password, Hash: &p.Hash, Match: &p.Match})
 	}
 	return mustJSON(u)
 }
@@ -99,12 +101,12 @@ func upload(t *testing.T, h http.Handler, id, runID string, n int) {
 }
 
 func startJSON(kind string, ids ...string) []byte {
-	return mustJSON(wireStart{kind, ids})
+	return mustJSON(wire.Start{Kind: kind, Targets: ids})
 }
 
-func start(t *testing.T, h http.Handler, runID, kind string, ids ...string) wireStarted {
+func start(t *testing.T, h http.Handler, runID, kind string, ids ...string) wire.Started {
 	t.Helper()
-	return decode[wireStarted](t, mustCallBody(t, h, "POST", "/runs/"+runID+"/start", startJSON(kind, ids...), http.StatusOK))
+	return decode[wire.Started](t, mustCallBody(t, h, "POST", "/runs/"+runID+"/start", startJSON(kind, ids...), http.StatusOK))
 }
 
 // waitFor fails the test unless cond holds within 10 s.
@@ -118,11 +120,11 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 }
 
 // waitRun waits until no target of run runID is running, and returns it.
-func waitRun(t *testing.T, h http.Handler, runID string) wireRun {
+func waitRun(t *testing.T, h http.Handler, runID string) wire.Run {
 	t.Helper()
-	var v wireRun
+	var v wire.Run
 	waitFor(t, "run "+runID+" to end", func() bool {
-		v = decode[wireRun](t, mustCall(t, h, "GET", "/runs/"+runID, http.StatusOK))
+		v = decode[wire.Run](t, mustCall(t, h, "GET", "/runs/"+runID, http.StatusOK))
 		for _, s := range v.Targets {
 			if s.State == stateRunning {
 				return false
@@ -133,7 +135,7 @@ func waitRun(t *testing.T, h http.Handler, runID string) wireRun {
 	return v
 }
 
-func wantStates(t *testing.T, v wireRun, want map[string]wireRunTarget) {
+func wantStates(t *testing.T, v wire.Run, want map[string]wire.RunTarget) {
 	t.Helper()
 	if len(v.Targets) != len(want) {
 		t.Errorf("run %s targets = %+v, want %+v", v.RunID, v.Targets, want)
@@ -146,9 +148,9 @@ func wantStates(t *testing.T, v wireRun, want map[string]wireRunTarget) {
 }
 
 // allRecords returns target id's records, read through the API.
-func allRecords(t *testing.T, h http.Handler, id string) []wireRecord {
+func allRecords(t *testing.T, h http.Handler, id string) []wire.Record {
 	t.Helper()
-	page := decode[wireRecords](t, mustCall(t, h, "GET", "/targets/"+id+"/records?since=0", http.StatusOK))
+	page := decode[wire.Records](t, mustCall(t, h, "GET", "/targets/"+id+"/records?since=0", http.StatusOK))
 	if page.Gap {
 		t.Fatalf("target %s's records have a gap", id)
 	}
@@ -199,8 +201,8 @@ func TestUploadPairs(t *testing.T) {
 	h := c.Handler()
 	mustCall(t, h, "PUT", "/targets/1", http.StatusCreated)
 
-	got := decode[wireUploaded](t, mustCallBody(t, h, "PUT", "/targets/1/pairs/w1", pairsJSON(testPairs(3)), http.StatusCreated))
-	if want := (wireUploaded{c.bootID, 3}); got != want {
+	got := decode[wire.Uploaded](t, mustCallBody(t, h, "PUT", "/targets/1/pairs/w1", pairsJSON(testPairs(3)), http.StatusCreated))
+	if want := (wire.Uploaded{BootID: c.bootID, Count: 3}); got != want {
 		t.Errorf("upload = %+v, want %+v", got, want)
 	}
 	c.wantPending(t, "1", "w1", 3)
@@ -304,11 +306,11 @@ func TestUploadCap(t *testing.T) {
 	}
 
 	password, hash, match := strings.Repeat("A", maxPasswordLen), randomExactPHC(), false
-	big := wireUploadPair{&password, &hash, &match}
+	big := wire.UploadPair{Password: &password, Hash: &hash, Match: &match}
 	if n := len(mustJSON(big)) + len(","); n != maxPairJSON {
 		t.Errorf("the largest pair takes %d bytes, want maxPairJSON = %d", n, maxPairJSON)
 	}
-	worst := wireUpload{}
+	worst := wire.Upload{}
 	for range max(c.windowPairs, c.burstPairs) {
 		worst.Pairs = append(worst.Pairs, big)
 	}
@@ -398,7 +400,7 @@ func TestStartRefusals(t *testing.T) {
 	// A burst takes exactly one target with burst_pairs.
 	upload(t, h, "4", "b1", c.burstPairs)
 	start(t, h, "b1", "burst", "4")
-	wantStates(t, waitRun(t, h, "b1"), map[string]wireRunTarget{"4": {State: stateDone}})
+	wantStates(t, waitRun(t, h, "b1"), map[string]wire.RunTarget{"4": {State: stateDone}})
 }
 
 // TestStartCap checks the start body cap on both sides: a body of
@@ -418,7 +420,7 @@ func TestStartCap(t *testing.T) {
 	errorBody(t, callBody(h, "POST", "/runs/w1/start", padded(64<<10+1)), http.StatusRequestEntityTooLarge)
 	c.wantPending(t, "1", "w1", c.windowPairs)
 	mustCallBody(t, h, "POST", "/runs/w1/start", padded(64<<10), http.StatusOK)
-	wantStates(t, waitRun(t, h, "w1"), map[string]wireRunTarget{"1": {State: stateDone}})
+	wantStates(t, waitRun(t, h, "w1"), map[string]wire.RunTarget{"1": {State: stateDone}})
 }
 
 // TestStartAllOrNothing checks that a start refused on one target takes
@@ -443,7 +445,7 @@ func TestStartAllOrNothing(t *testing.T) {
 	start(t, h, "w1", "window", "1", "2")
 	c.wantPending(t, "1", "", 0)
 	c.wantPending(t, "2", "", 0)
-	wantStates(t, waitRun(t, h, "w1"), map[string]wireRunTarget{"1": {State: stateDone}, "2": {State: stateDone}})
+	wantStates(t, waitRun(t, h, "w1"), map[string]wire.RunTarget{"1": {State: stateDone}, "2": {State: stateDone}})
 }
 
 // TestStartWhileActive checks that a run is refused while another is
@@ -466,7 +468,7 @@ func TestStartWhileActive(t *testing.T) {
 		t.Errorf("upload to a running target: error %q, want in a run", msg)
 	}
 	mustCall(t, h, "POST", "/runs/w1/cancel", http.StatusOK)
-	wantStates(t, waitRun(t, h, "w1"), map[string]wireRunTarget{"1": {State: stateCancelled}})
+	wantStates(t, waitRun(t, h, "w1"), map[string]wire.RunTarget{"1": {State: stateCancelled}})
 	c.wantIdle(t)
 
 	// w1 is used: neither an upload nor a start may name it again.
@@ -498,14 +500,14 @@ func TestWindowRun(t *testing.T) {
 		t.Errorf("start_wall is %v after the request, want about %v", lead, startLead)
 	}
 	// The first send is startLead away, so both are still running.
-	wantStates(t, decode[wireRun](t, mustCall(t, h, "GET", "/runs/w1", http.StatusOK)),
-		map[string]wireRunTarget{"1": {State: stateRunning}, "2": {State: stateRunning}})
+	wantStates(t, decode[wire.Run](t, mustCall(t, h, "GET", "/runs/w1", http.StatusOK)),
+		map[string]wire.RunTarget{"1": {State: stateRunning}, "2": {State: stateRunning}})
 
 	v := waitRun(t, h, "w1")
 	if v.BootID != c.bootID || v.RunID != "w1" || v.Kind != "window" || !v.StartWall.Equal(st.StartWall) {
 		t.Errorf("run = %+v, want w1, window, start_wall %v", v, st.StartWall)
 	}
-	wantStates(t, v, map[string]wireRunTarget{"1": {State: stateDone}, "2": {State: stateDone}})
+	wantStates(t, v, map[string]wire.RunTarget{"1": {State: stateDone}, "2": {State: stateDone}})
 	c.wantIdle(t)
 
 	for _, id := range ids {
@@ -542,7 +544,7 @@ func TestBurstRun(t *testing.T) {
 	if v.Kind != "burst" {
 		t.Errorf("kind %q, want burst", v.Kind)
 	}
-	wantStates(t, v, map[string]wireRunTarget{"5": {State: stateDone}})
+	wantStates(t, v, map[string]wire.RunTarget{"5": {State: stateDone}})
 	c.wantIdle(t)
 
 	recs := allRecords(t, h, "5")
@@ -577,18 +579,18 @@ func TestCancelRun(t *testing.T) {
 	start(t, h, "w1", "window", "1")
 	waitFor(t, "a send in flight", func() bool { return sh.seen.Load() > 0 })
 
-	v := decode[wireRun](t, mustCall(t, h, "POST", "/runs/w1/cancel", http.StatusOK))
-	wantStates(t, v, map[string]wireRunTarget{"1": {State: stateRunning}})
+	v := decode[wire.Run](t, mustCall(t, h, "POST", "/runs/w1/cancel", http.StatusOK))
+	wantStates(t, v, map[string]wire.RunTarget{"1": {State: stateRunning}})
 	time.Sleep(50 * time.Millisecond)
-	v = decode[wireRun](t, mustCall(t, h, "GET", "/runs/w1", http.StatusOK))
-	wantStates(t, v, map[string]wireRunTarget{"1": {State: stateRunning}})
+	v = decode[wire.Run](t, mustCall(t, h, "GET", "/runs/w1", http.StatusOK))
+	wantStates(t, v, map[string]wire.RunTarget{"1": {State: stateRunning}})
 	rec := call(h, "DELETE", fmt.Sprintf("/targets/1?through=%d", uint64(math.MaxUint64)))
 	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "in a run") {
 		t.Fatalf("DELETE while running = %d %s, want 409 in a run", rec.Code, rec.Body)
 	}
 
 	sh.release()
-	wantStates(t, waitRun(t, h, "w1"), map[string]wireRunTarget{"1": {State: stateCancelled}})
+	wantStates(t, waitRun(t, h, "w1"), map[string]wire.RunTarget{"1": {State: stateCancelled}})
 	c.wantIdle(t)
 	held := sh.seen.Load()
 	next := c.target("1").Ring.Next()
@@ -596,8 +598,8 @@ func TestCancelRun(t *testing.T) {
 		t.Errorf("%d records, want one per request sent (%d)", next, held)
 	}
 	// Cancelling a run that has ended changes nothing.
-	v = decode[wireRun](t, mustCall(t, h, "POST", "/runs/w1/cancel", http.StatusOK))
-	wantStates(t, v, map[string]wireRunTarget{"1": {State: stateCancelled}})
+	v = decode[wire.Run](t, mustCall(t, h, "POST", "/runs/w1/cancel", http.StatusOK))
+	wantStates(t, v, map[string]wire.RunTarget{"1": {State: stateCancelled}})
 	errorBody(t, call(h, "POST", "/runs/w9/cancel"), http.StatusNotFound)
 	errorBody(t, call(h, "GET", "/runs/w9"), http.StatusNotFound)
 	mustCall(t, h, "DELETE", fmt.Sprintf("/targets/1?through=%d", next-1), http.StatusOK)
@@ -650,13 +652,13 @@ func TestRunBaseContext(t *testing.T) {
 	start(t, h, "w1", "window", "1")
 	waitFor(t, "a send", func() bool { return sh.seen.Load() > 0 })
 	cancel()
-	wantStates(t, waitRun(t, h, "w1"), map[string]wireRunTarget{"1": {State: stateCancelled}})
+	wantStates(t, waitRun(t, h, "w1"), map[string]wire.RunTarget{"1": {State: stateCancelled}})
 	c.wantIdle(t)
 
 	next, seen := c.target("1").Ring.Next(), sh.seen.Load()
 	upload(t, h, "1", "w2", c.windowPairs)
 	start(t, h, "w2", "window", "1")
-	wantStates(t, waitRun(t, h, "w2"), map[string]wireRunTarget{"1": {State: stateCancelled}})
+	wantStates(t, waitRun(t, h, "w2"), map[string]wire.RunTarget{"1": {State: stateCancelled}})
 	if n, s := c.target("1").Ring.Next(), sh.seen.Load(); n != next || s != seen {
 		t.Errorf("a run started under a cancelled context added %d records and sent %d requests", n-next, s-seen)
 	}
@@ -671,8 +673,8 @@ func TestRunError(t *testing.T) {
 	tg.ID = "1"
 	c.runs["w1"], c.active = r, r
 	c.finish(r, tg, fmt.Errorf("loadgen: boom"))
-	v := decode[wireRun](t, mustCall(t, c.Handler(), "GET", "/runs/w1", http.StatusOK))
-	wantStates(t, v, map[string]wireRunTarget{"1": {State: stateError, Error: "loadgen: boom"}})
+	v := decode[wire.Run](t, mustCall(t, c.Handler(), "GET", "/runs/w1", http.StatusOK))
+	wantStates(t, v, map[string]wire.RunTarget{"1": {State: stateError, Error: "loadgen: boom"}})
 	if tg.busy || c.active != nil {
 		t.Errorf("after the error: busy %v, active %v", tg.busy, c.active)
 	}
