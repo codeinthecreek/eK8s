@@ -341,8 +341,8 @@ func TestBootID(t *testing.T) {
 		if rec.Code != tc.status {
 			t.Errorf("%s = %d %s, want %d", name, rec.Code, rec.Body, tc.status)
 		}
-		if got := rec.Header().Get(bootIDHeader); got != c.bootID {
-			t.Errorf("%s: %s header %q, want %q", name, bootIDHeader, got, c.bootID)
+		if got := rec.Header().Get(wire.BootIDHeader); got != c.bootID {
+			t.Errorf("%s: %s header %q, want %q", name, wire.BootIDHeader, got, c.bootID)
 		}
 		if tc.json {
 			if got := decode[wire.BootID](t, rec).BootID; got != c.bootID {

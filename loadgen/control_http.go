@@ -13,10 +13,6 @@ import (
 	"github.com/codeinthecreek/eK8s/loadgen/wire"
 )
 
-// bootIDHeader is the header that carries boot_id on every control API
-// response.
-const bootIDHeader = "Ek8s-Boot-Id"
-
 // maxRecordsPage is the most records one records request returns, and
 // its default limit.
 const maxRecordsPage = 1000
@@ -41,7 +37,7 @@ func (c *Control) Handler() http.Handler {
 	mux.HandleFunc("POST /runs/{run_id}/cancel", c.handleCancel)
 	mux.HandleFunc("POST /canary", c.handleCanary)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set(bootIDHeader, c.bootID)
+		w.Header().Set(wire.BootIDHeader, c.bootID)
 		mux.ServeHTTP(w, r)
 	})
 }

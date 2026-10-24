@@ -12,6 +12,10 @@ package wire
 
 import "time"
 
+// BootIDHeader is the header that carries boot_id on every control API
+// response, the ServeMux's own 404 and 405 included.
+const BootIDHeader = "Ek8s-Boot-Id"
+
 // A run's kinds: Start.Kind and Run.Kind.
 const (
 	KindWindow = "window"
