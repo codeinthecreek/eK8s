@@ -132,6 +132,8 @@ repo/
                           # embedded). Imported by gate only; never by
                           # wrapper or loadgen (loadgen's pairs are
                           # generated fresh on the host, sec 10).
+  internal/hostpairs/    # host /verify pair generation and full
+                          # verification.
   gate/                  # correctness gate, five ordered stages.
   loadgen/               # open-loop load generator (sec 10): sustained
                           # mode (one stream per live variant, sending
@@ -143,6 +145,10 @@ repo/
                           # Argon2 package (it does no Argon2: pairs and
                           # full verification are the host's, sec 10).
                           # Never in the mutation driver's sandbox.
+    wire/                # the control API's wire format, standard
+                          # library only.
+    client/              # Go client for the control API (gate Stage 5,
+                          # orchestrator).
   deploy/                # kind cluster config, k8s manifests, stress-ng.
   driver/                # mutation driver wrapping claude -p.
   orchestrator/          # population manager, selection, scoring loop.
@@ -595,8 +601,8 @@ anything else is `failed`. Negatives are outside `success_rate`, p95 and
 For `verify` calls specifically, "success" additionally requires the
 *objectively correct* accept/reject determination against the pair's
 known ground truth (section 10: a match pair is a host-generated
-`hashcore.Hash` of a fresh password, a mismatch pair a random canonical
-PHC at the exact parameters with a fresh password) -- a fast, well-formed
+`hashcore.Hash` of a fresh password, a mismatch pair a fresh password
+with `hashcore.Hash` of a different fresh password) -- a fast, well-formed
 response that returns "valid" for a should-reject pair is a `failed`
 classification regardless of latency, not a success. (This closes a
 specification-gaming risk: without ground-truth checking, a mutant could
@@ -790,8 +796,8 @@ starts only when its pairs are ready. After a loadgen restart the
 orchestrator hands over a new batch, never the old one. The test-vector
 pool stays gate-only (section 5).
 - Match pair: `hashcore.Hash` of a fresh password.
-- Mismatch pair: a random canonical PHC string at the exact parameters
-  with a fresh password. Sending only matching pairs would never exercise
+- Mismatch pair: a fresh password with `hashcore.Hash` of a different
+  fresh password. Sending only matching pairs would never exercise
   the rejection path under load, the specification-gaming gap described
   in section 8.
 

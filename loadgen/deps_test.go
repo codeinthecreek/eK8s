@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -90,5 +91,49 @@ func TestBuildDeps(t *testing.T) {
 	}
 	if len(bad) > 0 {
 		t.Errorf("loadgen's build depends on forbidden packages: %s", strings.Join(bad, ", "))
+	}
+}
+
+// TestWireDeps checks that loadgen/wire's build depends, directly or
+// transitively, on the standard library only, so that any client of the
+// control API can import it.
+func TestWireDeps(t *testing.T) { checkStdDeps(t, "loadgen/wire") }
+
+// TestClientDeps checks that loadgen/client's build depends, directly or
+// transitively, on the standard library and loadgen/wire only, so that
+// gate Stage 5 and the orchestrator can import it.
+func TestClientDeps(t *testing.T) { checkStdDeps(t, "loadgen/client", "loadgen/wire") }
+
+// checkStdDeps checks that the build of pkg, a path in this module,
+// depends on the standard library and the module's packages also only.
+// It lists with TestBuildDeps's settings.
+func checkStdDeps(t *testing.T, pkg string, also ...string) {
+	t.Helper()
+	cmd := exec.Command("go", "list", "-deps", "-f", "{{.ImportPath}} {{.Standard}}", modulePath+"/"+pkg)
+	cmd.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS=linux")
+	out, err := cmd.Output()
+	if err != nil {
+		var ee *exec.ExitError
+		if errors.As(err, &ee) {
+			t.Fatalf("go list: %v\n%s", err, ee.Stderr)
+		}
+		t.Fatalf("go list: %v", err)
+	}
+	listed := false
+	var bad []string
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		path, std, _ := strings.Cut(line, " ")
+		switch {
+		case path == modulePath+"/"+pkg:
+			listed = true
+		case std != "true" && !slices.ContainsFunc(also, func(a string) bool { return path == modulePath+"/"+a }):
+			bad = append(bad, path)
+		}
+	}
+	if !listed {
+		t.Fatalf("go list output does not list %s/%s:\n%s", modulePath, pkg, out)
+	}
+	if len(bad) > 0 {
+		t.Errorf("%s's build depends on packages outside the standard library and %v: %s", pkg, also, strings.Join(bad, ", "))
 	}
 }

@@ -10,6 +10,8 @@ import (
 	"os"
 	"syscall"
 	"testing"
+
+	"github.com/codeinthecreek/eK8s/loadgen/wire"
 )
 
 // dialErr wraps errno as a failed TCP connect does.
@@ -23,21 +25,21 @@ func TestCanaryResult(t *testing.T) {
 		err  error
 		want string
 	}{
-		{"none", nil, canaryConnected},
-		{"ECONNREFUSED", dialErr(syscall.ECONNREFUSED), canaryRefused},
-		{"EHOSTUNREACH", dialErr(syscall.EHOSTUNREACH), canaryRefused},
-		{"ENETUNREACH", dialErr(syscall.ENETUNREACH), canaryRefused},
-		{"wrapped ECONNREFUSED", fmt.Errorf("x: %w", dialErr(syscall.ECONNREFUSED)), canaryRefused},
-		{"dial timeout", &net.OpError{Op: "dial", Net: "tcp", Err: os.ErrDeadlineExceeded}, canaryRefused},
-		{"ETIMEDOUT", dialErr(syscall.ETIMEDOUT), canaryRefused}, // syscall.Errno.Timeout
-		{"EAGAIN", dialErr(syscall.EAGAIN), canaryError},         // Errno.Timeout, but local
-		{"EPERM", dialErr(syscall.EPERM), canaryError},
-		{"EACCES", dialErr(syscall.EACCES), canaryError},
-		{"ECONNRESET", dialErr(syscall.ECONNRESET), canaryError},
-		{"EADDRNOTAVAIL", dialErr(syscall.EADDRNOTAVAIL), canaryError},
-		{"cancelled", &net.OpError{Op: "dial", Net: "tcp", Err: context.Canceled}, canaryError},
-		{"bare ECONNREFUSED text", errors.New("connect: connection refused"), canaryError},
-		{"unrelated", errors.New("boom"), canaryError},
+		{"none", nil, wire.CanaryConnected},
+		{"ECONNREFUSED", dialErr(syscall.ECONNREFUSED), wire.CanaryRefused},
+		{"EHOSTUNREACH", dialErr(syscall.EHOSTUNREACH), wire.CanaryRefused},
+		{"ENETUNREACH", dialErr(syscall.ENETUNREACH), wire.CanaryRefused},
+		{"wrapped ECONNREFUSED", fmt.Errorf("x: %w", dialErr(syscall.ECONNREFUSED)), wire.CanaryRefused},
+		{"dial timeout", &net.OpError{Op: "dial", Net: "tcp", Err: os.ErrDeadlineExceeded}, wire.CanaryRefused},
+		{"ETIMEDOUT", dialErr(syscall.ETIMEDOUT), wire.CanaryRefused}, // syscall.Errno.Timeout
+		{"EAGAIN", dialErr(syscall.EAGAIN), wire.CanaryError},         // Errno.Timeout, but local
+		{"EPERM", dialErr(syscall.EPERM), wire.CanaryError},
+		{"EACCES", dialErr(syscall.EACCES), wire.CanaryError},
+		{"ECONNRESET", dialErr(syscall.ECONNRESET), wire.CanaryError},
+		{"EADDRNOTAVAIL", dialErr(syscall.EADDRNOTAVAIL), wire.CanaryError},
+		{"cancelled", &net.OpError{Op: "dial", Net: "tcp", Err: context.Canceled}, wire.CanaryError},
+		{"bare ECONNREFUSED text", errors.New("connect: connection refused"), wire.CanaryError},
+		{"unrelated", errors.New("boom"), wire.CanaryError},
 	} {
 		if got := canaryResult(tc.err); got != tc.want {
 			t.Errorf("canaryResult(%s: %v) = %q, want %q", tc.name, tc.err, got, tc.want)
@@ -48,8 +50,8 @@ func TestCanaryResult(t *testing.T) {
 func TestCanaryConnected(t *testing.T) {
 	srv := httptest.NewServer(http.NotFoundHandler())
 	defer srv.Close()
-	if got := canary(t.Context(), srv.Listener.Addr().String()); got != canaryConnected {
-		t.Errorf("canary to a listener = %q, want %q", got, canaryConnected)
+	if got := canary(t.Context(), srv.Listener.Addr().String()); got != wire.CanaryConnected {
+		t.Errorf("canary to a listener = %q, want %q", got, wire.CanaryConnected)
 	}
 }
 
@@ -60,8 +62,8 @@ func TestCanaryRefused(t *testing.T) {
 	}
 	addr := l.Addr().String()
 	l.Close()
-	if got := canary(t.Context(), addr); got != canaryRefused {
-		t.Errorf("canary to a closed port = %q, want %q", got, canaryRefused)
+	if got := canary(t.Context(), addr); got != wire.CanaryRefused {
+		t.Errorf("canary to a closed port = %q, want %q", got, wire.CanaryRefused)
 	}
 }
 
@@ -71,8 +73,8 @@ func TestCanaryEndpoint(t *testing.T) {
 	cfg := validConfig()
 	cfg.CanaryAddr = srv.Listener.Addr().String()
 	c := newTestControl(t, cfg)
-	got := decode[wireCanary](t, mustCall(t, c.Handler(), "POST", "/canary", http.StatusOK))
-	if want := (wireCanary{c.bootID, canaryConnected}); got != want {
+	got := decode[wire.Canary](t, mustCall(t, c.Handler(), "POST", "/canary", http.StatusOK))
+	if want := (wire.Canary{BootID: c.bootID, Result: wire.CanaryConnected}); got != want {
 		t.Errorf("POST /canary = %+v, want %+v", got, want)
 	}
 }
@@ -93,7 +95,7 @@ func TestCanaryEndpointDetached(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("POST /canary = %d %s, want 200", rec.Code, rec.Body)
 	}
-	if got, want := decode[wireCanary](t, rec), (wireCanary{c.bootID, canaryConnected}); got != want {
+	if got, want := decode[wire.Canary](t, rec), (wire.Canary{BootID: c.bootID, Result: wire.CanaryConnected}); got != want {
 		t.Errorf("POST /canary with a cancelled request context = %+v, want %+v", got, want)
 	}
 }

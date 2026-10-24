@@ -6,17 +6,12 @@ import (
 	"net"
 	"syscall"
 	"time"
+
+	"github.com/codeinthecreek/eK8s/loadgen/wire"
 )
 
 // canaryTimeout is the policy canary's dial timeout (DESIGN.md sec 11).
 const canaryTimeout = time.Second
-
-// The policy canary's results (DESIGN.md sec 11).
-const (
-	canaryConnected = "connected" // policy enforcement is off: the half is excluded
-	canaryRefused   = "refused"   // the policy stopped the connection
-	canaryError     = "error"     // shows nothing about the policy: the half is excluded
-)
 
 // canary makes the policy canary's one connection attempt, to addr (the
 // API server's ClusterIP), which loadgen's own NetworkPolicy must refuse
@@ -41,14 +36,14 @@ func canaryResult(err error) string {
 	var ne net.Error
 	switch {
 	case err == nil:
-		return canaryConnected
+		return wire.CanaryConnected
 	case errors.Is(err, syscall.EAGAIN):
-		return canaryError
+		return wire.CanaryError
 	case errors.As(err, &ne) && ne.Timeout(),
 		errors.Is(err, syscall.ECONNREFUSED),
 		errors.Is(err, syscall.EHOSTUNREACH),
 		errors.Is(err, syscall.ENETUNREACH):
-		return canaryRefused
+		return wire.CanaryRefused
 	}
-	return canaryError
+	return wire.CanaryError
 }

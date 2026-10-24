@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"slices"
 	"time"
+
+	"github.com/codeinthecreek/eK8s/loadgen/wire"
 )
 
 // startLead is how far after a start request a run's first send is
@@ -35,16 +37,16 @@ func validRunID(id string) bool { return runIDRE.MatchString(id) }
 type runKind string
 
 const (
-	windowRun runKind = "window"
-	burstRun  runKind = "burst"
+	windowRun runKind = runKind(wire.KindWindow)
+	burstRun  runKind = runKind(wire.KindBurst)
 )
 
 // A run's per-target states.
 const (
-	stateRunning   = "running"   // its RunWindow or RunBurst has not returned
-	stateDone      = "done"      // it returned nil: every send was made and recorded
-	stateCancelled = "cancelled" // the run's context ended first
-	stateError     = "error"     // it returned another error, before sending anything
+	stateRunning   = wire.StateRunning   // its RunWindow or RunBurst has not returned
+	stateDone      = wire.StateDone      // it returned nil: every send was made and recorded
+	stateCancelled = wire.StateCancelled // the run's context ended first
+	stateError     = wire.StateError     // it returned another error, before sending anything
 )
 
 // run is one window or burst. id, kind, start, cancel and done are fixed

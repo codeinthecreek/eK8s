@@ -1,0 +1,1 @@
+{"boot_id":"00112233445566778899aabbccddeeff","run_id":"w1","kind":"window","start_wall":"2026-10-18T02:04:05.123456789Z","targets":{"1":{"state":"done"},"12":{"state":"error","error":"loadgen: boom"}}}
