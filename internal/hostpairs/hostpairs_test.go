@@ -182,9 +182,19 @@ func TestVerify(t *testing.T) {
 // of milliseconds, slower under the race detector.
 const cancelBound = 2 * time.Second
 
+// cancelDelay is how long TestCancel lets a call run before cancelling
+// its ctx.
+const cancelDelay = 200 * time.Millisecond
+
 // TestCancel checks that both functions return ctx's error, and no
 // results, promptly when ctx is cancelled mid-run, on far more work than
-// they could finish in the time.
+// they could finish in the time. Generate's 4,000 hashes, at tens of
+// milliseconds each on 2 workers, take tens of seconds (minutes under
+// -race), far longer than cancelDelay plus cancelBound, and its 6,000
+// passwords are drawn in milliseconds, so hashing is running when the
+// cancel lands. A call still running a second past that bound fails the
+// test there, with its goroutine left running, rather than at the test
+// timeout.
 func TestCancel(t *testing.T) {
 	core := hashcore.New()
 	h, err := core.Hash("pw")
@@ -200,7 +210,7 @@ func TestCancel(t *testing.T) {
 		call func(ctx context.Context) (int, error)
 	}{
 		{"Generate", func(ctx context.Context) (int, error) {
-			pairs, err := Generate(ctx, core, 50000, 50000, 2)
+			pairs, err := Generate(ctx, core, 2000, 2000, 2)
 			return len(pairs), err
 		}},
 		{"Verify", func(ctx context.Context) (int, error) {
@@ -210,13 +220,30 @@ func TestCancel(t *testing.T) {
 	} {
 		ctx, cancel := context.WithCancel(t.Context())
 		cancelled := make(chan time.Time, 1)
-		time.AfterFunc(200*time.Millisecond, func() {
+		time.AfterFunc(cancelDelay, func() {
 			cancelled <- time.Now()
 			cancel()
 		})
-		n, err := c.call(ctx)
-		returned := time.Now()
+		type result struct {
+			n        int
+			err      error
+			returned time.Time
+		}
+		done := make(chan result, 1)
+		start := time.Now()
+		go func() {
+			n, err := c.call(ctx)
+			done <- result{n, err, time.Now()}
+		}()
+		var r result
+		select {
+		case r = <-done:
+		case <-time.After(cancelDelay + cancelBound + time.Second):
+			cancel()
+			t.Fatalf("%s has run %v without returning", c.name, time.Since(start))
+		}
 		cancel()
+		n, err, returned := r.n, r.err, r.returned
 		if !errors.Is(err, context.Canceled) {
 			t.Errorf("%s: error %v, want context.Canceled", c.name, err)
 		}

@@ -37,7 +37,8 @@ const (
 	CanaryError     = "error"     // shows nothing about the policy: the half is excluded
 )
 
-// Error is the body of every error response.
+// Error is the body of every error response loadgen's handlers write;
+// the ServeMux's own 404 and 405 answers are text/plain.
 type Error struct {
 	BootID string `json:"boot_id"`
 	Error  string `json:"error"`

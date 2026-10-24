@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -24,6 +25,115 @@ import (
 // encode back to the same bytes. The files are written by hand from the
 // encoder's output; there is no -update flag.
 func TestWireGolden(t *testing.T) {
+	for _, tc := range wireCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			want, err := os.ReadFile(filepath.Join("testdata", "wire", tc.name+".json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := wireBody(t, tc.v); !bytes.Equal(got, want) {
+				t.Errorf("encoded:\n got %s\nwant %s", got, want)
+			}
+			p := reflect.New(reflect.TypeOf(tc.v))
+			req := httptest.NewRequest(http.MethodPut, "/", bytes.NewReader(want))
+			if err := decodeBody(httptest.NewRecorder(), req, maxStartBody, p.Interface()); err != nil {
+				t.Fatalf("decoding the golden file: %v", err)
+			}
+			if got := wireBody(t, p.Elem().Interface()); !bytes.Equal(got, want) {
+				t.Errorf("decoded and encoded again:\n got %s\nwant %s", got, want)
+			}
+		})
+	}
+}
+
+// TestWireGoldenFull checks that every _full case sets every field, so
+// that a field added to a wire type, omitempty or not, shows in that
+// case's golden file and fails TestWireGolden until the file is
+// updated. A nil pointer is unset; a non-nil pointer to a non-struct is
+// set, and one to a struct is checked as that struct. A slice, array or
+// map must be non-empty, and each field of its element type set in at
+// least one element. time.Time is set when not IsZero; any other struct
+// is checked field by field; any other value is set when not zero.
+func TestWireGoldenFull(t *testing.T) {
+	for _, tc := range wireCases() {
+		if !strings.HasSuffix(tc.name, "_full") {
+			continue
+		}
+		if u := unsetFields(reflect.ValueOf(tc.v), tc.name); len(u) > 0 {
+			t.Errorf("%s is unset", u[0])
+		}
+	}
+}
+
+// unsetFields returns the paths of v's unset fields, in field order, as
+// TestWireGoldenFull defines unset. A collection's element fields are
+// under path[], and unset only when unset in every element.
+func unsetFields(v reflect.Value, path string) []string {
+	if v.Type() == reflect.TypeFor[time.Time]() {
+		if v.Interface().(time.Time).IsZero() {
+			return []string{path}
+		}
+		return nil
+	}
+	switch v.Kind() {
+	case reflect.Pointer:
+		if v.IsNil() {
+			return []string{path}
+		}
+		if e := v.Elem(); e.Kind() == reflect.Struct {
+			return unsetFields(e, path)
+		}
+		return nil
+	case reflect.Struct:
+		var u []string
+		for i := range v.NumField() {
+			u = append(u, unsetFields(v.Field(i), path+"."+v.Type().Field(i).Name)...)
+		}
+		return u
+	case reflect.Slice, reflect.Array, reflect.Map:
+		if v.Len() == 0 {
+			return []string{path}
+		}
+		var elems []reflect.Value
+		if v.Kind() == reflect.Map {
+			for it := v.MapRange(); it.Next(); {
+				elems = append(elems, it.Value())
+			}
+		} else {
+			for i := range v.Len() {
+				elems = append(elems, v.Index(i))
+			}
+		}
+		// Unset in every element: keep the first element's paths that
+		// each later element also leaves unset.
+		u := unsetFields(elems[0], path+"[]")
+		for _, e := range elems[1:] {
+			also := make(map[string]bool)
+			for _, p := range unsetFields(e, path+"[]") {
+				also[p] = true
+			}
+			var both []string
+			for _, p := range u {
+				if also[p] {
+					both = append(both, p)
+				}
+			}
+			u = both
+		}
+		return u
+	}
+	if v.IsZero() {
+		return []string{path}
+	}
+	return nil
+}
+
+// wireCases returns TestWireGolden's cases: each is a value and the
+// name of its golden file, testdata/wire/<name>.json.
+func wireCases() []struct {
+	name string
+	v    any
+} {
 	const boot = "00112233445566778899aabbccddeeff"
 	wall := time.Date(2026, 10, 18, 2, 4, 5, 123456789, time.UTC)
 	pair := wire.Pair{Password: "PW", Hash: "$argon2id$v=19$m=19456,t=2,p=1$c2FsdA$a2V5"}
@@ -38,7 +148,7 @@ func TestWireGolden(t *testing.T) {
 	p1, h1, m1 := "p1", "h1", false
 	runTarget := wire.RunTarget{State: wire.StateError, Error: "loadgen: boom"}
 
-	for _, tc := range []struct {
+	return []struct {
 		name string
 		v    any
 	}{
@@ -72,24 +182,6 @@ func TestWireGolden(t *testing.T) {
 		}},
 		{"run_target_full", runTarget},
 		{"run_target_zero", wire.RunTarget{}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			want, err := os.ReadFile(filepath.Join("testdata", "wire", tc.name+".json"))
-			if err != nil {
-				t.Fatal(err)
-			}
-			if got := wireBody(t, tc.v); !bytes.Equal(got, want) {
-				t.Errorf("encoded:\n got %s\nwant %s", got, want)
-			}
-			p := reflect.New(reflect.TypeOf(tc.v))
-			req := httptest.NewRequest(http.MethodPut, "/", bytes.NewReader(want))
-			if err := decodeBody(httptest.NewRecorder(), req, maxStartBody, p.Interface()); err != nil {
-				t.Fatalf("decoding the golden file: %v", err)
-			}
-			if got := wireBody(t, p.Elem().Interface()); !bytes.Equal(got, want) {
-				t.Errorf("decoded and encoded again:\n got %s\nwant %s", got, want)
-			}
-		})
 	}
 }
 
