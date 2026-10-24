@@ -34,7 +34,7 @@ max. Earlier entries are not backfilled.
 - Reason: no scored window shares the node with a build, gate run or burst, and host-side pair generation and verification get the gap; cold start is part of the behaviour scored, and the same for all. Gap order: verify, score, generate next pairs, then start the gate, so host Argon2 never competes with Stages 2-4 or Stage 5 and fails a correct candidate on the hang-timeout.
 - Reverse: DESIGN.md sec 7 Stage 5 and sec 11 edits; restore the exclusion reasons in sec 11.
 
-## 2026-10-14 · PR #33 · /verify pairs generated on the host per window, each sent once to one variant (amends the PR #29 Q5 C fresh-pairs entry and the PR #31 FailOpen entry; DESIGN.md sec 5, 8, 10, 11)
+## 2026-10-14 · PR #33 · /verify pairs generated on the host per window, each sent once to one variant (amends the PR #29 Q5 C fresh-pairs entry and the PR #31 FailOpen entry; DESIGN.md sec 5, 8, 10, 11) (mismatch method amended by the PR #46 host-pairs entry)
 - Decision: match = hashcore.Hash of a fresh password, mismatch = random canonical PHC at exact params with a fresh password, both made on the host before each window (a window starts only when they are ready); a loadgen restart gets a new batch, never the old one. Pool gate-only. No cross-variant reuse in v1, so egress denial is containment only (the PR #31 entry's "cross-variant pair sharing relies on it" no longer holds).
 - Rejected: loadgen generating pairs with hashcore (Argon2 on the node during scored windows); pairs shared across variants.
 - Reason: pair generation costs Argon2 time; doing it on the host in the gap keeps it out of scored windows and loadgen free of hashcore.
@@ -472,7 +472,7 @@ max. Earlier entries are not backfilled.
 - Origin: Code
 
 ## 2026-10-24 · PR #46 (inferred) · The control API's wire types live in loadgen/wire, standard library only (DESIGN.md sec 10)
-- Decision: the 18 wire types, BootIDHeader and the run kind, run state and canary result strings are exported from loadgen/wire; loadgen's typed constants are defined from them; loadgen/wire_golden_test.go pins every type's bytes against loadgen/testdata/wire/; TestWireDeps keeps wire on the standard library.
+- Decision: the 18 wire types, BootIDHeader and the run kind, run state and canary result strings are exported from loadgen/wire; loadgen's typed constants are defined from them; loadgen/wire_golden_test.go pins every type's bytes against loadgen/testdata/wire/, and TestWireGoldenFull requires each _full case to set every field, so a new field fails until its golden file shows it; TestWireDeps keeps wire on the standard library.
 - Rejected: exporting the types from package loadgen (every client would import the server and its dependencies); a client-side copy of the structs (two definitions of the orchestrator's contract).
 - Reason: one definition of the wire for server, client, gate and orchestrator, and any byte change fails a test.
 - Reverse: move the types back into loadgen/control_http.go, unexported, and drop loadgen/wire.
@@ -486,7 +486,7 @@ max. Earlier entries are not backfilled.
 - Reverse: relax check() in loadgen/client/client.go.
 - Origin: Code
 
-## 2026-10-24 · PR #46 (inferred) · Host /verify pairs: a mismatch hashes another fresh password; crypto/rand order; the caller sets the split (DESIGN.md sec 8, 10)
+## 2026-10-24 · PR #46 (inferred) · Host /verify pairs: a mismatch hashes another fresh password; crypto/rand order; the caller sets the split (amends the PR #33 /verify pairs entry's mismatch method; DESIGN.md sec 8, 10)
 - Decision: internal/hostpairs makes a match pair from a fresh password and hashcore.Hash of itself and a mismatch pair from a fresh password and hashcore.Hash of another fresh password, returns them in a crypto/rand Fisher-Yates order, takes both counts from its caller, and fully verifies /hash answers (OK only for Verify's (true, nil)).
 - Rejected: a random canonical PHC string built in gate code (the parameter literal outside hashcore); a random-PHC helper in hashcore (a protected path).
 - Reason: it uses only hashcore's exported Hash, and a hash of a password the variant never sees is as unpredictable to it as a random one; the cost is one Argon2 per mismatch pair, 8.56 ms wall per hash with 4 workers in the 4-vCPU container.
