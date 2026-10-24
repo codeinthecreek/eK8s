@@ -4,7 +4,7 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 *(inferred)* are guesses, not read from the repo; correct them.
 
 ## Now
-- claude/loadgen-deploy (PR #45, inferred): loadgen PR 5, the Deployment: maxRate 19, GOMEMLIMIT, single-listener checks, the deploy/loadgen renderer, loadgen-up.sh and loadgen-smoke.sh in deploy smoke CI; DESIGN.md sec 10, 11, 15; twelve decisions.md entries; Go toolchain go1.26.10 (GO-2026-6809).
+- claude/gate-stage5 (PR #46, inferred): gate PR4, Stage 5; opens with the PR #45 reconcile.
 
 ## Next
 - Extract docs/workflow/ into its own repo (links inside it are relative and stay within the folder); then decide whether eK8s's own CLAUDE.md, handoff.md and reviewer.md are regenerated from the templates (docs/decisions.md, PR #32 entry).
@@ -26,7 +26,7 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 - Orchestrator cull must `docker rmi` culled variants' images, and also remove them from the kind node, not only from the host: the gate keeps a passing candidate's image (Report.Image) for kind load and never removes it later.
 - Fitness CPU-seconds source: metrics.k8s.io gives a usage rate, while DESIGN.md sec 9 wants cumulative pod CPU-seconds; settle in the fitness design (kubelet /metrics/resource or cgroup counters).
 - HPA at 70% of a 250m request pins variants at maxReplicas under load; revisit with the observation-window design (also the default 300s scale-down stabilisation). Windows now start from an idle gap with no warm-up exclusion (DESIGN.md sec 11), so the gap length versus the scale-down stabilisation decides how many replicas a variant starts a window with.
-- CI: the go-version pins are 1.26.10 (go.mod toolchain and both setup-go pins, bumped together for each Go security patch). Unpin to '1.26.x' only with check-latest: true, since setup-go checks the runner's tool cache before the go-versions manifest and a cached older patch matches '1.26.x' (re-check setup-go's resolution first; docs/decisions.md, PR #18 entry).
+- CI: the go-version pins are 1.26.10 (go.mod toolchain and both setup-go pins, bumped together for each Go security patch). Unpin to '1.26.x' only with check-latest: true, since setup-go checks the runner's tool cache before the go-versions manifest and a cached older patch matches '1.26.x' (re-check setup-go's resolution first; docs/decisions-archive.md, PR #18 entry, whose Revisit condition, "once the manifest lists >= 1.26.9", this line supersedes). Open question (unverified): setup-go v7's README says go-version-file supports go.mod's toolchain directive; if go-version-file: go.mod resolves to the toolchain line rather than the go directive, both setup-go pins could go (check setup-go's source first; docs/decisions-archive.md, PR #20 entry rejected go-version-file while the manifest lagged).
 - An in-flight request cap in loadgen (hypothetical; no concrete threat).
 - Wait moved before Shutdown in loadgen/cmd/loadgen/main.go is untested: the orders differ only for a start that lands between the two calls, which needs a hook inside run to test.
 - A test that gate Stage 4 shares Stage 2's Run (swapping in a fresh NewRun passes today); it needs a race-build candidate fixture whose salts repeat Stage 2's (docs/decisions.md, PR #43 shared-Run entry).
@@ -34,8 +34,8 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 - TestScheduleSlowNext flake: lag 23.4 ms against its 20 ms bound; 2 failures under local load (one in a mutation run, one in a solo -count=30 run); 120 of 120 passes otherwise. Recheck the bound against PR #41's mutant lags.
 
 ## Recent
+- #45 Loadgen PR 5 of 5, the Deployment: maxRate 19, GOMEMLIMIT, single-listener checks, the deploy/loadgen renderer, loadgen-up.sh and loadgen-smoke.sh in deploy smoke CI; the canary poll after a new boot_id (kindnet enforcement lag); DESIGN.md sec 10, 11, 15; twelve decisions.md entries; Go toolchain go1.26.10 (GO-2026-6809) (2026-10-22)
 - #44 Loadgen PR 4, the control API on :9090: config, targets, records, runs, canary, binary, end-to-end test; DESIGN.md sec 7, 10, 11, 15; ten decisions.md entries (2026-10-18)
 - #43 Classifier cleanup: drop Run.Reserve and ErrNotCanonical; test that a failed FullVerify keeps its salt; fix the Negative, freshPassword and Stage 4 doc comments; key the salt set on the decoded 16-byte salt (25.23 B per salt, was 149.3 B), with DESIGN.md sec 8 and three decisions.md entries (2026-10-16)
 - #42 Cut per-PR doc reads, docs-only: decisions.md entries before #32 move to docs/decisions-archive.md; the reconcile greps decisions.md instead of reading it; Recent capped at 5; overview.md/README.md refresh on request; docs/workflow/ frozen until extraction (2026-10-16)
 - #41 Loadgen PR 3 of 5, open-loop sender and records: per-target Ring and Record (pairs ride on records), the HTTP client and send (no keep-alives, no proxy, no redirects, WriteTimeout + 1s pinned by a go/parser test), RunWindow/RunBurst on an index-based open-loop schedule with Evidence, Skipped and Fault records, memory benchmarks; DESIGN.md sec 10, 11 and eight decisions.md entries (2026-10-16)
-- #40 Classifier strictness, security-relevant: classifier rejects 2xx bodies that do not match the spec exactly (S1-S5: single member, duplicate keys, JSON-equivalent forms, only 200 is success, 4 KiB MaxBodyBytes); gate and loadgen follow the cap contract (MaxBodyBytes+1 read, Err only for a failed read); loadgen records() adds bad_status; tests and mutation checks (2026-10-16)
