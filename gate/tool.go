@@ -13,6 +13,7 @@ import (
 // toolWaitDelay bounds Wait after a tool's context ends or the tool
 // exits. A cancelled context kills only the direct child; a grandchild
 // holding stdout or stderr open would otherwise block Wait without bound.
+// Such a process keeps running after runTool returns.
 var toolWaitDelay = 5 * time.Second
 
 // runTool runs the named tool with args, feeding it stdin (nil means no

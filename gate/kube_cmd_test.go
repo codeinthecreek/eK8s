@@ -101,6 +101,9 @@ func setReady(t *testing.T, poll, timeout time.Duration) {
 
 func list(items ...string) string { return string(kubeJSON(items...)) }
 
+// getArgv is the argv of one getDeployPods call as the fake records it.
+const getArgv = "get\ndeploy,pods\n-n\nns\n-l\napp=svc\n-o\njson\n--request-timeout\n30s\n--context\nkind-x\n--\n"
+
 func TestKubectl(t *testing.T) {
 	dir := fakeTool(t, "kubectl", []string{"hello\n"}, nil)
 	var out string
@@ -112,7 +115,7 @@ func TestKubectl(t *testing.T) {
 	if out != "hello" {
 		t.Errorf("out = %q, want hello", out)
 	}
-	if got, want := readFile(t, filepath.Join(dir, "argv")), "get\npods\n--context\nkind-x\n--\n"; got != want {
+	if got, want := readFile(t, filepath.Join(dir, "argv")), "get\npods\n--request-timeout\n30s\n--context\nkind-x\n--\n"; got != want {
 		t.Errorf("argv = %q, want %q", got, want)
 	}
 	if got := readFile(t, filepath.Join(dir, "stdin")); got != "in" {
@@ -126,6 +129,20 @@ func TestKubectlFailure(t *testing.T) {
 	bounded(t, func() { _, err = kubectl(context.Background(), "kind-x", nil, "get", "pods") })
 	if err == nil || !strings.HasPrefix(err.Error(), "kubectl get: exit status 1:") || !strings.Contains(err.Error(), "boom") {
 		t.Errorf("err = %v, want kubectl get: exit status 1: ... boom", err)
+	}
+}
+
+func TestKubectlRefusesDashDash(t *testing.T) {
+	dir := fakeTool(t, "kubectl", []string{""}, nil)
+	var err error
+	bounded(t, func() {
+		_, err = kubectl(context.Background(), "kind-x", nil, "exec", "p1", "--", "ls")
+	})
+	if err == nil || !strings.Contains(err.Error(), `"--"`) {
+		t.Errorf("err = %v, want an error naming \"--\"", err)
+	}
+	if n := calls(t, dir); n != 0 {
+		t.Errorf("kubectl called %d times, want 0", n)
 	}
 }
 
@@ -163,7 +180,7 @@ func TestWaitReady(t *testing.T) {
 			setReady(t, 10*time.Millisecond, tc.timeout)
 			var problem string
 			var fault error
-			bounded(t, func() { problem, fault = waitReady(context.Background(), "kind-x", "ns", tc.timeout) })
+			bounded(t, func() { problem, fault = waitReady(context.Background(), "kind-x", "ns", "app=svc", tc.timeout) })
 			if tc.ok && (problem != "" || fault != nil) {
 				t.Errorf("got (%q, %v), want ready", problem, fault)
 			}
@@ -176,6 +193,9 @@ func TestWaitReady(t *testing.T) {
 			if n := calls(t, dir); n != tc.polls {
 				t.Errorf("polls = %d, want %d", n, tc.polls)
 			}
+			if got, want := readFile(t, filepath.Join(dir, "argv")), strings.Repeat(getArgv, tc.polls); got != want {
+				t.Errorf("argv = %q, want %q", got, want)
+			}
 		})
 	}
 }
@@ -186,7 +206,9 @@ func TestWaitReadyPendingForever(t *testing.T) {
 	var problem string
 	var fault error
 	start := time.Now()
-	bounded(t, func() { problem, fault = waitReady(context.Background(), "kind-x", "ns", 50*time.Millisecond) })
+	bounded(t, func() {
+		problem, fault = waitReady(context.Background(), "kind-x", "ns", "app=svc", 50*time.Millisecond)
+	})
 	elapsed := time.Since(start)
 	if problem != "" || fault == nil || !strings.Contains(fault.Error(), "Unschedulable") {
 		t.Errorf("got (%q, %v), want a fault naming Unschedulable", problem, fault)
@@ -211,7 +233,7 @@ func TestWaitReadyKubectlHangs(t *testing.T) {
 	var problem string
 	var fault error
 	start := time.Now()
-	bounded(t, func() { problem, fault = waitReady(ctx, "kind-x", "ns", 50*time.Millisecond) })
+	bounded(t, func() { problem, fault = waitReady(ctx, "kind-x", "ns", "app=svc", 50*time.Millisecond) })
 	elapsed := time.Since(start)
 	if problem != "" || !errors.Is(fault, context.DeadlineExceeded) || !strings.Contains(fault.Error(), "did not answer") {
 		t.Errorf("got (%q, %v), want a fault wrapping DeadlineExceeded containing \"did not answer\"", problem, fault)
@@ -233,7 +255,7 @@ func TestWaitReadyContextCancelled(t *testing.T) {
 	var problem string
 	var fault error
 	start := time.Now()
-	bounded(t, func() { problem, fault = waitReady(ctx, "kind-x", "ns", time.Minute) })
+	bounded(t, func() { problem, fault = waitReady(ctx, "kind-x", "ns", "app=svc", time.Minute) })
 	if problem != "" || !errors.Is(fault, context.Canceled) {
 		t.Errorf("got (%q, %v), want a fault wrapping context.Canceled", problem, fault)
 	}
@@ -257,17 +279,44 @@ func TestPodHealthCheck(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			fakeTool(t, "kubectl", tc.outs, tc.exits)
+			dir := fakeTool(t, "kubectl", tc.outs, tc.exits)
 			var problem string
 			var fault error
-			bounded(t, func() { problem, fault = podHealthCheck(context.Background(), "kind-x", "ns") })
+			bounded(t, func() { problem, fault = podHealthCheck(context.Background(), "kind-x", "ns", "app=svc") })
 			if problem != tc.problem {
 				t.Errorf("problem = %q, want %q", problem, tc.problem)
 			}
 			if tc.fault == "" && fault != nil || tc.fault != "" && (fault == nil || !strings.Contains(fault.Error(), tc.fault)) {
 				t.Errorf("fault = %v, want containing %q", fault, tc.fault)
 			}
+			if got := readFile(t, filepath.Join(dir, "argv")); got != getArgv {
+				t.Errorf("argv = %q, want %q", got, getArgv)
+			}
 		})
+	}
+}
+
+// TestWaitReadyEmptySelector: an empty selector is a fault and kubectl is not
+// called.
+func TestWaitReadyEmptySelector(t *testing.T) {
+	dir := fakeTool(t, "kubectl", []string{list(testDeploy, readyP1)}, nil)
+	var problem string
+	var fault error
+	bounded(t, func() { problem, fault = waitReady(context.Background(), "kind-x", "ns", "", time.Second) })
+	if problem != "" || fault == nil || !strings.Contains(fault.Error(), "empty selector") {
+		t.Errorf("waitReady: got (%q, %v), want a fault naming the empty selector", problem, fault)
+	}
+	bounded(t, func() { problem, fault = podHealthCheck(context.Background(), "kind-x", "ns", "") })
+	if problem != "" || fault == nil || !strings.Contains(fault.Error(), "empty selector") {
+		t.Errorf("podHealthCheck: got (%q, %v), want a fault naming the empty selector", problem, fault)
+	}
+	var err error
+	bounded(t, func() { err = podsRunning(context.Background(), "kind-x", "ns", "", 1) })
+	if err == nil || !strings.Contains(err.Error(), "empty selector") {
+		t.Errorf("podsRunning: got %v, want an error naming the empty selector", err)
+	}
+	if n := calls(t, dir); n != 0 {
+		t.Errorf("kubectl called %d times, want 0", n)
 	}
 }
 
@@ -295,8 +344,8 @@ func TestPodsRunning(t *testing.T) {
 			if tc.err == "" && err != nil || tc.err != "" && (err == nil || !strings.Contains(err.Error(), tc.err)) {
 				t.Errorf("err = %v, want containing %q", err, tc.err)
 			}
-			if !strings.Contains(readFile(t, filepath.Join(dir, "argv")), "-n\nns\n-l\napp=svc\n") {
-				t.Errorf("argv = %q, want -n ns -l app=svc", readFile(t, filepath.Join(dir, "argv")))
+			if want := "get\npods\n-n\nns\n-l\napp=svc\n-o\njson\n--request-timeout\n30s\n--context\nkind-x\n--\n"; readFile(t, filepath.Join(dir, "argv")) != want {
+				t.Errorf("argv = %q, want %q", readFile(t, filepath.Join(dir, "argv")), want)
 			}
 		})
 	}

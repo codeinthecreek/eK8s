@@ -345,7 +345,7 @@ func readyCheck(d deployment, pods []pod, atTimeout bool) (ready bool, problem s
 	return false, "", errors.New(timeoutFault(pods[0]))
 }
 
-// podHealth judges every pod of a Deployment (sorted by name) after load,
+// podHealth judges every pod it is given (sorted by name) after load,
 // a pod the autoscaler added included. Pending and not-Ready pods are not
 // judged: only a pod removed by others or failed by its node (a fault) or
 // a container failure, an exit included (a problem). A fault suppresses a
@@ -368,15 +368,26 @@ var (
 	readyTimeout = 120 * time.Second
 	// readyGrace bounds each kubectl call of the Ready wait past its
 	// timeout, so an API server that stops answering cannot hold the wait
-	// (inferred; kubectl get against a local kind API server answers in
-	// well under a second).
+	// for more than readyGrace plus toolWaitDelay (inferred; kubectl get
+	// against a local kind API server answers in well under a second).
 	readyGrace = 30 * time.Second
+	// kubectlRequestTimeout bounds each API request of a kubectl call, so
+	// a kubectl orphaned by a SIGKILLed gate still ends: kubectl's default
+	// is no timeout (checked against v1.37.0 config_flags.go).
+	kubectlRequestTimeout = 30 * time.Second
 )
 
-// kubectl calls kubectl against the kube context kubeCtx. --context goes
-// last so runTool's error label stays "kubectl <subcommand>".
+// kubectl calls kubectl against the kube context kubeCtx. --request-timeout
+// and --context go last so runTool's error label stays "kubectl
+// <subcommand>"; for that reason args must not contain "--", after which
+// kubectl would pass both flags to a remote command, so it is an error and
+// nothing is started.
 func kubectl(ctx context.Context, kubeCtx string, stdin io.Reader, args ...string) (string, error) {
-	return runTool(ctx, stdin, "kubectl", append(slices.Clone(args), "--context", kubeCtx)...)
+	if slices.Contains(args, "--") {
+		return "", errors.New("kubectl: args contain \"--\"")
+	}
+	args = append(slices.Clone(args), "--request-timeout", kubectlRequestTimeout.String(), "--context", kubeCtx)
+	return runTool(ctx, stdin, "kubectl", args...)
 }
 
 // kindLoad loads a locally built image into the kind cluster. The form
@@ -387,27 +398,33 @@ func kindLoad(ctx context.Context, cluster, image string) error {
 	return err
 }
 
-// getDeployPods reads the Deployment and pods of namespace ns.
-func getDeployPods(ctx context.Context, kubeCtx, ns string) (deployment, []pod, error) {
-	out, err := kubectl(ctx, kubeCtx, nil, "get", "deploy,pods", "-n", ns, "-o", "json")
+// getDeployPods reads the pods and Deployment matching selector in ns. An
+// empty selector is an error, since it would match every pod of the
+// namespace; nothing is started.
+func getDeployPods(ctx context.Context, kubeCtx, ns, selector string) (deployment, []pod, error) {
+	if selector == "" {
+		return deployment{}, nil, errors.New("get deploy,pods: empty selector")
+	}
+	out, err := kubectl(ctx, kubeCtx, nil, "get", "deploy,pods", "-n", ns, "-l", selector, "-o", "json")
 	if err != nil {
 		return deployment{}, nil, err
 	}
 	return parseDeployPods([]byte(out))
 }
 
-// waitReady polls until the namespace's first pod is Ready. A problem is
-// a candidate failure, a fault is a gate fault (any kubectl, parse or
-// context error included); the timeout rules live in readyCheck. The
-// last poll is made at or after the deadline with atTimeout true, so a
-// verdict always comes. Each kubectl call is cut off readyGrace after the
-// deadline, so the wait ends by timeout + readyGrace at the latest.
-func waitReady(ctx context.Context, kubeCtx, ns string, timeout time.Duration) (problem string, fault error) {
+// waitReady polls until the first of the pods matching selector in ns is
+// Ready. A problem is a candidate failure, a fault is a gate fault (any
+// kubectl, parse or context error included); the timeout rules live in
+// readyCheck. The last poll is made at or after the deadline with
+// atTimeout true, so a verdict always comes. Each kubectl call is cut off
+// readyGrace after the deadline, so the wait ends by timeout + readyGrace +
+// toolWaitDelay at the latest.
+func waitReady(ctx context.Context, kubeCtx, ns, selector string, timeout time.Duration) (problem string, fault error) {
 	deadline := time.Now().Add(timeout)
 	wctx, cancel := context.WithDeadline(ctx, deadline.Add(readyGrace))
 	defer cancel()
 	for {
-		d, pods, err := getDeployPods(wctx, kubeCtx, ns)
+		d, pods, err := getDeployPods(wctx, kubeCtx, ns, selector)
 		if err != nil {
 			if ctx.Err() == nil && wctx.Err() != nil {
 				return "", fmt.Errorf("wait ready: kubectl did not answer within the timeout plus readyGrace: %w", wctx.Err())
@@ -432,10 +449,9 @@ func waitReady(ctx context.Context, kubeCtx, ns string, timeout time.Duration) (
 	}
 }
 
-// podHealthCheck judges every pod of the namespace's Deployment with
-// podHealth.
-func podHealthCheck(ctx context.Context, kubeCtx, ns string) (problem string, fault error) {
-	_, pods, err := getDeployPods(ctx, kubeCtx, ns)
+// podHealthCheck judges every pod matching selector in ns with podHealth.
+func podHealthCheck(ctx context.Context, kubeCtx, ns, selector string) (problem string, fault error) {
+	_, pods, err := getDeployPods(ctx, kubeCtx, ns, selector)
 	if err != nil {
 		return "", fmt.Errorf("pod health: %w", err)
 	}
@@ -444,8 +460,12 @@ func podHealthCheck(ctx context.Context, kubeCtx, ns string) (problem string, fa
 
 // podsRunning returns nil only if the pods matching selector in ns are
 // exactly want, each phase Running and not being deleted. Every error is
-// a fault for the caller.
+// a fault for the caller. An empty selector is an error; nothing is
+// started.
 func podsRunning(ctx context.Context, kubeCtx, ns, selector string, want int) error {
+	if selector == "" {
+		return errors.New("get pods: empty selector")
+	}
 	out, err := kubectl(ctx, kubeCtx, nil, "get", "pods", "-n", ns, "-l", selector, "-o", "json")
 	if err != nil {
 		return err
