@@ -1,7 +1,6 @@
 package gate
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -38,17 +37,7 @@ func imageTag(binary []byte) string {
 // docker runs the docker CLI. A command that fails is a gate fault: only
 // the health check below says anything about the candidate.
 func docker(ctx context.Context, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, "docker", args...)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		if ctx.Err() != nil {
-			return "", fmt.Errorf("docker %s: %w", args[0], ctx.Err())
-		}
-		return "", fmt.Errorf("docker %s: %w: %s", args[0], err, strings.TrimSpace(stderr.String()))
-	}
-	return strings.TrimSpace(stdout.String()), nil
+	return runTool(ctx, nil, "docker", args...)
 }
 
 // dockerImage is an image built by checkDocker, and whether it already
