@@ -4,7 +4,7 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 *(inferred)* are guesses, not read from the repo; correct them.
 
 ## Now
-- claude/gate-stage5-pr4b (PR #47, inferred): loadgen response-header cap (4 KiB, 1xx included; an over-cap response is the variant's transport_error) and a stalled-request memory benchmark, before gate Stage 5; the branch keeps its earlier name.
+- claude/gate-stage5-pr4b (PR #47, inferred): loadgen response-header cap (1 KiB, 1xx included; an over-cap response is the variant's transport_error) and a stalled-request memory benchmark, before gate Stage 5; the branch keeps its earlier name.
 
 ## Next
 - Extract docs/workflow/ into its own repo (links inside it are relative and stay within the folder); then decide whether eK8s's own CLAUDE.md, handoff.md and reviewer.md are regenerated from the templates (docs/decisions.md, PR #32 entry).

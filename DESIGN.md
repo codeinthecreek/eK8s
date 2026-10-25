@@ -897,11 +897,12 @@ recorded; sends are never skipped to catch up. A window is round(`r` x W)
 sends; a burst uses the same scheduler with its own rate and count n. A
 send is skipped only when a `/verify` is due and the stream has no pair
 left (`ErrOutOfPairs`); it becomes a skipped record. In-flight requests are
-not capped. Each is bounded instead: response headers are capped at 4 KiB,
+not capped. Each is bounded instead: response headers are capped at 1 KiB,
 1xx responses included (`maxResponseHeaderBytes`), and bodies at
-`MaxBodyBytes`, so a request its variant stalls holds at most about 110 KiB
-(`BenchmarkStalledRequest`: about 78 KiB of heap, plus goroutine stacks);
-an over-cap response is the variant's `transport_error`.
+`MaxBodyBytes`, so a request its variant stalls holds at most about 80 KiB
+(`BenchmarkStalledRequest`, the worst of four shapes: about 56 KiB of heap,
+plus goroutine stacks); an over-cap response is the variant's
+`transport_error`.
 
 **Schedule lag and global exclusion.** Every send records its intended and
 actual send time. A scoring half is excluded for all variants (loadgen is
