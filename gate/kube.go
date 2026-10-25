@@ -363,8 +363,8 @@ var (
 	// readyPoll is the pause between polls of the Ready wait.
 	readyPoll = 1 * time.Second
 	// readyTimeout is how long a caller waits for the first pod to be
-	// Ready (inferred; check against real pod start times, workstation
-	// item W6).
+	// Ready (inferred; to be checked against real pod start times on the
+	// workstation).
 	readyTimeout = 120 * time.Second
 	// readyGrace bounds each kubectl call of the Ready wait past its
 	// timeout, so an API server that stops answering cannot hold the wait
