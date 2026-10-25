@@ -464,7 +464,7 @@ max. Earlier entries are not backfilled.
 - Reverse: replace the poll in check (3) with a single assertion.
 - Origin: Code
 
-## 2026-10-24 · PR #46 · Stage 5 lands as three PRs (amends docs/decisions-archive.md, PR #18 "gate/ in four PRs")
+## 2026-10-24 · PR #46 · Stage 5 lands as three PRs (amends docs/decisions-archive.md, PR #18 "gate/ in four PRs") (amended by the PR #48 five-PR entry)
 - Decision: gate PR4 (Stage 5) is PR4a (internal/hostpairs, loadgen/wire, loadgen/client), PR4b (gate.Stage5 over kubectl and kind, cmd/gate -stage5) and PR4c (deploy/stage5-smoke.sh in deploy CI: gen 0 and three mutants).
 - Rejected: one Stage 5 PR, or 4a with 4b (each likely over the review packet's ~600-line diff limit).
 - Reason: each PR reviews alone, and 4a's packages are the ones the orchestrator needs too.
@@ -494,10 +494,33 @@ max. Earlier entries are not backfilled.
 - Reverse: replace Generate's mismatch branch; DESIGN.md sec 8 and sec 10 edits.
 - Origin: Code
 
-## 2026-10-25 · PR #47 (inferred) · loadgen caps response headers at 1 KiB, 1xx included; an over-cap response is transport_error (amends the PR #45 memory-sum entry's in-flight term; DESIGN.md sec 10)
+## 2026-10-25 · PR #47 · loadgen caps response headers at 1 KiB, 1xx included; an over-cap response is transport_error (amends the PR #45 memory-sum entry's in-flight term; DESIGN.md sec 10)
 - Decision: loadgen's client sets MaxResponseHeaderBytes to 1 KiB (maxResponseHeaderBytes, loadgen/send.go); with no httptrace Got1xxResponse hook, net/http counts every 1xx response toward the same limit; an over-cap response fails the request as the variant's transport_error. BenchmarkStalledRequest measures the heap held per stalled request in four shapes; the worst, a body stall after bare-LF lines repeating one name, holds about 56 KiB, about 80 KiB with goroutine stacks.
 - Rejected: an in-flight cap (it changes the open-loop design); not counting a Stage 5 boot_id change toward halting the run after repeated gate faults (it leaves live windows exposed and charges nothing to the variant); 4 KiB (about 180 KiB per stalled request, so about 304 MiB with four stalling live variants plus a burst, over 256Mi); 2 KiB (about 115 KiB, so about 236.5 MiB in that case, over the ~230 MiB GOMEMLIMIT).
 - Reason: with Go's default 10 MiB limit, a variant sending large or many tiny headers could make loadgen hold 10-50 MiB per in-flight request, so a few dozen stalled requests could OOM-kill it (256Mi). At 1 KiB a burst at maxRate 19 (about 532 in flight x ~80 KiB = ~42 MiB) brings PR #45's ~117 MiB to about 159 MiB live, and four stalling live variants plus a burst (about 1,064 in flight) to about 200 MiB, under the ~230 MiB GOMEMLIMIT. gen 0's largest header block is 164 B, about 6 times under the cap.
 - Reverse: drop tr.MaxResponseHeaderBytes in loadgen/send.go, with its tests and the benchmark.
 - Revisit: a variant that legitimately needs more header bytes (it fails as transport_error); the 1,064 case is measured only as a heap benchmark, not in the cluster; whether kernel socket buffers count against the pod's memcg is unproven.
 - Origin: Code
+
+## 2026-10-25 · PR #48 (inferred) · Stage 5 lands as five PRs: 4a, 4b1, 4b2, 4b3, 4c (amends the PR #46 "Stage 5 lands as three PRs" entry)
+- Decision: after 4a (#46) and the loadgen header cap (#47): 4b1 cluster plumbing (gate/tool.go runTool; gate/kube.go pod classifier, kubectl and kind wrappers, Ready wait); 4b2 the kubectl proxy transport and burst evaluation; 4b3 gate.Stage5; 4c cmd/gate -stage5 and deploy/stage5-smoke.sh in deploy CI.
+- Rejected: one PR4b holding gate.Stage5 with its transport and cluster plumbing.
+- Reason: each part reviews alone under the ~600-line packet limit, and 4b1's files carry no Stage 5 coupling, so the gate-pod series can reuse them.
+- Reverse: merge the remaining PRs into fewer.
+- Origin: chat
+
+## 2026-10-25 · PR #48 (inferred) · The gate runs docker, kubectl and kind through one exec helper, runTool; kubectl and kind as commands, no client-go
+- Decision: gate/tool.go runTool(ctx, stdin, name, args...) runs every external tool; an ended ctx gives an error wrapping ctx.Err() without stderr, any other failure carries stderr; cmd.WaitDelay (toolWaitDelay, 5 s) bounds Wait when a process the tool started holds its output pipes. docker() wraps it with its error text unchanged; kubectl and kind are host prerequisites (gate/doc.go). kubectl() appends --request-timeout 30s (kubectl's default is none) and refuses args containing "--".
+- Rejected: client-go (a large dependency tree for a few calls, and a second path to the cluster beside the kubectl the deploy scripts use).
+- Reason: one place holds the ctx-versus-stderr split and the pipe bound; ci.yml installs no kubectl or kind, so the tests use fake scripts on PATH and never skip.
+- Reverse: replace kubectl and kindLoad in gate/kube.go with client-go calls; inline runTool back into docker().
+- Revisit: runTool kills only the direct child, so a process a tool starts (kind load's image export and import) outlives a cancel, and a SIGKILLed gate leaves a running kind load or docker command behind (kubectl ends within its request timeout); a process-group kill is parked in docs/STATUS.md.
+- Origin: chat
+
+## 2026-10-25 · PR #48 (inferred) · Ready wait and pod health: which pod states are gate faults and which are candidate failures
+- Decision: gate/kube.go readyCheck judges the first pod's Ready wait (readyTimeout 120 s, a poll every 1 s, each kubectl call cut off readyGrace 30 s past the deadline) and podHealth judges every pod after load. Gate faults: Deployment ReplicaFailure (admission refusal), ErrImageNeverPull, Evicted, DisruptionTarget, deletionTimestamp, pod phase Failed (kubelet admission rejection such as OutOfcpu; the pod stays Failed after its replacement is Ready, so any admission rejection during the wait or the load, an HPA scale-up included, is a fault), and at the timeout Pending, Unschedulable or any other waiting reason. Candidate failures: restartCount > 0, OOMKilled or Error, CrashLoopBackOff, any non-init container exit (Completed included), and at the timeout Running but never Ready. Every fault check precedes any failure check; Pending and not-Ready pods are judged only in the Ready wait.
+- Rejected: one classifier with a phase switch (it mixes the two rule sets); Unschedulable as a fault at once (a previous candidate's pods may still be releasing resources).
+- Reason: only the candidate's own behaviour may fail it; a node, admission or cluster problem says nothing about it, and a gate fault retries the candidate once, then halts the run (the retry rule lands in DESIGN.md sec 11 with gate.Stage5). No message field is decoded (terminated.message is candidate-written) and reasons print from an allowlist. The HPA's default 300 s scale-down stabilisation keeps a scale-down's deletionTimestamp out of the load window (inferred); readyTimeout and readyGrace are inferred (to be checked against real pod start times on the workstation).
+- Reverse: edit readyCheck and podHealth in gate/kube.go.
+- Revisit: Evicted and phase Failed as faults assume the candidate cannot drive node pressure (a variant with no ephemeral-storage limit that floods its log could be evicted under DiskPressure; the worst case is a halted run, never a pass); restarts and Running but never Ready are scored without checking the node, so a NotReady node or a node restart (ContainerStatusUnknown) counts against the candidate until gate.Stage5 checks node health first.
+- Origin: chat

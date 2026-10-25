@@ -18,6 +18,8 @@
 // capabilities (on Ubuntu >= 23.10, an AppArmor profile granting bwrap
 // userns, preferred, or kernel.apparmor_restrict_unprivileged_userns=0);
 // a docker daemon; gcc and a static libc (libc6-dev, glibc-static) for
-// Stage 4's race build. A missing one is a gate fault (an error from Run),
-// never a candidate failure.
+// Stage 4's race build; kubectl and kind on PATH for Stage 5 (CI pins
+// kubectl v1.37.0 and kind v0.33.0, .github/workflows/deploy.yml). A
+// missing one is a gate fault (an error from Run), never a candidate
+// failure.
 package gate
