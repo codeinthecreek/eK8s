@@ -502,14 +502,14 @@ max. Earlier entries are not backfilled.
 - Revisit: a variant that legitimately needs more header bytes (it fails as transport_error); the 1,064 case is measured only as a heap benchmark, not in the cluster; whether kernel socket buffers count against the pod's memcg is unproven.
 - Origin: Code
 
-## 2026-10-25 · PR #48 (inferred) · Stage 5 lands as five PRs: 4a, 4b1, 4b2, 4b3, 4c (amends the PR #46 "Stage 5 lands as three PRs" entry)
+## 2026-10-25 · PR #48 · Stage 5 lands as five PRs: 4a, 4b1, 4b2, 4b3, 4c (amends the PR #46 "Stage 5 lands as three PRs" entry)
 - Decision: after 4a (#46) and the loadgen header cap (#47): 4b1 cluster plumbing (gate/tool.go runTool; gate/kube.go pod classifier, kubectl and kind wrappers, Ready wait); 4b2 the kubectl proxy transport and burst evaluation; 4b3 gate.Stage5; 4c cmd/gate -stage5 and deploy/stage5-smoke.sh in deploy CI.
 - Rejected: one PR4b holding gate.Stage5 with its transport and cluster plumbing.
 - Reason: each part reviews alone under the ~600-line packet limit, and 4b1's files carry no Stage 5 coupling, so the gate-pod series can reuse them.
 - Reverse: merge the remaining PRs into fewer.
 - Origin: chat
 
-## 2026-10-25 · PR #48 (inferred) · The gate runs docker, kubectl and kind through one exec helper, runTool; kubectl and kind as commands, no client-go
+## 2026-10-25 · PR #48 · The gate runs docker, kubectl and kind through one exec helper, runTool; kubectl and kind as commands, no client-go
 - Decision: gate/tool.go runTool(ctx, stdin, name, args...) runs every external tool; an ended ctx gives an error wrapping ctx.Err() without stderr, any other failure carries stderr; cmd.WaitDelay (toolWaitDelay, 5 s) bounds Wait when a process the tool started holds its output pipes. docker() wraps it with its error text unchanged; kubectl and kind are host prerequisites (gate/doc.go). kubectl() appends --request-timeout 30s (kubectl's default is none) and refuses args containing "--".
 - Rejected: client-go (a large dependency tree for a few calls, and a second path to the cluster beside the kubectl the deploy scripts use).
 - Reason: one place holds the ctx-versus-stderr split and the pipe bound; ci.yml installs no kubectl or kind, so the tests use fake scripts on PATH and never skip.
@@ -517,7 +517,7 @@ max. Earlier entries are not backfilled.
 - Revisit: runTool kills only the direct child, so a process a tool starts (kind load's image export and import) outlives a cancel, and a SIGKILLed gate leaves a running kind load or docker command behind (kubectl ends within its request timeout); a process-group kill is parked in docs/STATUS.md.
 - Origin: chat
 
-## 2026-10-25 · PR #48 (inferred) · Ready wait and pod health: which pod states are gate faults and which are candidate failures
+## 2026-10-25 · PR #48 · Ready wait and pod health: which pod states are gate faults and which are candidate failures
 - Decision: gate/kube.go readyCheck judges the first pod's Ready wait (readyTimeout 120 s, a poll every 1 s, each kubectl call cut off readyGrace 30 s past the deadline) and podHealth judges every pod after load. Gate faults: Deployment ReplicaFailure (admission refusal), ErrImageNeverPull, Evicted, DisruptionTarget, deletionTimestamp, pod phase Failed (kubelet admission rejection such as OutOfcpu; the pod stays Failed after its replacement is Ready, so any admission rejection during the wait or the load, an HPA scale-up included, is a fault), and at the timeout Pending, Unschedulable or any other waiting reason. Candidate failures: restartCount > 0, OOMKilled or Error, CrashLoopBackOff, any non-init container exit (Completed included), and at the timeout Running but never Ready. Every fault check precedes any failure check; Pending and not-Ready pods are judged only in the Ready wait.
 - Rejected: one classifier with a phase switch (it mixes the two rule sets); Unschedulable as a fault at once (a previous candidate's pods may still be releasing resources).
 - Reason: only the candidate's own behaviour may fail it; a node, admission or cluster problem says nothing about it, and a gate fault retries the candidate once, then halts the run (the retry rule lands in DESIGN.md sec 11 with gate.Stage5). No message field is decoded (terminated.message is candidate-written) and reasons print from an allowlist. The HPA's default 300 s scale-down stabilisation keeps a scale-down's deletionTimestamp out of the load window (inferred); readyTimeout and readyGrace are inferred (to be checked against real pod start times on the workstation).
