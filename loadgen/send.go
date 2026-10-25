@@ -16,8 +16,19 @@ import (
 // (DESIGN.md sec 10).
 const clientTimeout = 3*classifier.HangTimeout + time.Second
 
+// maxResponseHeaderBytes caps a response's header bytes, status line
+// included, counted together with every 1xx response before it: loadgen
+// sets no httptrace Got1xxResponse hook, the one case in which net/http
+// gives each 1xx its own limit. A response over it fails the request, a
+// transport_error and so the variant's failure. 4 KiB is about 25 times
+// gen 0's largest header block (164 B, a 503 with Retry-After) and bounds
+// what each in-flight request holds while its headers arrive (DESIGN.md
+// sec 10).
+const maxResponseHeaderBytes = 4 << 10
+
 // newClient returns loadgen's HTTP client: one connection per request, no
-// proxy, no redirects followed, and a timeout of clientTimeout. A
+// proxy, no redirects followed, response headers capped at
+// maxResponseHeaderBytes, and a timeout of clientTimeout. A
 // redirect is the variant's own response (a 3xx): following it would let
 // a variant send loadgen's request, and its load, to any address
 // loadgen's egress reaches, a peer variant included.
@@ -25,6 +36,7 @@ func newClient() *http.Client {
 	tr := http.DefaultTransport.(*http.Transport).Clone()
 	tr.DisableKeepAlives = true
 	tr.Proxy = nil
+	tr.MaxResponseHeaderBytes = maxResponseHeaderBytes
 	return &http.Client{
 		Transport: tr,
 		Timeout:   clientTimeout,

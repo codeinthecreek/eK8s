@@ -1,7 +1,10 @@
 package loadgen
 
 import (
+	"bufio"
 	"bytes"
+	"context"
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/printer"
@@ -12,6 +15,8 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strconv"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -234,6 +239,9 @@ func TestNewClient(t *testing.T) {
 	if !tr.DisableKeepAlives || tr.Proxy != nil {
 		t.Errorf("DisableKeepAlives = %v, Proxy nil = %v; want true, true", tr.DisableKeepAlives, tr.Proxy == nil)
 	}
+	if tr.MaxResponseHeaderBytes != maxResponseHeaderBytes || maxResponseHeaderBytes != 4<<10 {
+		t.Errorf("MaxResponseHeaderBytes = %d, maxResponseHeaderBytes = %d; want both 4 KiB (DESIGN.md sec 10)", tr.MaxResponseHeaderBytes, maxResponseHeaderBytes)
+	}
 	if clientTimeout <= 3*classifier.HangTimeout {
 		t.Errorf("clientTimeout = %v, want more than cmd/service's WriteTimeout, %v", clientTimeout, 3*classifier.HangTimeout)
 	}
@@ -299,4 +307,270 @@ func TestSendActual(t *testing.T) {
 		}
 		prev = actual
 	}
+}
+
+const (
+	// headerBudget is the most a headerServer writes per connection,
+	// so that no test depends on the client to stop a flood.
+	headerBudget = 64 << 10
+	// headerDeadline bounds each header-cap send, well under
+	// clientTimeout, so that a missing cap fails the test at its own
+	// bound instead of waiting out the client.
+	headerDeadline = 3 * time.Second
+	// readBuffer is the transport's default read buffer: the client may
+	// read up to one buffer past what it parses.
+	readBuffer = 4 << 10
+)
+
+// headerServer is a raw TCP server for the header-cap tests. On each
+// connection it reads the request, writes pieces in order with gap
+// between them, at most headerBudget bytes in all, then holds the
+// connection open until the client closes it or Close is called, so
+// that only the client ends the exchange.
+type headerServer struct {
+	URL string
+	ln  net.Listener
+
+	mu     sync.Mutex
+	conns  []net.Conn
+	closed bool
+}
+
+// newHeaderServer starts a headerServer and closes it when the test or
+// benchmark ends.
+func newHeaderServer(tb testing.TB, gap time.Duration, pieces [][]byte) *headerServer {
+	tb.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		tb.Fatal(err)
+	}
+	s := &headerServer{URL: "http://" + ln.Addr().String(), ln: ln}
+	tb.Cleanup(s.Close)
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			if !s.track(c) {
+				c.Close()
+				return
+			}
+			go s.handle(c, gap, pieces)
+		}
+	}()
+	return s
+}
+
+func (s *headerServer) track(c net.Conn) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return false
+	}
+	s.conns = append(s.conns, c)
+	return true
+}
+
+func (s *headerServer) handle(c net.Conn, gap time.Duration, pieces [][]byte) {
+	defer c.Close()
+	if readRequest(c) != nil {
+		return
+	}
+	written := 0
+	for i, p := range pieces {
+		if i > 0 && gap > 0 {
+			time.Sleep(gap)
+		}
+		p = p[:min(len(p), headerBudget-written)]
+		n, err := c.Write(p)
+		written += n
+		if err != nil || written == headerBudget {
+			break
+		}
+	}
+	var one [1]byte
+	for {
+		if _, err := c.Read(one[:]); err != nil {
+			return
+		}
+	}
+}
+
+// readRequest reads and discards one request, so that closing the
+// connection later sends no reset over unread request bytes. What it
+// allocates is garbage once it returns.
+func readRequest(c net.Conn) error {
+	r, err := http.ReadRequest(bufio.NewReader(c))
+	if err != nil {
+		return err
+	}
+	_, err = io.Copy(io.Discard, r.Body)
+	return err
+}
+
+// Close stops the listener and closes every connection, which ends any
+// send still waiting on one.
+func (s *headerServer) Close() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return
+	}
+	s.closed = true
+	s.ln.Close()
+	for _, c := range s.conns {
+		c.Close()
+	}
+}
+
+// countingConn adds the bytes read from it to n.
+type countingConn struct {
+	net.Conn
+	n *atomic.Int64
+}
+
+func (c countingConn) Read(p []byte) (int, error) {
+	m, err := c.Conn.Read(p)
+	c.n.Add(int64(m))
+	return m, err
+}
+
+// countReads makes s's client add every byte it reads from a
+// connection to n.
+func countReads(tb testing.TB, s *Sender, n *atomic.Int64) {
+	tb.Helper()
+	tr := s.client.Transport.(*http.Transport)
+	dial := tr.DialContext
+	if dial == nil {
+		tb.Fatal("Transport.DialContext is nil")
+	}
+	tr.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		c, err := dial(ctx, network, addr)
+		if err != nil {
+			return nil, err
+		}
+		return countingConn{c, n}, nil
+	}
+}
+
+// headerLines returns a response head of exactly n bytes, the blank
+// line included: status, then the fixed header lines, then X-Pad lines
+// of at most 64 bytes each. Each line is its own piece.
+func headerLines(t *testing.T, status string, fixed []string, n int) [][]byte {
+	t.Helper()
+	pieces := [][]byte{[]byte(status + "\r\n")}
+	r := n - len(status) - 2 - 2
+	for _, f := range fixed {
+		pieces = append(pieces, []byte(f+"\r\n"))
+		r -= len(f) + 2
+	}
+	const minLine = len("X-Pad: a\r\n")
+	for r > 0 {
+		l := min(64, r)
+		if r-l > 0 && r-l < minLine {
+			l = r - minLine
+		}
+		if l < minLine {
+			t.Fatalf("headerLines: %d bytes left, less than one X-Pad line", r)
+		}
+		pieces = append(pieces, []byte("X-Pad: "+strings.Repeat("a", l-len("X-Pad: \r\n"))+"\r\n"))
+		r -= l
+	}
+	if r < 0 {
+		t.Fatalf("headerLines: status and fixed lines exceed %d bytes", n)
+	}
+	return append(pieces, []byte("\r\n"))
+}
+
+// hashResponse returns the pieces of a valid 200 /hash response whose
+// head is exactly headBytes, and the hash it carries.
+func hashResponse(t *testing.T, headBytes int) ([][]byte, string) {
+	t.Helper()
+	hash := randomExactPHC()
+	body := hashJSON(hash)
+	head := headerLines(t, "HTTP/1.1 200 OK", []string{"Content-Type: application/json", "Content-Length: " + strconv.Itoa(len(body))}, headBytes)
+	return append(head, body), hash
+}
+
+// sendWithin runs send in its own goroutine and fails the test if it has
+// not returned within headerDeadline.
+func sendWithin(t *testing.T, s *Sender, baseURL string, req Request) Response {
+	t.Helper()
+	done := make(chan Response, 1)
+	go func() {
+		_, resp, _ := s.send(baseURL, req)
+		done <- resp
+	}()
+	select {
+	case resp := <-done:
+		return resp
+	case <-time.After(headerDeadline):
+		t.Fatalf("send did not return within %v (clientTimeout %v): the header cap did not end it", headerDeadline, clientTimeout)
+		return Response{}
+	}
+}
+
+// sendOverCap runs req against pieces, served with gap between them, and
+// checks that it fails on the header cap: Err names the exceeded limit,
+// the client read at most the cap plus one read buffer, and the Checker
+// gives transport_error.
+func sendOverCap(t *testing.T, gap time.Duration, pieces [][]byte) {
+	t.Helper()
+	srv := newHeaderServer(t, gap, pieces)
+	s := NewSender()
+	var read atomic.Int64
+	countReads(t, s, &read)
+	req := hashRequest(newPassword())
+	resp := sendWithin(t, s, srv.URL, req)
+	want := fmt.Sprintf("exceeded %d bytes", maxResponseHeaderBytes)
+	if resp.Err == nil || !strings.Contains(resp.Err.Error(), want) {
+		t.Errorf("send = status %d, Err %v; want an error naming %q", resp.Status, resp.Err, want)
+	}
+	n := read.Load()
+	if n > maxResponseHeaderBytes+readBuffer {
+		t.Errorf("client read %d bytes, want at most %d (the cap plus one read buffer)", n, maxResponseHeaderBytes+readBuffer)
+	}
+	t.Logf("client read %d bytes before %v", n, resp.Err)
+	check(t, NewChecker(), req, resp, verdict(classifier.ReasonTransportError), nil)
+}
+
+// TestSendHeaderOverCap: a valid 200 whose head is one byte over the
+// cap, sent at once.
+func TestSendHeaderOverCap(t *testing.T) {
+	pieces, _ := hashResponse(t, maxResponseHeaderBytes+1)
+	sendOverCap(t, 0, pieces)
+}
+
+// TestSendHeaderDrip: a head of twice the cap, one line every 5 ms, so
+// the cap ends it after about 70 lines (~350 ms), not the client timeout.
+func TestSendHeaderDrip(t *testing.T) {
+	pieces, _ := hashResponse(t, 2*maxResponseHeaderBytes)
+	sendOverCap(t, 5*time.Millisecond, pieces)
+}
+
+// TestSendHeader1xxFlood: 16 102 responses of 512 bytes each, every one
+// under the cap but 8 KiB together, then a valid 200: every 1xx counts
+// toward the one cap.
+func TestSendHeader1xxFlood(t *testing.T) {
+	var pieces [][]byte
+	for range 16 {
+		pieces = append(pieces, bytes.Join(headerLines(t, "HTTP/1.1 102 Processing", nil, 512), nil))
+	}
+	final, _ := hashResponse(t, 200)
+	sendOverCap(t, 0, append(pieces, final...))
+}
+
+// TestSendHeaderAtCap: a valid 200 whose head is exactly the cap
+// classifies normally, so the cap is not off by one against
+// TestSendHeaderOverCap's one byte more.
+func TestSendHeaderAtCap(t *testing.T) {
+	pieces, hash := hashResponse(t, maxResponseHeaderBytes)
+	srv := newHeaderServer(t, 0, pieces)
+	req := hashRequest(newPassword())
+	resp := sendWithin(t, NewSender(), srv.URL, req)
+	if resp.Err != nil || resp.Status != http.StatusOK {
+		t.Fatalf("send = status %d, Err %v; want 200, nil", resp.Status, resp.Err)
+	}
+	check(t, NewChecker(), req, resp, verdict(classifier.ReasonNone), &HashPair{req.Password, hash})
 }

@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"runtime"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -12,7 +14,8 @@ import (
 )
 
 // These benchmarks measure the memory DESIGN.md sec 10 budgets for: a
-// Record held in a Ring and a salt held in a Checker's set. They are
+// Record held in a Ring, a salt held in a Checker's set and a request
+// stalled in its headers. They are
 // Benchmark functions so plain go test does not run them. Each builds
 // its structure once, however large b.N is, so run them with
 //
@@ -156,4 +159,56 @@ func BenchmarkCheckerSalts(b *testing.B) {
 		}
 		return c
 	})
+}
+
+const memStalled = 200
+
+// BenchmarkStalledRequest: the live heap a Sender holds per request
+// stalled mid-header at the cap, in the worst header shape: distinct
+// 2-3 byte names with empty values, so each 5-6 byte line is its own
+// header map entry. Each of memStalled sends gets just under
+// maxResponseHeaderBytes of such lines and then nothing, until the
+// server closes. It feeds the in-flight term of the PR #45 memory sum
+// (docs/decisions.md), as KiB/request. It leaves out goroutine stacks
+// (three per request: send's, the transport's read and write loops) and
+// counts the fake server's side of each connection (one net.Conn and a
+// 1-byte buffer), so it reads slightly high.
+func BenchmarkStalledRequest(b *testing.B) {
+	const names = "abcdefghijklmnopqrstuvwxyz0123456789"
+	head := []byte("HTTP/1.1 200 OK\r\n")
+	for i := 0; ; i++ {
+		name := []byte{names[i%36], names[i/36%36]}
+		if i >= 36*36 {
+			name = append(name, names[i/(36*36)%36])
+		}
+		line := append(name, ":\r\n"...)
+		if len(head)+len(line) > maxResponseHeaderBytes-64 {
+			break
+		}
+		head = append(head, line...)
+	}
+	srv := newHeaderServer(b, 0, [][]byte{head})
+	s := NewSender()
+	var read atomic.Int64
+	countReads(b, s, &read)
+	req := hashRequest(newPassword())
+
+	before := heapAlloc()
+	var wg sync.WaitGroup
+	for range memStalled {
+		wg.Go(func() { s.send(srv.URL, req) })
+	}
+	// Wait until every send has read its whole head and waits for more.
+	want := int64(memStalled * len(head))
+	for deadline := time.Now().Add(clientTimeout / 2); read.Load() < want; time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			srv.Close()
+			wg.Wait()
+			b.Fatalf("read %d of %d head bytes within %v", read.Load(), want, clientTimeout/2)
+		}
+	}
+	after := heapAlloc()
+	srv.Close()
+	wg.Wait()
+	b.ReportMetric(float64(after-before)/memStalled/1024, "KiB/request")
 }
