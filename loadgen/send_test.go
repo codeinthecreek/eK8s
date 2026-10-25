@@ -239,8 +239,8 @@ func TestNewClient(t *testing.T) {
 	if !tr.DisableKeepAlives || tr.Proxy != nil {
 		t.Errorf("DisableKeepAlives = %v, Proxy nil = %v; want true, true", tr.DisableKeepAlives, tr.Proxy == nil)
 	}
-	if tr.MaxResponseHeaderBytes != maxResponseHeaderBytes || maxResponseHeaderBytes != 4<<10 {
-		t.Errorf("MaxResponseHeaderBytes = %d, maxResponseHeaderBytes = %d; want both 4 KiB (DESIGN.md sec 10)", tr.MaxResponseHeaderBytes, maxResponseHeaderBytes)
+	if tr.MaxResponseHeaderBytes != maxResponseHeaderBytes || maxResponseHeaderBytes != 1<<10 {
+		t.Errorf("MaxResponseHeaderBytes = %d, maxResponseHeaderBytes = %d; want both 1 KiB (DESIGN.md sec 10)", tr.MaxResponseHeaderBytes, maxResponseHeaderBytes)
 	}
 	if clientTimeout <= 3*classifier.HangTimeout {
 		t.Errorf("clientTimeout = %v, want more than cmd/service's WriteTimeout, %v", clientTimeout, 3*classifier.HangTimeout)
@@ -543,18 +543,18 @@ func TestSendHeaderOverCap(t *testing.T) {
 }
 
 // TestSendHeaderDrip: a head of twice the cap, one line every 5 ms, so
-// the cap ends it after about 70 lines (~350 ms), not the client timeout.
+// the cap ends it after about 18 lines (~85 ms), not the client timeout.
 func TestSendHeaderDrip(t *testing.T) {
 	pieces, _ := hashResponse(t, 2*maxResponseHeaderBytes)
 	sendOverCap(t, 5*time.Millisecond, pieces)
 }
 
-// TestSendHeader1xxFlood: 16 102 responses of 512 bytes each, every one
-// under the cap but 8 KiB together, then a valid 200: every 1xx counts
+// TestSendHeader1xxFlood: 4 102 responses of 512 bytes each, every one
+// under the cap but 2 KiB together, then a valid 200: every 1xx counts
 // toward the one cap.
 func TestSendHeader1xxFlood(t *testing.T) {
 	var pieces [][]byte
-	for range 16 {
+	for range 4 {
 		pieces = append(pieces, bytes.Join(headerLines(t, "HTTP/1.1 102 Processing", nil, 512), nil))
 	}
 	final, _ := hashResponse(t, 200)

@@ -20,11 +20,11 @@ const clientTimeout = 3*classifier.HangTimeout + time.Second
 // included, counted together with every 1xx response before it: loadgen
 // sets no httptrace Got1xxResponse hook, the one case in which net/http
 // gives each 1xx its own limit. A response over it fails the request, a
-// transport_error and so the variant's failure. 4 KiB is about 25 times
-// gen 0's largest header block (164 B, a 503 with Retry-After) and bounds
-// what each in-flight request holds while its headers arrive (DESIGN.md
-// sec 10).
-const maxResponseHeaderBytes = 4 << 10
+// transport_error and so the variant's failure. 1 KiB is about 6 times
+// gen 0's largest header block (164 B, a 503 with Retry-After) and keeps
+// what each in-flight request holds while its variant stalls it to about
+// 80 KiB (BenchmarkStalledRequest; DESIGN.md sec 10).
+const maxResponseHeaderBytes = 1 << 10
 
 // newClient returns loadgen's HTTP client: one connection per request, no
 // proxy, no redirects followed, response headers capped at
