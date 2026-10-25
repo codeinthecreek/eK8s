@@ -435,7 +435,7 @@ max. Earlier entries are not backfilled.
 - Reverse: replace with a static manifest plus a sed step.
 - Origin: Code
 
-## 2026-10-21 · PR #45 · W = 5 min; loadgen refuses r above maxRate = 19, from the memory sum (DESIGN.md sec 10, 15)
+## 2026-10-21 · PR #45 · W = 5 min; loadgen refuses r above maxRate = 19, from the memory sum (DESIGN.md sec 10, 15) (in-flight term extended by the PR #47 header-cap entry)
 - Decision: the renderer constant W is 5 min; loadgen/config.go's maxRate is 19, next to maxBurstSends, and Config.Validate refuses a higher r, so the binary enforces its own budget and the renderer inherits it.
 - Rejected: 1-2 min (not the "multi-minute" window of DESIGN.md sec 10); maxRate 25 from n <= 3,000 alone (110.16 MiB benchmarked, ~128 MiB with inferred transients).
 - Reason: at r = 19, 4 targets, W = 5 min, n = 3,000 and 750k salts per variant, live memory is 102.94 MiB benchmarked, ~117 MiB with inferred transients: about half the ~230 MiB GOMEMLIMIT, GOGC=100's headroom; salts dominate.
@@ -464,21 +464,21 @@ max. Earlier entries are not backfilled.
 - Reverse: replace the poll in check (3) with a single assertion.
 - Origin: Code
 
-## 2026-10-24 · PR #46 (inferred) · Stage 5 lands as three PRs (amends docs/decisions-archive.md, PR #18 "gate/ in four PRs")
+## 2026-10-24 · PR #46 · Stage 5 lands as three PRs (amends docs/decisions-archive.md, PR #18 "gate/ in four PRs")
 - Decision: gate PR4 (Stage 5) is PR4a (internal/hostpairs, loadgen/wire, loadgen/client), PR4b (gate.Stage5 over kubectl and kind, cmd/gate -stage5) and PR4c (deploy/stage5-smoke.sh in deploy CI: gen 0 and three mutants).
 - Rejected: one Stage 5 PR, or 4a with 4b (each likely over the review packet's ~600-line diff limit).
 - Reason: each PR reviews alone, and 4a's packages are the ones the orchestrator needs too.
 - Reverse: merge the remaining PRs into one.
 - Origin: Code
 
-## 2026-10-24 · PR #46 (inferred) · The control API's wire types live in loadgen/wire, standard library only (DESIGN.md sec 10)
+## 2026-10-24 · PR #46 · The control API's wire types live in loadgen/wire, standard library only (DESIGN.md sec 10)
 - Decision: the 18 wire types, BootIDHeader and the run kind, run state and canary result strings are exported from loadgen/wire; loadgen's typed constants are defined from them; loadgen/wire_golden_test.go pins every type's bytes against loadgen/testdata/wire/, and TestWireGoldenFull requires each _full case to set every field, so a new field fails until its golden file shows it; TestWireDeps keeps wire on the standard library.
 - Rejected: exporting the types from package loadgen (every client would import the server and its dependencies); a client-side copy of the structs (two definitions of the orchestrator's contract).
 - Reason: one definition of the wire for server, client, gate and orchestrator, and any byte change fails a test.
 - Reverse: move the types back into loadgen/control_http.go, unexported, and drop loadgen/wire.
 - Origin: chat
 
-## 2026-10-24 · PR #46 (inferred) · loadgen/client is strict and leaves the transport to its caller (DESIGN.md sec 10)
+## 2026-10-24 · PR #46 · loadgen/client is strict and leaves the transport to its caller (DESIGN.md sec 10)
 - Decision: the client takes a base URL and an *http.Client, and accepts a response only with its endpoint's success status, Content-Type exactly application/json, one Ek8s-Boot-Id header equal to the body's boot_id, strict decoding with nothing trailing, an echo of the requested id or run_id, and a body under a cap derived from loadgen's records page (TestClientRecordsCap); after Expect, another boot_id is ErrBootChanged.
 - Rejected: kubectl --raw per call (loses the status code and the boot-ID header); client-go (a new dependency); lenient decoding (a mismatched loadgen would read as a valid answer).
 - Reason: Stage 5 and the orchestrator take verdicts from these responses, so a response the client cannot account for is an error, never a guess.
@@ -486,10 +486,18 @@ max. Earlier entries are not backfilled.
 - Reverse: relax check() in loadgen/client/client.go.
 - Origin: Code
 
-## 2026-10-24 · PR #46 (inferred) · Host /verify pairs: a mismatch hashes another fresh password; crypto/rand order; the caller sets the split (amends the PR #33 /verify pairs entry's mismatch method; DESIGN.md sec 8, 10)
+## 2026-10-24 · PR #46 · Host /verify pairs: a mismatch hashes another fresh password; crypto/rand order; the caller sets the split (amends the PR #33 /verify pairs entry's mismatch method; DESIGN.md sec 8, 10)
 - Decision: internal/hostpairs makes a match pair from a fresh password and hashcore.Hash of itself and a mismatch pair from a fresh password and hashcore.Hash of another fresh password, returns them in a crypto/rand Fisher-Yates order, takes both counts from its caller, and fully verifies /hash answers (OK only for Verify's (true, nil)).
 - Rejected: a random canonical PHC string built in gate code (the parameter literal outside hashcore); a random-PHC helper in hashcore (a protected path).
 - Reason: it uses only hashcore's exported Hash, and a hash of a password the variant never sees is as unpredictable to it as a random one; the cost is one Argon2 per mismatch pair, 8.56 ms wall per hash with 4 workers in the 4-vCPU container.
 - Revisit: a hashcore helper once the orchestrator's per-window pair cost is measured.
 - Reverse: replace Generate's mismatch branch; DESIGN.md sec 8 and sec 10 edits.
+- Origin: Code
+
+## 2026-10-25 · PR #47 (inferred) · loadgen caps response headers at 1 KiB, 1xx included; an over-cap response is transport_error (amends the PR #45 memory-sum entry's in-flight term; DESIGN.md sec 10)
+- Decision: loadgen's client sets MaxResponseHeaderBytes to 1 KiB (maxResponseHeaderBytes, loadgen/send.go); with no httptrace Got1xxResponse hook, net/http counts every 1xx response toward the same limit; an over-cap response fails the request as the variant's transport_error. BenchmarkStalledRequest measures the heap held per stalled request in four shapes; the worst, a body stall after bare-LF lines repeating one name, holds about 56 KiB, about 80 KiB with goroutine stacks.
+- Rejected: an in-flight cap (it changes the open-loop design); not counting a Stage 5 boot_id change toward halting the run after repeated gate faults (it leaves live windows exposed and charges nothing to the variant); 4 KiB (about 180 KiB per stalled request, so about 304 MiB with four stalling live variants plus a burst, over 256Mi); 2 KiB (about 115 KiB, so about 236.5 MiB in that case, over the ~230 MiB GOMEMLIMIT).
+- Reason: with Go's default 10 MiB limit, a variant sending large or many tiny headers could make loadgen hold 10-50 MiB per in-flight request, so a few dozen stalled requests could OOM-kill it (256Mi). At 1 KiB a burst at maxRate 19 (about 532 in flight x ~80 KiB = ~42 MiB) brings PR #45's ~117 MiB to about 159 MiB live, and four stalling live variants plus a burst (about 1,064 in flight) to about 200 MiB, under the ~230 MiB GOMEMLIMIT. gen 0's largest header block is 164 B, about 6 times under the cap.
+- Reverse: drop tr.MaxResponseHeaderBytes in loadgen/send.go, with its tests and the benchmark.
+- Revisit: a variant that legitimately needs more header bytes (it fails as transport_error); the 1,064 case is measured only as a heap benchmark, not in the cluster; whether kernel socket buffers count against the pod's memcg is unproven.
 - Origin: Code

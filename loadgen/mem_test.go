@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"runtime"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -12,14 +14,16 @@ import (
 )
 
 // These benchmarks measure the memory DESIGN.md sec 10 budgets for: a
-// Record held in a Ring and a salt held in a Checker's set. They are
-// Benchmark functions so plain go test does not run them. Each builds
-// its structure once, however large b.N is, so run them with
+// Record held in a Ring, a salt held in a Checker's set and a request
+// stalled in its headers or body. They are Benchmark functions so plain
+// go test does not run them. Each builds its structure once, however
+// large b.N is, so run them with
 //
 //	go test -run '^$' -bench . -benchtime=1x ./loadgen/
 //
-// and read the B/entry metric: heap in use after the structure is built
-// minus before, each after runtime.GC().
+// and read the B/entry metric (KiB/request for a stalled request): heap
+// in use after the structure is built minus before, each after
+// runtime.GC().
 //
 // A map's bytes per key step with its size, so each salt figure is for
 // exactly memSalts keys. [16]byte and uint64 keys measure the same, and
@@ -156,4 +160,133 @@ func BenchmarkCheckerSalts(b *testing.B) {
 		}
 		return c
 	})
+}
+
+const memStalled = 200
+
+// headerNameChars spells the distinct header names of the stalled-request
+// heads: all lower case, so no two canonicalize to the same key.
+const headerNameChars = "abcdefghijklmnopqrstuvwxyz0123456789"
+
+// distinctName returns the i'th distinct header name of at least n
+// characters: every n-character name first, then every n+1, and so on.
+func distinctName(i, n int) string {
+	for {
+		k := 1
+		for range n {
+			k *= len(headerNameChars)
+		}
+		if i < k {
+			break
+		}
+		i -= k
+		n++
+	}
+	name := make([]byte, n)
+	for j := range name {
+		name[j] = headerNameChars[i%len(headerNameChars)]
+		i /= len(headerNameChars)
+	}
+	return string(name)
+}
+
+// stalledHead returns status and then line(0), line(1), ... for as many
+// lines as fit in limit bytes, with no blank line to end the head.
+func stalledHead(status string, limit int, line func(i int) string) []byte {
+	head := []byte(status)
+	for i := 0; ; i++ {
+		l := line(i)
+		if len(head)+len(l) > limit {
+			return head
+		}
+		head = append(head, l...)
+	}
+}
+
+// stalledLimit keeps every stalled head just under the cap, so the
+// request waits for more rather than failing.
+const stalledLimit = maxResponseHeaderBytes - 64
+
+// BenchmarkStalledRequest: the live heap a Sender holds per request that
+// its server stalls, in KiB/request, for each header shape that could be
+// the worst under the cap. Each of memStalled sends gets its sub-
+// benchmark's bytes and then nothing, until the server closes:
+//   - crlf-distinct: CRLF lines with distinct 2-3 byte names and empty
+//     values, each line its own header map entry;
+//   - lf-distinct: the same with bare-LF lines, which net/textproto also
+//     accepts, the 1-character names first, so more entries fit;
+//   - lf-repeat: bare-LF lines repeating one name, one map key with a
+//     growing value slice;
+//   - body-stall: the worst of those heads, lf-repeat, ended by a
+//     Content-Length larger than what is sent, then MaxBodyBytes of body,
+//     so send holds the header map and its body buffer.
+//
+// It feeds the in-flight term of the PR #45 memory sum
+// (docs/decisions.md). It leaves out goroutine stacks (three per request:
+// send's, the transport's read and write loops) and counts the fake
+// server's side of each connection (one net.Conn and a 1-byte buffer), so
+// it reads slightly high.
+func BenchmarkStalledRequest(b *testing.B) {
+	crlf := func(i int) string { return distinctName(i, 2) + ":\r\n" }
+	lf := func(i int) string { return distinctName(i, 1) + ":\n" }
+	repeat := func(int) string { return "a:\n" }
+	const contentLength = "Content-Length: 65536\n\n"
+	bodyHead := stalledHead("HTTP/1.1 200 OK\n", stalledLimit-len(contentLength), repeat)
+	for _, c := range []struct {
+		name string
+		resp []byte
+	}{
+		{"crlf-distinct", stalledHead("HTTP/1.1 200 OK\r\n", stalledLimit, crlf)},
+		{"lf-distinct", stalledHead("HTTP/1.1 200 OK\n", stalledLimit, lf)},
+		{"lf-repeat", stalledHead("HTTP/1.1 200 OK\n", stalledLimit, repeat)},
+		{"body-stall", append(append(bodyHead, contentLength...), strings.Repeat("a", classifier.MaxBodyBytes)...)},
+	} {
+		b.Run(c.name, func(b *testing.B) { stall(b, c.resp) })
+	}
+}
+
+// stall runs memStalled sends against a server that writes resp to each
+// and then stalls, and reports the heap held per request once every send
+// has read all of resp and the heap has settled: two readings in a row
+// within 1% of each other.
+func stall(b *testing.B, resp []byte) {
+	srv := newHeaderServer(b, 0, [][]byte{resp})
+	s := NewSender()
+	var read atomic.Int64
+	countReads(b, s, &read)
+	req := hashRequest(newPassword())
+
+	before := int64(heapAlloc())
+	var wg sync.WaitGroup
+	for range memStalled {
+		wg.Go(func() { s.send(srv.URL, req) })
+	}
+	deadline := time.Now().Add(clientTimeout / 2)
+	fail := func(what string) {
+		srv.Close()
+		wg.Wait()
+		b.Fatalf("%s within %v (read %d of %d bytes)", what, clientTimeout/2, read.Load(), memStalled*len(resp))
+	}
+	for read.Load() < int64(memStalled*len(resp)) {
+		if time.Now().After(deadline) {
+			fail("sends did not read all their bytes")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	held := int64(heapAlloc()) - before
+	for {
+		if time.Now().After(deadline) {
+			fail("heap did not settle")
+		}
+		time.Sleep(10 * time.Millisecond)
+		next := int64(heapAlloc()) - before
+		settled := 100*(next-held) <= held && 100*(held-next) <= held
+		held = next
+		if settled {
+			break
+		}
+	}
+	srv.Close()
+	wg.Wait()
+	b.ReportMetric(float64(held)/memStalled/1024, "KiB/request")
 }
