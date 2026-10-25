@@ -435,7 +435,7 @@ max. Earlier entries are not backfilled.
 - Reverse: replace with a static manifest plus a sed step.
 - Origin: Code
 
-## 2026-10-21 · PR #45 · W = 5 min; loadgen refuses r above maxRate = 19, from the memory sum (DESIGN.md sec 10, 15)
+## 2026-10-21 · PR #45 · W = 5 min; loadgen refuses r above maxRate = 19, from the memory sum (DESIGN.md sec 10, 15) (in-flight term extended by the PR #47 header-cap entry)
 - Decision: the renderer constant W is 5 min; loadgen/config.go's maxRate is 19, next to maxBurstSends, and Config.Validate refuses a higher r, so the binary enforces its own budget and the renderer inherits it.
 - Rejected: 1-2 min (not the "multi-minute" window of DESIGN.md sec 10); maxRate 25 from n <= 3,000 alone (110.16 MiB benchmarked, ~128 MiB with inferred transients).
 - Reason: at r = 19, 4 targets, W = 5 min, n = 3,000 and 750k salts per variant, live memory is 102.94 MiB benchmarked, ~117 MiB with inferred transients: about half the ~230 MiB GOMEMLIMIT, GOGC=100's headroom; salts dominate.
@@ -492,4 +492,12 @@ max. Earlier entries are not backfilled.
 - Reason: it uses only hashcore's exported Hash, and a hash of a password the variant never sees is as unpredictable to it as a random one; the cost is one Argon2 per mismatch pair, 8.56 ms wall per hash with 4 workers in the 4-vCPU container.
 - Revisit: a hashcore helper once the orchestrator's per-window pair cost is measured.
 - Reverse: replace Generate's mismatch branch; DESIGN.md sec 8 and sec 10 edits.
+- Origin: Code
+
+## 2026-10-25 · PR #47 (inferred) · loadgen caps response headers at 4 KiB, 1xx included; an over-cap response is transport_error (amends the PR #45 memory-sum entry's in-flight term; DESIGN.md sec 10)
+- Decision: loadgen's client sets MaxResponseHeaderBytes to 4 KiB (maxResponseHeaderBytes, loadgen/send.go); with no httptrace Got1xxResponse hook, net/http counts every 1xx response toward the same limit; an over-cap response fails the request as the variant's transport_error. BenchmarkStalledRequest measures the live heap per request stalled at the cap: about 78 KiB, about 100 KiB with goroutine stacks.
+- Rejected: an in-flight cap (it changes the open-loop design); not counting a Stage 5 boot_id change toward the Q9 halt (it leaves live windows exposed and charges nothing to the variant); 16 KiB (about 284 KiB per request in tiny header lines, so about 151 MiB at 532 in flight).
+- Reason: with Go's default 10 MiB limit, a variant sending large or many tiny headers could make loadgen hold 10-50 MiB per in-flight request, so a few dozen stalled requests could OOM-kill it (256Mi). At 4 KiB the worst case at maxRate 19 is about 532 in flight x ~110 KiB = ~57 MiB on top of PR #45's ~117 MiB, about 174 MiB live, under the ~230 MiB GOMEMLIMIT. gen 0's largest header block is 164 B.
+- Reverse: drop tr.MaxResponseHeaderBytes in loadgen/send.go, with its tests and the benchmark.
+- Revisit: at that worst case GOMEMLIMIT binds, so GC CPU can delay sends past Stage 5's poll bound (a gate fault); four stalling live variants plus a burst (about 1,064 in flight) reach the limit; whether kernel socket buffers count against the pod's memcg is unproven.
 - Origin: Code
