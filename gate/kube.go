@@ -1,11 +1,14 @@
 package gate
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"slices"
 	"strings"
+	"time"
 )
 
 // Kubernetes names this file matches, checked against k8s.io/api v0.37.0
@@ -354,4 +357,134 @@ func podHealth(pods []pod) (problem string, fault error) {
 		}
 	}
 	return firstFailure(pods), nil
+}
+
+var (
+	// readyPoll is the pause between polls of the Ready wait.
+	readyPoll = 1 * time.Second
+	// readyTimeout is how long a caller waits for the first pod to be
+	// Ready (inferred; check against real pod start times, workstation
+	// item W6).
+	readyTimeout = 120 * time.Second
+	// readyGrace bounds each kubectl call of the Ready wait past its
+	// timeout, so an API server that stops answering cannot hold the wait
+	// (inferred; kubectl get against a local kind API server answers in
+	// well under a second).
+	readyGrace = 30 * time.Second
+)
+
+// kubectl calls kubectl against the kube context kubeCtx. --context goes
+// last so runTool's error label stays "kubectl <subcommand>".
+func kubectl(ctx context.Context, kubeCtx string, stdin io.Reader, args ...string) (string, error) {
+	return runTool(ctx, stdin, "kubectl", append(slices.Clone(args), "--context", kubeCtx)...)
+}
+
+// kindLoad loads a locally built image into the kind cluster. The form
+// `kind load docker-image <image> --name <cluster>` is checked against
+// kind v0.33.0 (pkg/cmd/kind/load/docker-image).
+func kindLoad(ctx context.Context, cluster, image string) error {
+	_, err := runTool(ctx, nil, "kind", "load", "docker-image", image, "--name", cluster)
+	return err
+}
+
+// getDeployPods reads the Deployment and pods of namespace ns.
+func getDeployPods(ctx context.Context, kubeCtx, ns string) (deployment, []pod, error) {
+	out, err := kubectl(ctx, kubeCtx, nil, "get", "deploy,pods", "-n", ns, "-o", "json")
+	if err != nil {
+		return deployment{}, nil, err
+	}
+	return parseDeployPods([]byte(out))
+}
+
+// waitReady polls until the namespace's first pod is Ready. A problem is
+// a candidate failure, a fault is a gate fault (any kubectl, parse or
+// context error included); the timeout rules live in readyCheck. The
+// last poll is made at or after the deadline with atTimeout true, so a
+// verdict always comes. Each kubectl call is cut off readyGrace after the
+// deadline, so the wait ends by timeout + readyGrace at the latest.
+func waitReady(ctx context.Context, kubeCtx, ns string, timeout time.Duration) (problem string, fault error) {
+	deadline := time.Now().Add(timeout)
+	wctx, cancel := context.WithDeadline(ctx, deadline.Add(readyGrace))
+	defer cancel()
+	for {
+		d, pods, err := getDeployPods(wctx, kubeCtx, ns)
+		if err != nil {
+			if ctx.Err() == nil && wctx.Err() != nil {
+				return "", fmt.Errorf("wait ready: kubectl did not answer within the timeout plus readyGrace: %w", wctx.Err())
+			}
+			return "", fmt.Errorf("wait ready: %w", err)
+		}
+		now := time.Now()
+		ready, problem, fault := readyCheck(d, pods, !now.Before(deadline))
+		if ready {
+			return "", nil
+		}
+		if problem != "" || fault != nil {
+			return problem, fault
+		}
+		timer := time.NewTimer(min(readyPoll, deadline.Sub(now)))
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return "", fmt.Errorf("wait ready: %w", ctx.Err())
+		case <-timer.C:
+		}
+	}
+}
+
+// podHealthCheck judges every pod of the namespace's Deployment with
+// podHealth.
+func podHealthCheck(ctx context.Context, kubeCtx, ns string) (problem string, fault error) {
+	_, pods, err := getDeployPods(ctx, kubeCtx, ns)
+	if err != nil {
+		return "", fmt.Errorf("pod health: %w", err)
+	}
+	return podHealth(pods)
+}
+
+// podsRunning returns nil only if the pods matching selector in ns are
+// exactly want, each phase Running and not being deleted. Every error is
+// a fault for the caller.
+func podsRunning(ctx context.Context, kubeCtx, ns, selector string, want int) error {
+	out, err := kubectl(ctx, kubeCtx, nil, "get", "pods", "-n", ns, "-l", selector, "-o", "json")
+	if err != nil {
+		return err
+	}
+	var l kubeList
+	if err := json.Unmarshal([]byte(out), &l); err != nil {
+		return fmt.Errorf("kubectl output: %w", err)
+	}
+	if l.Kind != "List" {
+		return fmt.Errorf("kubectl output: kind %q, want List", l.Kind)
+	}
+	pods := make([]pod, 0, len(l.Items))
+	for _, raw := range l.Items {
+		var k struct {
+			Kind string `json:"kind"`
+		}
+		if err := json.Unmarshal(raw, &k); err != nil {
+			return fmt.Errorf("kubectl output: %w", err)
+		}
+		if k.Kind != "Pod" {
+			return fmt.Errorf("kubectl output: unexpected item kind %q", k.Kind)
+		}
+		var p pod
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return fmt.Errorf("kubectl output: %w", err)
+		}
+		pods = append(pods, p)
+	}
+	if len(pods) != want {
+		return fmt.Errorf("%d pods match %q, want %d", len(pods), selector, want)
+	}
+	slices.SortFunc(pods, func(a, b pod) int { return strings.Compare(a.Metadata.Name, b.Metadata.Name) })
+	for _, p := range pods {
+		if p.Metadata.DeletionTimestamp != nil {
+			return fmt.Errorf("pod %s: deletionTimestamp set", p.Metadata.Name)
+		}
+		if p.Status.Phase != phaseRunning {
+			return fmt.Errorf("pod %s: phase %s, want Running", p.Metadata.Name, phaseText(p.Status.Phase))
+		}
+	}
+	return nil
 }
