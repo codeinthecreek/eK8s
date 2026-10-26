@@ -34,7 +34,8 @@ const (
 
 // proxyStartPrefix starts the line kubectl proxy prints on stdout once it
 // listens: "Starting to serve on " and the socket path (checked against
-// kubectl v1.37.0's proxy command, inferred).
+// kubectl v1.37.0's proxy command; seen with a v1.37.1 client against a
+// v1.37.0 node).
 const proxyStartPrefix = "Starting to serve on "
 
 const (
@@ -77,12 +78,16 @@ type ControlProxy struct {
 // kubectl runs until Close. timeout is the Timeout of the http.Client
 // behind Client (0: none). An empty kubeCtx is an error and nothing is
 // started, since kubectl would fall back to the kubeconfig's current
-// context, which may be another cluster. A start error has stopped
-// kubectl and removed the directory, and carries at most maxProxyOutput
-// bytes of kubectl's stderr (none when ctx ended).
+// context, which may be another cluster; a ctx already done is an error
+// too, and also starts nothing. A start error has stopped kubectl and
+// removed the directory, and carries at most maxProxyOutput bytes of
+// kubectl's stderr (none when ctx ended).
 func StartControlProxy(ctx context.Context, kubeCtx string, timeout time.Duration) (*ControlProxy, error) {
 	if kubeCtx == "" {
 		return nil, errors.New("control proxy: empty kube context")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("control proxy: start: %w", err)
 	}
 	kubectlPath, err := exec.LookPath("kubectl")
 	if err != nil {
@@ -187,13 +192,17 @@ func (p *ControlProxy) stop() error {
 
 // controlProxyDir makes the socket's directory with os.MkdirTemp under
 // os.TempDir(), or under /tmp if the socket path there would be over
-// maxSocketPath bytes (a long TMPDIR), and checks it is private.
+// maxSocketPath bytes (a long TMPDIR) or MkdirTemp fails there (a TMPDIR
+// that is missing or not writable), and checks it is private. It returns
+// an error only when /tmp fails too, carrying both MkdirTemp errors.
 func controlProxyDir() (string, error) {
 	var sock string
+	var mkErr error
 	for _, base := range []string{os.TempDir(), "/tmp"} {
 		dir, err := os.MkdirTemp(base, "ek8s-proxy-")
 		if err != nil {
-			return "", err
+			mkErr = errors.Join(mkErr, err)
+			continue
 		}
 		if sock = filepath.Join(dir, "s"); len(sock) > maxSocketPath {
 			os.Remove(dir)
@@ -204,6 +213,9 @@ func controlProxyDir() (string, error) {
 			return "", err
 		}
 		return dir, nil
+	}
+	if mkErr != nil {
+		return "", mkErr
 	}
 	return "", fmt.Errorf("socket path %s is over %d bytes", sock, maxSocketPath)
 }

@@ -389,7 +389,7 @@ func TestControlProxyStartFailures(t *testing.T) {
 		want       string
 	}{
 		{name: "fail at start", mode: "fail-at-start", want: "kubectl exited before serving: exit status 1: stderr: x"},
-		{name: "silent", mode: "silent", want: "no start line within 300ms"},
+		{name: "silent", mode: "silent", want: "no start line within 1s"},
 		{name: "wrong line", mode: "wrong-line", want: "start line names another socket"},
 		{name: "cancelled ctx", mode: "silent", cancel: true, want: "context canceled"},
 	}
@@ -397,12 +397,22 @@ func TestControlProxyStartFailures(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			fdir, tmp := installFakeKubectl(t, tc.mode)
 			if !tc.cancel {
-				setProxyStartTimeout(t, 300*time.Millisecond)
+				setProxyStartTimeout(t, time.Second)
 			}
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			if tc.cancel {
-				time.AfterFunc(100*time.Millisecond, cancel)
+				// Cancel only once the fake is running, however slowly a
+				// loaded runner starts it.
+				go func() {
+					for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+						if b, err := os.ReadFile(filepath.Join(fdir, "pid")); err == nil && len(b) > 0 {
+							cancel()
+							return
+						}
+					}
+					t.Error("fake kubectl wrote no pid within 5 s")
+				}()
 			}
 			start := time.Now()
 			p, err := startProxy(t, ctx)
@@ -416,8 +426,8 @@ func TestControlProxyStartFailures(t *testing.T) {
 			if tc.mode == "fail-at-start" && err != nil && (!strings.HasSuffix(err.Error(), "error: fake start failure") || len(err.Error()) > maxProxyOutput+200) {
 				t.Errorf("err is %d bytes, want the stderr tail within %d bytes", len(err.Error()), maxProxyOutput)
 			}
-			if tc.name == "silent" && elapsed < 300*time.Millisecond {
-				t.Errorf("failed after %v, before the 300ms bound", elapsed)
+			if tc.name == "silent" && elapsed < time.Second {
+				t.Errorf("failed after %v, before the 1s bound", elapsed)
 			}
 			if elapsed > 5*time.Second {
 				t.Errorf("failed after %v, want promptly", elapsed)
@@ -491,4 +501,43 @@ func TestControlProxyEmptyContext(t *testing.T) {
 		t.Errorf("fake kubectl ran: %v", err)
 	}
 	dirEmpty(t, tmp)
+}
+
+// A ctx that is done before the call starts nothing: no kubectl, no
+// directory. Started and killed at once, the fake may die before it writes
+// its pid, so the pid file and TMPDIR alone would not show a start; PATH is
+// emptied, so a start would fail in LookPath, not with context.Canceled.
+func TestControlProxyCancelledBeforeStart(t *testing.T) {
+	fdir, tmp := installFakeKubectl(t, "ok")
+	t.Setenv("PATH", t.TempDir())
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	p, err := startProxy(t, ctx)
+	if p != nil || !errors.Is(err, context.Canceled) {
+		t.Errorf("got (%v, %v), want an error wrapping context.Canceled", p, err)
+	}
+	if _, err := os.Lstat(filepath.Join(fdir, "pid")); !os.IsNotExist(err) {
+		t.Errorf("fake kubectl ran: %v", err)
+	}
+	dirEmpty(t, tmp)
+}
+
+// A TMPDIR that does not exist puts the socket's directory under /tmp.
+func TestControlProxyTMPDIRMissing(t *testing.T) {
+	_, tmp := installFakeKubectl(t, "ok")
+	t.Setenv("TMPDIR", filepath.Join(tmp, "missing"))
+	p, err := startProxy(t, context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := filepath.Dir(p.dir); got != "/tmp" {
+		t.Errorf("dir %s, want one in /tmp", p.dir)
+	}
+	bounded(t, func() { _, err = p.Client().Config(context.Background()) })
+	must(t, err)
+	bounded(t, func() { err = p.Close() })
+	must(t, err)
+	if _, err := os.Lstat(p.dir); !os.IsNotExist(err) {
+		t.Errorf("dir after Close: %v, want it gone", err)
+	}
 }
