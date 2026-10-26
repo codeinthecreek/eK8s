@@ -568,3 +568,24 @@ max. Earlier entries are not backfilled.
 - Reason: owner time and quota; the owner accepts Code's technical recommendations.
 - Reverse: drop the "Working mode: autonomous" section and restore the PR #51 edits to the commit, push, ask-before, DESIGN.md-approval, end-of-task packet, chat-material and self-review rules in CLAUDE.md, the packet-default, "Which packet" and hypothetical-routing lines in docs/handoff.md, and reviewer.md's description.
 - Origin: chat
+
+## 2026-10-26 · PR #52 · Owner answers to the skeleton plan batch (PR #51 comment)
+- Decision: the 9-step plan approved; S1-S3 and S6-S12 yes (Stage 5 PRs merged into two; JSONL lineage, no SQLite; genomes as files plus sha256; full host verification of every window; live cap 3 (4 in probation); FIFO eviction, hall of fame, stagnation, escalation, a retry/re-PUT, docker rmi, salt growth and HPA tuning deferred; mutation model pinned to Sonnet 5.5); N1-N4 no; N5 accepted for the first run (bare boot unbounded; pressure on the workstation, not an escape).
+- S4 yes, conditional: one baseline window and no stress half, only if none of the three fitness components S5 keeps (success_rate, p95 latency, cpu_per_success) needs the stress half (DESIGN.md sec 9); otherwise ask the owner before building fitness. Restore the stress half before any run that makes resilience claims.
+- Rejected: N1-N4 (each weakens a non-negotiable); a cgroup-bound PR for N5 before the first run.
+- Reverse: re-ask the owner.
+- Origin: owner
+
+## 2026-10-26 · PR #52 · Escalation list gains any third-party dependency
+- Decision: CLAUDE.md "Working mode: autonomous" stop-and-ask list adds "adds any third-party dependency (a Go module or a tool)".
+- Rejected: Code deciding dependencies itself and logging them (the earlier Working agreement default).
+- Reason: owner's call; supply-chain exposure in a run that executes model-written code.
+- Reverse: drop the clause from the escalation list.
+- Origin: owner
+
+## 2026-10-26 · PR #52 · Model-tier rule: Code stops when the next PR needs another tier
+- Decision: CLAUDE.md "Working mode: autonomous" adds: mid tier (Sonnet, medium) for skeleton PRs 1-4 and 8; top tier (Opus, high) for PRs 5-7 (driver sandbox, orchestrator integrity and verification); Code stops and tells the owner when the next PR needs a different tier than the session runs.
+- Rejected: one tier for every PR.
+- Reason: owner's call; spend top-tier effort where the non-negotiables bite.
+- Reverse: drop the "Model tier" bullet.
+- Origin: owner

@@ -18,10 +18,16 @@ per-step prompts and asks the owner only on direction questions.
 - Stop and ask the owner only when work: touches a non-negotiable
   (hashcore isolation and the fixed core, fail-closed classification,
   sandboxing and containment, protected paths); changes DESIGN.md
-  direction or scope; adds work not on the first-run path; or needs
+  direction or scope; adds work not on the first-run path; adds any
+  third-party dependency (a Go module or a tool); or needs
   something Code cannot do or verify (workstation steps, credentials,
   merges). Batch the questions into one short message, each with a
   recommendation, answerable yes or no where possible.
+- Model tier: Code stops and tells the owner when the next PR needs a
+  different model tier than the session runs. Mid tier (Sonnet, medium
+  effort): skeleton PRs 1-4 and 8. Top tier (Opus, high effort): skeleton
+  PRs 5-7 (driver sandbox, orchestrator integrity and verification).
+  The skeleton PR list is in `docs/STATUS.md` Next.
 - Finding routing: a review finding (reviewer subagent, CI, a review
   comment) is fixed in the current PR, or added to `docs/STATUS.md` Next
   only if it blocks the first run, or else appended to
