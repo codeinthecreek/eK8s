@@ -4,7 +4,7 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 *(inferred)* are guesses, not read from the repo; correct them.
 
 ## Now
-- claude/wizardly-euler-slijms (PR #49, inferred): gate Stage 5 PR4b2, the transport: gate/controlproxy.go (kubectl proxy on a unix socket in a 0700 dir; the client follows no redirects and refuses any 3xx); two decisions.md entries (the transport; Stage 5 as six PRs).
+- claude/wizardly-euler-slijms (PR #49, inferred): gate Stage 5 PR4b2, the transport: gate/controlproxy.go (kubectl proxy on a unix socket in a 0700 dir; the client refuses any 3xx and dials nothing after Close); two decisions.md entries (the transport; Stage 5 as six PRs).
 
 ## Next
 - Extract docs/workflow/ into its own repo (links inside it are relative and stay within the folder); then decide whether eK8s's own CLAUDE.md, handoff.md and reviewer.md are regenerated from the templates (docs/decisions.md, PR #32 entry).
@@ -36,6 +36,7 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 - Gate tools outlive a cancel or a SIGKILLed gate: runTool kills only the direct child, so kind load's image export and import (and the tests' sleep fakes) keep running; a process group (Setpgid, with Cancel killing -pid) would end them (docs/decisions.md, PR #48 runTool entry).
 - Variants have no ephemeral-storage limit: a log-flooding variant could drive DiskPressure eviction of its own pod, which Stage 5 scores as a gate fault (a halted run, never a pass); set one in deploy/variant (docs/decisions.md, PR #48 pod-state entry).
 - A SIGKILLed gate leaves its kubectl proxy running, serving the unix socket (the gate's uid only, within --accept-paths), and its ek8s-proxy-* directory on disk until something kills it; a start-up sweep of stale directories and their kubectl would clean up (docs/decisions.md, PR #49 transport entry).
+- ControlProxy accepts a world-writable TMPDIR without the sticky bit, where another user could swap its directory between the privacy check and kubectl's bind; skipping such a base (and checking /tmp the same way) would close it (docs/decisions.md, PR #49 transport entry).
 
 ## Recent
 - #48 Gate Stage 5 PR4b1, cluster plumbing: runTool, one exec helper for docker, kubectl and kind (WaitDelay bound; docker() wraps it); gate/kube.go pod classifier (readyCheck, podHealth: gate faults vs candidate failures, no candidate text in verdicts) and the kubectl and kind wrappers (request timeout, selector required, waitReady bounded); three decisions.md entries (2026-10-25)
