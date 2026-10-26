@@ -96,8 +96,11 @@ for check in pod-health responses hash-verify; do
 done
 ok "gate Stage 5 passed: pod-health, responses, hash-verify"
 
-[ "$(k -n "$ns" get deploy hasher -o jsonpath='{.status.readyReplicas}')" = 1 ] ||
-	die "Deployment hasher in $ns is not Ready after the pass"
+# At least one, not exactly one: the burst can push the HPA (70% of the
+# CPU request) to scale up, and a second Ready replica is no failure.
+ready=$(k -n "$ns" get deploy hasher -o jsonpath='{.status.readyReplicas}')
+[ "${ready:-0}" -ge 1 ] 2>/dev/null ||
+	die "Deployment hasher in $ns is not Ready after the pass (readyReplicas ${ready:-0})"
 ok "the candidate is still Ready in $ns"
 
 k get --raw "$proxy/targets" | grep -q "\"id\":\"$id\"" ||
