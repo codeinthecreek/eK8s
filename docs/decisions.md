@@ -554,3 +554,10 @@ max. Earlier entries are not backfilled.
 - Reverse: edit gate/burstverdict.go.
 - Revisit: a success hash that hashcore rejects is inferred unreachable (loadgen's classifier checks the hash first); host Verify time at r = 19 is unmeasured.
 - Origin: Code
+
+## 2026-10-26 · PR #51 (inferred) · The gate-pod series (DESIGN.md sec 7 "Planned") waits until after the first evolutionary run
+- Decision: the first run's gate uses the bare boot (bwrap, the nsenter relay, Stage 1's docker run sub-check); the "Planned" text stays in DESIGN.md sec 7 with one sentence saying so, and the gate-pod design packet item moves to docs/AFTER-FIRST-RUN.md.
+- Rejected: building Stages 2-4 in a pod before the first run.
+- Reason: the bare boot is built and tested; the pod series is a design packet plus several PRs that a first, fitness-ranked run does not need.
+- Reverse: move the gate-pod item back to docs/STATUS.md Next and drop the sec 7 sentence.
+- Origin: chat

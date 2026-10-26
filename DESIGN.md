@@ -475,6 +475,8 @@ Mechanics:
 
 Direction only; the implementation is a later PR series with its own
 design packet, and the bare-boot text above stays until it lands.
+The series is deferred until after the first evolutionary run
+(docs/AFTER-FIRST-RUN.md), whose gate runs the bare boot above.
 - Stage 1's pre-build checks, `go vet` and `go build` stay on the host,
   with no candidate execution there.
 - Stages 2-4 move to a pod in the cluster, replacing the bare boot (and
