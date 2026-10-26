@@ -50,6 +50,11 @@ type fakeLoadgen struct {
 	gap     bool
 	pairs   wire.Upload
 	runID   string
+
+	runError     string // the target's error text in a run
+	startGarbage bool   // the start is applied, but its response is unreadable
+	pageMax      int    // records per page, when not 0
+	stuckNext    bool   // a records page does not advance next
 }
 
 func newFake() *fakeLoadgen {
@@ -135,12 +140,18 @@ func (f *fakeLoadgen) handler() http.Handler {
 		var s wire.Start
 		json.NewDecoder(r.Body).Decode(&s)
 		f.startKind, f.startTarget, f.runID = s.Kind, s.Targets, r.PathValue("run")
+		if f.startGarbage {
+			w.Header().Set(wire.BootIDHeader, f.bootNow())
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte("{"))
+			return
+		}
 		f.reply(w, 200, wire.Started{BootID: f.bootNow(), RunID: f.runID, StartWall: time.Now().UTC()})
 	}))
 	runBody := func(state string) wire.Run {
 		run := wire.Run{BootID: f.bootNow(), RunID: f.runID, Kind: wire.KindBurst, Targets: map[string]wire.RunTarget{}}
 		for _, id := range f.startTarget {
-			run.Targets[id] = wire.RunTarget{State: state}
+			run.Targets[id] = wire.RunTarget{State: state, Error: f.runError}
 		}
 		return run
 	}
@@ -174,12 +185,19 @@ func (f *fakeLoadgen) handler() http.Handler {
 		for i := range all {
 			all[i].Seq = uint64(i)
 		}
+		if f.pageMax > 0 {
+			limit = min(limit, f.pageMax)
+		}
 		end := min(len(all), since+limit)
 		page := []wire.Record{}
 		if since < end {
 			page = all[since:end]
 		}
-		f.reply(w, 200, wire.Records{BootID: f.bootNow(), Records: page, Gap: f.gap, Next: uint64(since + len(page))})
+		next := since + len(page)
+		if f.stuckNext {
+			next = since
+		}
+		f.reply(w, 200, wire.Records{BootID: f.bootNow(), Records: page, Gap: f.gap, Next: uint64(next)})
 	}))
 	return mux
 }
@@ -213,7 +231,7 @@ func fastParams(t *testing.T) burstParams {
 
 		canaryEvery: time.Millisecond, canaryBound: 5 * time.Second,
 		pollEvery: time.Millisecond, clientTimeout: 10 * time.Millisecond,
-		runSlack: 50 * time.Millisecond, drainBound: 100 * time.Millisecond,
+		runSlack: 50 * time.Millisecond, drainBound: 5 * time.Second,
 	}
 }
 
@@ -252,6 +270,67 @@ func TestRunBurst(t *testing.T) {
 	}
 	if len(f.pairs.Pairs) != 14 || matches != 7 {
 		t.Errorf("uploaded %d pairs, %d matches; want 14, 7", len(f.pairs.Pairs), matches)
+	}
+}
+
+// TestRunBurstOddPairs: an odd pair count gives the extra pair to the
+// matches.
+func TestRunBurstOddPairs(t *testing.T) {
+	t.Parallel()
+	f := newFake()
+	f.cfg.BurstPairs = 15
+	if _, err := f.run(t, t.Context(), fastParams(t)); err != nil {
+		t.Fatalf("runBurst: %v", err)
+	}
+	matches := 0
+	for _, p := range f.pairs.Pairs {
+		if *p.Match {
+			matches++
+		}
+	}
+	if len(f.pairs.Pairs) != 15 || matches != 8 {
+		t.Errorf("uploaded %d pairs, %d matches; want 15, 8", len(f.pairs.Pairs), matches)
+	}
+}
+
+// TestRunBurstStartLost: a start whose response is unreadable may have
+// started the run, so it is cancelled; a status answer started nothing.
+func TestRunBurstStartLost(t *testing.T) {
+	t.Parallel()
+	f := newFake()
+	f.startGarbage = true
+	_, err := f.run(t, t.Context(), fastParams(t))
+	if err == nil || !strings.Contains(err.Error(), "stage 5 burst") {
+		t.Fatalf("runBurst error = %v; want a burst fault", err)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.cancels != 1 {
+		t.Errorf("%d cancels after a lost start, want 1", f.cancels)
+	}
+}
+
+// TestRunBurstRecordsStall: records pages that do not advance, or that
+// run past the burst's last page, end the read.
+func TestRunBurstRecordsStall(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		set  func(f *fakeLoadgen)
+		want string
+	}{
+		{"stuck_next", func(f *fakeLoadgen) { f.stuckNext = true }, "has next"},
+		{"too_many_pages", func(f *fakeLoadgen) { f.pageMax = 1 }, "past the burst's last page"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			f := newFake()
+			tc.set(f)
+			_, err := f.run(t, t.Context(), fastParams(t))
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("runBurst error = %v; want a fault containing %q", err, tc.want)
+			}
+		})
 	}
 }
 
@@ -476,5 +555,17 @@ func TestRunBurstFaultTextBounded(t *testing.T) {
 	_, err := f.run(t, t.Context(), fastParams(t))
 	if err == nil || len(err.Error()) > 400 || strings.Contains(err.Error(), "secret") || strings.Contains(err.Error(), "\n") {
 		t.Fatalf("error %q: want one line with the target cut", err)
+	}
+}
+
+// TestRunBurstRunErrorBounded: a run's error text is cut and quoted too.
+func TestRunBurstRunErrorBounded(t *testing.T) {
+	t.Parallel()
+	f := newFake()
+	f.end = wire.StateError
+	f.runError = strings.Repeat("y", 500) + "\nsecret"
+	_, err := f.run(t, t.Context(), fastParams(t))
+	if err == nil || len(err.Error()) > 400 || strings.Contains(err.Error(), "secret") || strings.Contains(err.Error(), "\n") {
+		t.Fatalf("error %q: want one line with the run's error cut", err)
 	}
 }

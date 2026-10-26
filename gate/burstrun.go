@@ -192,6 +192,13 @@ func awaitCanary(ctx context.Context, cl *client.Client, p burstParams) error {
 // records.
 func burstRecords(ctx context.Context, cl *client.Client, p burstParams, cfg wire.Config, since uint64) ([]wire.Record, error) {
 	if _, err := cl.Start(ctx, p.RunID, wire.Start{Kind: wire.KindBurst, Targets: []string{p.Target}}); err != nil {
+		// A status loadgen answered means it started nothing (a start is
+		// all or nothing); any other failure (a timeout, a lost or
+		// unreadable response) may have started the run.
+		var ae *client.APIError
+		if !errors.As(err, &ae) {
+			err = abandon(ctx, cl, p, err)
+		}
 		return nil, err
 	}
 	length := time.Duration(float64(cfg.BurstSends) / cfg.BurstRate * float64(time.Second))
