@@ -502,14 +502,14 @@ max. Earlier entries are not backfilled.
 - Revisit: a variant that legitimately needs more header bytes (it fails as transport_error); the 1,064 case is measured only as a heap benchmark, not in the cluster; whether kernel socket buffers count against the pod's memcg is unproven.
 - Origin: Code
 
-## 2026-10-25 · PR #48 (inferred) · Stage 5 lands as five PRs: 4a, 4b1, 4b2, 4b3, 4c (amends the PR #46 "Stage 5 lands as three PRs" entry)
+## 2026-10-25 · PR #48 · Stage 5 lands as five PRs: 4a, 4b1, 4b2, 4b3, 4c (amends the PR #46 "Stage 5 lands as three PRs" entry) (amended by the PR #49 six-PR entry)
 - Decision: after 4a (#46) and the loadgen header cap (#47): 4b1 cluster plumbing (gate/tool.go runTool; gate/kube.go pod classifier, kubectl and kind wrappers, Ready wait); 4b2 the kubectl proxy transport and burst evaluation; 4b3 gate.Stage5; 4c cmd/gate -stage5 and deploy/stage5-smoke.sh in deploy CI.
 - Rejected: one PR4b holding gate.Stage5 with its transport and cluster plumbing.
 - Reason: each part reviews alone under the ~600-line packet limit, and 4b1's files carry no Stage 5 coupling, so the gate-pod series can reuse them.
 - Reverse: merge the remaining PRs into fewer.
 - Origin: chat
 
-## 2026-10-25 · PR #48 (inferred) · The gate runs docker, kubectl and kind through one exec helper, runTool; kubectl and kind as commands, no client-go
+## 2026-10-25 · PR #48 · The gate runs docker, kubectl and kind through one exec helper, runTool; kubectl and kind as commands, no client-go
 - Decision: gate/tool.go runTool(ctx, stdin, name, args...) runs every external tool; an ended ctx gives an error wrapping ctx.Err() without stderr, any other failure carries stderr; cmd.WaitDelay (toolWaitDelay, 5 s) bounds Wait when a process the tool started holds its output pipes. docker() wraps it with its error text unchanged; kubectl and kind are host prerequisites (gate/doc.go). kubectl() appends --request-timeout 30s (kubectl's default is none) and refuses args containing "--".
 - Rejected: client-go (a large dependency tree for a few calls, and a second path to the cluster beside the kubectl the deploy scripts use).
 - Reason: one place holds the ctx-versus-stderr split and the pipe bound; ci.yml installs no kubectl or kind, so the tests use fake scripts on PATH and never skip.
@@ -517,10 +517,25 @@ max. Earlier entries are not backfilled.
 - Revisit: runTool kills only the direct child, so a process a tool starts (kind load's image export and import) outlives a cancel, and a SIGKILLed gate leaves a running kind load or docker command behind (kubectl ends within its request timeout); a process-group kill is parked in docs/STATUS.md.
 - Origin: chat
 
-## 2026-10-25 · PR #48 (inferred) · Ready wait and pod health: which pod states are gate faults and which are candidate failures
+## 2026-10-25 · PR #48 · Ready wait and pod health: which pod states are gate faults and which are candidate failures
 - Decision: gate/kube.go readyCheck judges the first pod's Ready wait (readyTimeout 120 s, a poll every 1 s, each kubectl call cut off readyGrace 30 s past the deadline) and podHealth judges every pod after load. Gate faults: Deployment ReplicaFailure (admission refusal), ErrImageNeverPull, Evicted, DisruptionTarget, deletionTimestamp, pod phase Failed (kubelet admission rejection such as OutOfcpu; the pod stays Failed after its replacement is Ready, so any admission rejection during the wait or the load, an HPA scale-up included, is a fault), and at the timeout Pending, Unschedulable or any other waiting reason. Candidate failures: restartCount > 0, OOMKilled or Error, CrashLoopBackOff, any non-init container exit (Completed included), and at the timeout Running but never Ready. Every fault check precedes any failure check; Pending and not-Ready pods are judged only in the Ready wait.
 - Rejected: one classifier with a phase switch (it mixes the two rule sets); Unschedulable as a fault at once (a previous candidate's pods may still be releasing resources).
 - Reason: only the candidate's own behaviour may fail it; a node, admission or cluster problem says nothing about it, and a gate fault retries the candidate once, then halts the run (the retry rule lands in DESIGN.md sec 11 with gate.Stage5). No message field is decoded (terminated.message is candidate-written) and reasons print from an allowlist. The HPA's default 300 s scale-down stabilisation keeps a scale-down's deletionTimestamp out of the load window (inferred); readyTimeout and readyGrace are inferred (to be checked against real pod start times on the workstation).
 - Reverse: edit readyCheck and podHealth in gate/kube.go.
 - Revisit: Evicted and phase Failed as faults assume the candidate cannot drive node pressure (a variant with no ephemeral-storage limit that floods its log could be evicted under DiskPressure; the worst case is a halted run, never a pass); restarts and Running but never Ready are scored without checking the node, so a NotReady node or a node restart (ContainerStatusUnknown) counts against the candidate until gate.Stage5 checks node health first.
+- Origin: chat
+
+## 2026-10-26 · PR #49 (inferred) · The gate reaches loadgen's control API through kubectl proxy on a unix socket in a private directory
+- Decision: gate/controlproxy.go StartControlProxy runs kubectl --context C proxy --unix-socket <dir>/s --accept-paths '^/api/v1/namespaces/ek8s-system/services/loadgen:control/proxy(/.*)?$' (no --port; kubectl's default --reject-paths and --accept-hosts kept) in a 0700 directory from MkdirTemp under TMPDIR, or under /tmp when the socket path would be over 100 bytes or MkdirTemp fails there; it waits up to proxyStartTimeout (10 s) for the line "Starting to serve on <socket path>" and returns a loadgen/client Client whose http.Client dials only the socket, uses no proxy and HTTP/1.1, follows no redirect and turns any 3xx into an error; Close first stops all dialling (a dial already under way finishes first; any later one fails), then kills kubectl and removes the directory, so a Client used after Close cannot reach a socket another local user recreated at the removed path. Every ControlProxy error is a gate fault.
+- Rejected: a TCP port (any local user could connect to it); kubectl get --raw per request (a process per call, and its output hides the response headers loadgen/client checks: Content-Type and the boot_id header); client-go (as in the PR #48 runTool entry).
+- Reason: the directory limits the socket to the gate's uid (and root), and --accept-paths limits it to loadgen's control Service proxy path. On a kind cluster (kubectl v1.37.1 client, v1.37.0 node) the path filter applied on the socket (other paths 403), a non-localhost Host was refused, the socket was srwx------, exactly one Ek8s-Boot-Id and a Content-Type of application/json passed through (the API server adds Audit-Id and Cache-Control, so no exact header set is assumed), and a path with ".." segments got a 307 to the cleaned path, which can lie outside --accept-paths; kubectl's server, a Go ServeMux, sends that redirect for any unclean path before kubectl's filter runs (inferred from the go1.26 net/http source), so the client must never follow a redirect.
+- Reverse: replace StartControlProxy with another transport; loadgen/client takes any *http.Client, so only gate/controlproxy.go changes.
+- Revisit: a SIGKILLed gate leaves kubectl proxy serving the socket, and the directory on disk, until something kills it, and a world-writable TMPDIR without the sticky bit would let another user swap the directory between the privacy check and kubectl's bind (both in docs/STATUS.md Parked); kubectl proxy is given no --request-timeout, so only the http.Client's Timeout bounds a request; proxyStartTimeout is inferred; the Go client through the socket is tested only against a fake kubectl so far, and on a cluster only with curl.
+- Origin: chat
+
+## 2026-10-26 · PR #49 (inferred) · Stage 5 lands as six PRs: the transport alone, then burst evaluation (amends the PR #48 five-PR entry)
+- Decision: 4b2 is the kubectl proxy transport alone (gate/controlproxy.go); then 4b3 burst evaluation (gate/burst.go), 4b4 gate.Stage5, and 4c cmd/gate -stage5 and deploy/stage5-smoke.sh in deploy CI.
+- Rejected: 4b2 as planned, holding the transport and burst evaluation (about 2,000 lines); burst evaluation inside the gate.Stage5 PR (over 1,000 lines).
+- Reason: the transport with its tests came to about 1,300 lines with its review fixes, over the ~600-line review packet limit on its own.
+- Reverse: merge burst evaluation back into the transport PR.
 - Origin: chat
