@@ -105,7 +105,9 @@ k get --raw "$proxy/targets" | grep -q "\"id\":\"$id\"" ||
 ok "loadgen holds target $id"
 
 node=$(k get nodes -o jsonpath='{.items[0].metadata.name}')
-k get --raw "/api/v1/nodes/$node/proxy/metrics/resource" |
-	grep -Eq "^pod_cpu_usage_seconds_total\{[^}]*namespace=\"$ns\"[^}]*\} [0-9.e+-]+" ||
+# Into a variable first: grep -q would end the pipe early and SIGPIPE
+# kubectl under pipefail.
+metrics=$(k get --raw "/api/v1/nodes/$node/proxy/metrics/resource")
+grep -Eq "^pod_cpu_usage_seconds_total\{[^}]*namespace=\"$ns\"[^}]*\} [0-9.e+-]+" <<<"$metrics" ||
 	die "the kubelet reports no pod_cpu_usage_seconds_total for namespace $ns"
 ok "the kubelet reports pod_cpu_usage_seconds_total for $ns"

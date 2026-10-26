@@ -39,6 +39,9 @@ type Stats struct {
 
 	// SuccessRate is (Successes + ShedCredit x Sheds) / Requests.
 	SuccessRate float64
+	// Served is Successes / Requests: the share of the half that earned
+	// latency and CPU credit.
+	Served float64
 	// P95Latency is the 95th percentile (nearest rank) of the successes'
 	// latency; with no success it reads as the ceiling.
 	P95Latency time.Duration
@@ -53,7 +56,8 @@ type Stats struct {
 }
 
 // Result is a scored half: its Stats, each component's normalized score
-// in 0 to 1, and their weighted sum.
+// in 0 to 1, and Score: Success's weight times SuccessScore plus Served
+// times the latency and CPU weights times theirs (see Score).
 type Result struct {
 	Stats
 	SuccessScore, LatencyScore, CPUScore float64
@@ -123,7 +127,13 @@ func Score(p Params, recs []wire.Record, cpuSeconds float64) (Result, error) {
 	res.SuccessScore = clamp01(st.SuccessRate)
 	res.LatencyScore = clamp01(float64(p.LatencyCeiling-st.P95Latency) / float64(p.LatencyCeiling-p.LatencyFloor))
 	res.CPUScore = clamp01((p.CPUCeiling - st.CPUPerSuccess) / (p.CPUCeiling - p.CPUFloor))
-	res.Score = p.WeightSuccess*res.SuccessScore + p.WeightLatency*res.LatencyScore + p.WeightCPU*res.CPUScore
+	// Latency and CPU are measured over successes only, so a wrapper that
+	// sheds almost everything would keep full marks on both for the few
+	// it serves. They count in proportion to the share served: a request
+	// that was not served earns no latency or CPU credit.
+	st.Served = float64(st.Successes) / float64(st.Requests)
+	res.Stats = st
+	res.Score = p.WeightSuccess*res.SuccessScore + st.Served*(p.WeightLatency*res.LatencyScore+p.WeightCPU*res.CPUScore)
 	return res, nil
 }
 

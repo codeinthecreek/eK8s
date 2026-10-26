@@ -81,7 +81,7 @@ func TestScoreBasics(t *testing.T) {
 	if !near(res.SuccessScore, 4.5/6) || !near(res.LatencyScore, wantLat) || res.CPUScore != 0 {
 		t.Errorf("component scores = %v, %v, %v", res.SuccessScore, res.LatencyScore, res.CPUScore)
 	}
-	if want := 0.4*4.5/6 + 0.3*wantLat; !near(res.Score, want) {
+	if want := 0.4*4.5/6 + (4.0/6)*0.3*wantLat; !near(res.Score, want) || !near(res.Served, 4.0/6) {
 		t.Errorf("score %v, want %v", res.Score, want)
 	}
 }
@@ -135,7 +135,7 @@ func TestScoreNoSuccess(t *testing.T) {
 		t.Fatal(err)
 	}
 	if res.Successes != 0 || res.P95Latency != p.LatencyCeiling || res.CPUPerSuccess != p.CPUCeiling ||
-		res.LatencyScore != 0 || res.CPUScore != 0 || !near(res.Score, 0.4*0.25) {
+		res.LatencyScore != 0 || res.CPUScore != 0 || res.Served != 0 || !near(res.Score, 0.4*0.25) {
 		t.Errorf("no-success result %+v", res)
 	}
 }
@@ -296,5 +296,37 @@ func TestDeps(t *testing.T) {
 		if std != "true" && !ok[path] {
 			t.Errorf("fitness's build depends on %s", path)
 		}
+	}
+}
+
+// TestShedGaming: a half that sheds all but one request does not keep
+// full latency and CPU marks for the one it served.
+func TestShedGaming(t *testing.T) {
+	p := DefaultParams()
+	recs := []wire.Record{succ(10 * time.Millisecond)}
+	for range 99 {
+		recs = append(recs, rec("hash", "graceful_shed", "", time.Millisecond))
+	}
+	gamer, err := Score(p, recs, 0.001)
+	if err != nil {
+		t.Fatal(err)
+	}
+	honest, _ := Score(p, []wire.Record{succ(100 * time.Millisecond), succ(120 * time.Millisecond)}, 0.2)
+	if gamer.Score >= 0.25 || honest.Score <= 0.8 || gamer.Score >= honest.Score {
+		t.Errorf("shed-everything scores %v, an honest half %v", gamer.Score, honest.Score)
+	}
+}
+
+func TestParseResourceLimits(t *testing.T) {
+	line := "pod_cpu_usage_seconds_total{namespace=\"a\",pod=\"b\"} 1\n"
+	if _, err := parseResource(strings.NewReader(line), int64(len(line))); err != nil {
+		t.Errorf("input of exactly the cap: %v", err)
+	}
+	if _, err := parseResource(strings.NewReader(line), int64(len(line))-1); err == nil {
+		t.Error("input one byte over the cap was accepted")
+	}
+	long := "# " + strings.Repeat("x", 2<<20) + "\n" + line
+	if _, err := ParseResource(strings.NewReader(long)); err == nil {
+		t.Error("a line over the scanner's cap was accepted")
 	}
 }

@@ -706,7 +706,7 @@ stress-active):
   (goroutine scheduling, queueing, concurrency-control bookkeeping) -- a
   clean signal for exactly what is being evolved.
 
-**Stress-half bucketing:** `graceful_shed` responses get partial credit
+**Shed credit (every half):** `graceful_shed` responses get partial credit
 (starting point: 0.5, tune later) rather than being scored identically to
 `failed` -- otherwise a wrapper that evolves a genuinely good
 load-shedding strategy is penalized the same as one that simply falls
@@ -757,7 +757,11 @@ principles.
 
 **Per-half score** = weighted sum of the three normalized components
 (starting point: roughly equal weighting, slight lean toward
-`success_rate` given availability is arguably most load-bearing).
+`success_rate` given availability is arguably most load-bearing). `p95_latency` and
+`cpu_per_success` are measured over successes only, so their weighted
+terms count in proportion to the share of requests served (a half that
+sheds nearly everything keeps no latency or CPU credit for the few it
+serves; docs/decisions.md, PR #56 entry).
 
 **The first run scores a baseline half only**, so its fitness is the
 baseline score (docs/decisions.md, PR #52 S4 and the PR #56 entry);

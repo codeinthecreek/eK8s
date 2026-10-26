@@ -32,9 +32,15 @@ type Sample map[Pod]float64
 // namespace or pod label, repeats a pod, or carries a value that is not
 // finite and non-negative is an error: a counter read wrong must not
 // become a CPU figure.
-func ParseResource(r io.Reader) (Sample, error) {
+func ParseResource(r io.Reader) (Sample, error) { return parseResource(r, maxMetricsBytes) }
+
+// parseResource is ParseResource with the input cap as a parameter. An
+// input over max bytes is an error, not a silent cut: a truncated read
+// could drop a pod's series and undercount its CPU.
+func parseResource(r io.Reader, max int64) (Sample, error) {
 	out := make(Sample)
-	sc := bufio.NewScanner(io.LimitReader(r, maxMetricsBytes))
+	lr := &io.LimitedReader{R: r, N: max + 1}
+	sc := bufio.NewScanner(lr)
 	sc.Buffer(make([]byte, 0, 64<<10), 1<<20)
 	for n := 1; sc.Scan(); n++ {
 		line := sc.Text()
@@ -65,6 +71,9 @@ func ParseResource(r io.Reader) (Sample, error) {
 	}
 	if err := sc.Err(); err != nil {
 		return nil, fmt.Errorf("fitness: reading metrics: %w", err)
+	}
+	if lr.N <= 0 {
+		return nil, fmt.Errorf("fitness: metrics over %d bytes", max)
 	}
 	return out, nil
 }
