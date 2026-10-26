@@ -106,6 +106,8 @@ func TestResponsesDetail(t *testing.T) {
 			"burst: 1 of 4 responses failed (other 1); indices 3"},
 		{"capped indices", ten,
 			"burst: 10 of 10 responses failed (bad_status 4, transport_error 6); indices 0, 1, 2, 3, 4, 5, 6, 7, ..."},
+		{"eight indices, no cut", ten[2:],
+			"burst: 8 of 8 responses failed (bad_status 2, transport_error 6); indices 0, 1, 2, 3, 4, 5, 6, 7"},
 	}
 	// One failed record per classifier reason, on a kind that can fail
 	// with it: negative_accepted and a negative's bad_status included.
@@ -154,12 +156,19 @@ func TestCheckBurstRecords(t *testing.T) {
 	skipped.Skipped = true
 	fault := burstRec(1, "verify", "", "")
 	fault.Fault = "dial: refused"
+	// With a valid Bucket, so only the Skipped and Fault checks can catch them.
+	skippedOK := burstRec(1, "verify", bucketSuccess, "")
+	skippedOK.Skipped = true
+	faultOK := burstRec(1, "verify", bucketSuccess, "")
+	faultOK.Fault = "dial: refused"
 	pairOnVerify := burstRec(1, "verify", bucketSuccess, "")
 	pairOnVerify.Pair = &wire.Pair{Password: candidateMarker, Hash: candidateMarker}
 	for name, recs := range map[string][]wire.Record{
 		"no records":                nil,
 		"skipped":                   {ok[0], skipped},
 		"fault":                     {ok[0], fault},
+		"skipped with a bucket":     {ok[0], skippedOK},
+		"fault with a bucket":       {ok[0], faultOK},
 		"unknown bucket":            {ok[0], burstRec(1, "verify", candidateMarker, "")},
 		"empty bucket":              {ok[0], burstRec(1, "verify", "", "")},
 		"success hash with no pair": {ok[0], hashRec(1, bucketSuccess, nil)},
@@ -180,6 +189,20 @@ func TestCheckBurstRecords(t *testing.T) {
 	case len(err.Error()) > 160, strings.Contains(err.Error(), strings.Repeat("f", maxQuoted+1)),
 		!strings.HasSuffix(err.Error(), `"...`):
 		t.Errorf("1 KiB fault: error %q, want at most %d bytes of the fault and a marked cut", err, maxQuoted)
+	}
+
+	// Exactly 64 bytes are kept whole, 65 are cut: the literal pins maxQuoted.
+	for n, wantCut := range map[int]bool{64: false, 65: true} {
+		r := burstRec(0, "verify", "", "")
+		r.Fault = strings.Repeat("g", n)
+		err := checkBurstRecords([]wire.Record{r})
+		switch {
+		case err == nil:
+			t.Errorf("%d-byte fault: no error, want a gate fault", n)
+		case strings.HasSuffix(err.Error(), `"...`) != wantCut,
+			!strings.Contains(err.Error(), `"`+strings.Repeat("g", 64)+`"`):
+			t.Errorf("%d-byte fault: error %q, want 64 bytes quoted, cut %v", n, err, wantCut)
+		}
 	}
 }
 

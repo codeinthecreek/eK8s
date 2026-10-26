@@ -57,7 +57,9 @@ var knownBuckets = map[string]bool{
 // burstVerdicts adds Stage 5 "responses" and, only if it passes,
 // "hash-verify" over recs, one burst's records once they are read
 // (DESIGN.md sec 7; docs/decisions.md, the PR #50 burst verdict entry);
-// ok reports whether both passed. Only the candidate's own responses
+// ok reports whether both passed. The caller must first check that recs
+// are complete (one record per index, this run and target, no gap):
+// burstVerdicts does not. Only the candidate's own responses
 // fail it: a record loadgen could not account for is a gate fault, an
 // error from checkBurstRecords before any Result is added, so a failed
 // "responses" never masks one. ctx ending during hash-verify is the only
@@ -144,7 +146,7 @@ func responsesDetail(recs []wire.Record) string {
 
 // hashVerifyDetail is "hash-verify" over records checkBurstRecords
 // passed: every record with a Pair is verified on the host with the
-// fixed core, none sampled (DESIGN.md sec 7), in record order. A hash
+// fixed core, none sampled (DESIGN.md sec 7), its items passed in record order. A hash
 // that does not verify (mismatch) and one the core rejects as malformed
 // or not at the fixed parameters (rejected) both fail it: either is the
 // candidate's own bytes. Its only error is ctx's, if ctx ends first.
