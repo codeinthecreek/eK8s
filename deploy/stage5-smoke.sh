@@ -71,6 +71,12 @@ image="ek8s-wrapper:$(sha256sum "$work/service" | cut -c1-12)"
 docker build -q -t "$image" "$work" >/dev/null
 
 # The orchestrator's job in a gap: stress-ng on, Running, before Stage 5.
+# At CI size the node has no CPU left for stress-ng's 500m request beside
+# loadgen (750m) and the candidate (250m), so its requests shrink here;
+# its limits stay, so it still contends. deploy/up.sh restores the
+# requests on a re-run (apply -k).
+k -n ek8s-stress patch deploy/stress-ng --type=json -p \
+	'[{"op":"replace","path":"/spec/template/spec/containers/0/resources/requests","value":{"cpu":"10m","memory":"16Mi"}}]'
 k -n ek8s-stress scale deploy/stress-ng --replicas=1
 k -n ek8s-stress rollout status deploy/stress-ng --timeout=180s || die "stress-ng not Ready"
 
