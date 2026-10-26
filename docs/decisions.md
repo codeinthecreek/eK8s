@@ -540,17 +540,31 @@ max. Earlier entries are not backfilled.
 - Reverse: merge burst evaluation back into the transport PR.
 - Origin: chat
 
-## 2026-10-26 · PR #50 (inferred) · Stage 5 lands as eight PRs: burst evaluation splits into verdicts, pre-run steps and the burst run (amends the PR #49 six-PR entry)
+## 2026-10-26 · PR #50 · Stage 5 lands as eight PRs: burst evaluation splits into verdicts, pre-run steps and the burst run (amends the PR #49 six-PR entry)
 - Decision: after 4b2 (#49): 4b3a the burst verdicts (gate/burstverdict.go, Stage 5 checks "responses" and "hash-verify"); 4b3b the Stage 5 pre-run steps over loadgen/client (the GET /config and GET /targets checks, Expect, PUT pairs, the canary) with a fake loadgen; 4b3c the burst run (start, the bounded poll, the records read and its fault checks, the drain); then 4b4 gate.Stage5, and 4c cmd/gate -stage5 and deploy/stage5-smoke.sh in deploy CI.
 - Rejected: 4b3 as one PR (about 1,250 lines); two PRs, the run protocol with its fake loadgen (about 1,000 lines) and the verdicts; the verdicts inside the gate.Stage5 PR (about 860 lines).
 - Reason: each part reviews alone under the ~600-line packet limit; the verdicts work on records alone and need no fake loadgen, and 4b3c holds the poll bound, the cancel and the drain for review on their own.
 - Reverse: merge 4b3a, 4b3b and 4b3c back into one PR.
 - Origin: chat
 
-## 2026-10-26 · PR #50 (inferred) · Stage 5 burst verdicts: any failed bucket fails "responses", every /hash pair is host-verified
+## 2026-10-26 · PR #50 · Stage 5 burst verdicts: any failed bucket fails "responses", every /hash pair is host-verified
 - Decision: gate/burstverdict.go adds the Stage 5 check "responses" and, only if it passes, "hash-verify". A record fails "responses" if and only if its Bucket is "failed" (negative_accepted and bad_status included); success and graceful_shed pass. Every record with a Pair (once "responses" has passed, only success /hash records) goes to hostpairs.Verify, and a hash that does not verify, or that hashcore rejects as malformed or at other parameters, fails "hash-verify". A Skipped or Fault record, an empty or unknown Bucket, a success /hash record without a Pair, a Pair on a record of another kind, an empty record list, and ctx ending during Verify are gate faults; completeness (one record per index, the run's RunID and Target, no gap) is for the caller to check before burstVerdicts, in the burst run (4b3c). Detail holds counts, record indices (the first 8, ascending) and reason names from an allowlist of the classifier's reasons ("other" otherwise), never Pair, Evidence, Class or other text as given.
 - Rejected: trusting 4b3c's record checks with no re-check here of the fields these verdicts read; verifying the pairs of failed records too; a hash that hashcore rejects as a gate fault (drift between the classifier and hashcore); Reason text printed as given.
 - Reason: only the candidate's own responses may fail it, and a record loadgen cannot account for says nothing about the candidate; every hash is verified, not a sample (DESIGN.md sec 7); a failed candidate is discarded at "responses", and integrity culls are the orchestrator's (DESIGN.md sec 9); Detail must carry no candidate-controlled or free text.
 - Reverse: edit gate/burstverdict.go.
 - Revisit: a success hash that hashcore rejects is inferred unreachable (loadgen's classifier checks the hash first); host Verify time at r = 19 is unmeasured.
 - Origin: Code
+
+## 2026-10-26 · PR #51 (inferred) · The gate-pod series (DESIGN.md sec 7 "Planned") waits until after the first evolutionary run
+- Decision: the first run's gate uses the bare boot (bwrap, the nsenter relay, Stage 1's docker run sub-check); the "Planned" text stays in DESIGN.md sec 7 with one sentence saying so, and the gate-pod design packet item moves to docs/AFTER-FIRST-RUN.md.
+- Rejected: building Stages 2-4 in a pod before the first run.
+- Reason: the bare boot is built and tested; the pod series is a design packet plus several PRs that a first, fitness-ranked run does not need.
+- Reverse: move the gate-pod item back to docs/STATUS.md Next and drop the sec 7 sentence.
+- Origin: chat
+
+## 2026-10-26 · PR #51 (inferred) · Autonomous working mode: Code works along STATUS.md Next and asks the owner only on direction questions
+- Decision: CLAUDE.md "Working mode: autonomous": Code plans, implements, self-reviews, opens each PR and continues; technical decisions are Code's (Origin: Code); it asks the owner, in one batched message, only on the non-negotiables, DESIGN.md direction or scope, off-path work, or what it cannot do or verify; findings are fixed in the PR, put in Next if they block the first run, or appended to docs/AFTER-FIRST-RUN.md; Next and Parked capped at 10. Commit, push, packet and chat-approval rules in CLAUDE.md, docs/handoff.md and reviewer.md now apply only when the owner asks.
+- Rejected: the per-step chat relay (a chat-drafted prompt, a packet and an owner approval for each commit, push and step).
+- Reason: owner time and quota; the owner accepts Code's technical recommendations.
+- Reverse: drop the "Working mode: autonomous" section and restore the PR #51 edits to the commit, push, ask-before, DESIGN.md-approval, end-of-task packet, chat-material and self-review rules in CLAUDE.md, the packet-default, "Which packet" and hypothetical-routing lines in docs/handoff.md, and reviewer.md's description.
+- Origin: chat

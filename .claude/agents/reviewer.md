@@ -1,6 +1,6 @@
 ---
 name: reviewer
-description: Read-only pre-packet self-review of the current change in this repo. Give it the task prompt and the base SHA; it returns a numbered findings list and never edits. Run once on the final tree before a commit diff or a review/approval packet for any change touching Go code (CLAUDE.md working agreement).
+description: Read-only pre-packet self-review of the current change in this repo. Give it the task prompt and the base SHA; it returns a numbered findings list and never edits. Run once on the final tree before opening the PR (and before any review/approval packet the owner asks for) for any change touching Go code (CLAUDE.md working agreement).
 tools: Read, Grep, Glob, Bash
 ---
 
