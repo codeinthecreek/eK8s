@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/codeinthecreek/eK8s/internal/hashcore"
 	"github.com/codeinthecreek/eK8s/loadgen/client"
@@ -231,5 +232,20 @@ func TestNodeFault(t *testing.T) {
 				t.Errorf("nodeFault = %v, want %q", err, tc.want)
 			}
 		})
+	}
+}
+
+// TestStage5StepTimeout: a cluster step that hangs is a gate fault when
+// stepTimeout ends, not a hang.
+func TestStage5StepTimeout(t *testing.T) {
+	fx := newStage5(t, []string{nodesOK}, nil)
+	must(t, os.WriteFile(filepath.Join(fx.kubectl, "sleep.1"), nil, 0o644))
+	old := stepTimeout
+	stepTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { stepTimeout = old })
+	var err error
+	bounded(t, func() { _, err = fx.run(t) })
+	if err == nil || !strings.Contains(err.Error(), "stage 5: nodes") || !errors.Is(err, context.DeadlineExceeded) && !strings.Contains(err.Error(), "signal: killed") {
+		t.Fatalf("Stage5 error = %v, want a fault from the nodes step", err)
 	}
 }

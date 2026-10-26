@@ -608,5 +608,5 @@ max. Earlier entries are not backfilled.
 - Decision: gate.Stage5(ctx, Stage5Config, *Report) checks nodes Ready and the stress-ng pods Running, loads the image, `kubectl create`s the variant bundle, waits Ready, runs runBurst, then adds "deploy-ready" (on a failure), "pod-health", "responses", "hash-verify". A pod problem (never Ready, restarts) first re-checks nodes: a NotReady node makes it a fault. ContainerStatusUnknown is a fault. On a candidate failure it DELETEs the loadgen target through the last Seq; the namespace stays for the caller. Each cluster step runs under a 2 min stepTimeout. A fault ends the stage with an error and no Result (halt, S10).
 - Rejected: Stage5 deleting the namespace (DESIGN.md sec 11 gives it to the orchestrator); `apply` (merges into a namespace that exists); the retry-once rule in code (S10).
 - Reason: only the candidate's own behaviour may fail it; the stage must not start or stop stress itself (DESIGN.md sec 7).
-- Reverse: edit gate/stage5.go. DESIGN.md sec 7 pass condition 1 and sec 11 "Gate faults" now state the pod-state and retry rules (overview.md stale line extended).
+- Reverse: edit gate/stage5.go. Resolves the node-check Revisit of the PR #48 pod-state entry. DESIGN.md sec 7 pass condition 1 and sec 11 "Gate faults" now state the pod-state and retry rules (overview.md stale line extended).
 - Origin: Code
