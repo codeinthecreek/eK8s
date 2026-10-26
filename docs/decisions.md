@@ -561,3 +561,10 @@ max. Earlier entries are not backfilled.
 - Reason: the bare boot is built and tested; the pod series is a design packet plus several PRs that a first, fitness-ranked run does not need.
 - Reverse: move the gate-pod item back to docs/STATUS.md Next and drop the sec 7 sentence.
 - Origin: chat
+
+## 2026-10-26 · PR #51 (inferred) · Autonomous working mode: Code works along STATUS.md Next and asks the owner only on direction questions
+- Decision: CLAUDE.md "Working mode: autonomous": Code plans, implements, self-reviews, opens each PR and continues; technical decisions are Code's (Origin: Code); it asks the owner, in one batched message, only on the non-negotiables, DESIGN.md direction or scope, off-path work, or what it cannot do or verify; findings are fixed in the PR, put in Next if they block the first run, or appended to docs/AFTER-FIRST-RUN.md; Next and Parked capped at 10. Commit, push, packet and chat-approval rules in CLAUDE.md, docs/handoff.md and reviewer.md now apply only when the owner asks.
+- Rejected: the per-step chat relay (a chat-drafted prompt, a packet and an owner approval for each commit, push and step).
+- Reason: owner time and quota; the owner accepts Code's technical recommendations.
+- Reverse: drop the "Working mode: autonomous" section and restore the PR #51 edits to the commit, push, ask-before, DESIGN.md-approval, end-of-task packet, chat-material and self-review rules in CLAUDE.md, the packet-default, "Which packet" and hypothetical-routing lines in docs/handoff.md, and reviewer.md's description.
+- Origin: chat

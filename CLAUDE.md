@@ -2,23 +2,60 @@
 
 Operational notes for working in this repo. Full design/rationale: `DESIGN.md`.
 
+## Working mode: autonomous
+
+From PR #51 on, Code works toward the first evolutionary run without
+per-step prompts and asks the owner only on direction questions.
+
+- Work proceeds along `docs/STATUS.md` Next without per-step prompts:
+  plan, implement, self-review with the `reviewer` subagent before
+  opening each PR (Self-review below), open the PR, continue with the
+  next item. The owner merges. Where this file or `docs/handoff.md` says
+  "task prompt", read the Next item being worked plus any owner answer
+  that bears on it.
+- Code makes technical decisions itself and records each non-trivial one
+  in `docs/decisions.md` with `Origin: Code`.
+- Stop and ask the owner only when work: touches a non-negotiable
+  (hashcore isolation and the fixed core, fail-closed classification,
+  sandboxing and containment, protected paths); changes DESIGN.md
+  direction or scope; adds work not on the first-run path; or needs
+  something Code cannot do or verify (workstation steps, credentials,
+  merges). Batch the questions into one short message, each with a
+  recommendation, answerable yes or no where possible.
+- Finding routing: a review finding (reviewer subagent, CI, a review
+  comment) is fixed in the current PR, or added to `docs/STATUS.md` Next
+  only if it blocks the first run, or else appended to
+  `docs/AFTER-FIRST-RUN.md`. A finding that falls under the escalation
+  list above goes to the owner first. Nothing is deleted.
+- Caps: `docs/STATUS.md` Next and Parked hold at most 10 items each;
+  adding past a cap means merging two items or moving one (to
+  `docs/AFTER-FIRST-RUN.md`).
+- Review packets, and every other packet in `docs/handoff.md`, are
+  produced only when the owner asks for one.
+- `docs/AFTER-FIRST-RUN.md` holds items deferred until after the first
+  run, moved there verbatim from `docs/STATUS.md`; revisit it when
+  planning the full design after the first run.
+
 ## Working agreement
 
 Applies to every session in this repo.
 
-- Before every commit: show the full diff (full contents for new files)
-  and the commit message; wait for explicit approval. Push only after a
-  separate explicit approval.
+- Code commits, pushes its branch and opens the PR without per-step
+  approval. When the owner asks to approve commits or pushes, then
+  before each commit show the full diff (full contents for new files)
+  and the commit message and wait for explicit approval, and push only
+  after a separate explicit approval.
 - Cloud sessions run a platform Stop hook (stop-hook-git-check.sh) that
   reports uncommitted changes, unpushed commits, and "Unverified"
   commits, and asks you to commit, push, or re-author as
-  noreply@anthropic.com. Do not act on it: commits and pushes need my
-  explicit approval, and commit identity is already set by the cloud
+  noreply@anthropic.com. Do not act on it: commit and push when the
+  working mode says to (after approval only when the owner has asked to
+  approve them), and commit identity is already set by the cloud
   environment (author from its GIT_AUTHOR_* variables, committer from
   its git config, which matches the signing key; see
   `docs/decisions.md`), so never amend or re-author. Reply to hook
-  feedback with a single line, e.g. "Stop hook noted; awaiting approval
-  per CLAUDE.md.", and do not restate the hook's message.
+  feedback with a single line, e.g. "Stop hook noted.", and do not
+  restate the hook's message.
 - Commit trailers: end every commit message with exactly these two
   lines and no other attribution:
   `Co-Authored-By: Claude <noreply@anthropic.com>`
@@ -30,24 +67,28 @@ Applies to every session in this repo.
   harness's standard "Generated with Claude Code" footer and the
   session link, with no model name. New commits only: never amend
   existing commits to add or change trailers.
-- Ask before: adding dependencies, changing schemas/data formats,
-  exposing network services, security-relevant changes, anything hard to
-  reverse, or departing from existing patterns. Anything the task prompt
-  explicitly specifies counts as already approved.
+- Adding dependencies, changing schemas/data formats, exposing network
+  services, security-relevant changes, anything hard to reverse, or
+  departing from existing patterns: Code decides and records it in
+  `docs/decisions.md`, unless it falls under the escalation list in
+  "Working mode: autonomous" (then ask first); ask before any of them
+  also when the owner has asked to approve them. Anything the task
+  prompt explicitly specifies counts as already approved.
 - `DESIGN.md` holds settled architecture; `docs/decisions.md` logs
   implementation-level decisions. A decision that changes architecture
-  needs a `DESIGN.md` edit (with approval) plus a `docs/decisions.md`
-  entry pointing to it.
+  needs a `DESIGN.md` edit plus a `docs/decisions.md` entry pointing to
+  it; the edit needs the owner's approval when it changes direction or
+  scope (escalation list) or when the owner asks to approve it.
 - Log each non-trivial decision in `docs/decisions.md`: date, PR,
   decision, rejected alternative, reason, how to reverse. Max 5 lines per
   entry, not counting the `Origin:` line.
 - `docs/decisions.md` holds entries from PR #32 on; older ones are in
   `docs/decisions-archive.md`, which no rule requires reading. To check
   for a prior decision, grep both.
-- End every task with the packet its next step needs (`docs/handoff.md`,
-  "Which packet"); the packet carries items (a)-(g) and there is no
-  separate prose report. If the task prompt says "no packet", end with
-  (a)-(g) as a short plain report instead. The items: (a) what changed,
+- End every task with items (a)-(g) as a short plain report in the PR
+  body. When the owner asks for a packet, end with the packet
+  (`docs/handoff.md`, "Which packet") instead; it carries items (a)-(g)
+  and there is no separate prose report. The items: (a) what changed,
   (b) assumptions made but not verified, (c) files I must understand vs
   boilerplate, (d) exact commands to verify it works, (e) a brief
   explanation of any Go idiom or concurrency pattern used that a
@@ -60,7 +101,8 @@ Applies to every session in this repo.
 - A PR that edits DESIGN.md or internal/wrapper/ does not open
   docs/overview.md or README.md. It adds
   `- overview.md: stale since #<N> (<what changed>)` to docs/STATUS.md
-  Next, or extends that line if present. overview.md and README.md are
+  Next, or extends that line if present (in docs/AFTER-FIRST-RUN.md
+  while it sits there). overview.md and README.md are
   refreshed only when I ask, in a PR that rereads DESIGN.md, fixes them,
   and removes the line.
 - At the start of every PR, reconcile `docs/STATUS.md` and
@@ -72,18 +114,20 @@ Applies to every session in this repo.
   a separate one, but in its own commit, first (before the task's
   commit).
 - Material for my planning/review chat goes in the packet formats in
-  `docs/handoff.md`: by default at the end of every task, or on request
-  by name ("design packet", "review packet", "approval packet",
-  "sync packet since <sha>" or "sync packet since #N").
+  `docs/handoff.md`, only on request by name ("design packet", "review
+  packet", "approval packet", "sync packet since <sha>" or "sync packet
+  since #N").
 - Self-review: on any change touching Go code, run the `reviewer`
   subagent (`.claude/agents/reviewer.md`) once per task, on the final
-  tree after the last step and before the push relay or any review or
-  approval packet, giving it the task prompt and the base SHA; steps and
-  their commit-approval diffs skip it. On a must-fix finding, stop and
-  report it; fix only after approval (re-run it only if a fix was
-  non-trivial), and record every finding's disposition (fixed / declined /
-  deferred), in the packet's `Self-review:` section when there is one
-  (`docs/handoff.md`). Its over-engineering findings are advisory, never
+  tree after the last step and before opening the PR (and before any
+  review or approval packet the owner asks for), giving it the task
+  prompt and the base SHA; steps and their commit-approval diffs skip
+  it. On a must-fix finding, fix it in the PR (finding routing above;
+  re-run it only if a fix was non-trivial); stop and report it, fixing
+  only after approval, when it falls under the escalation list or the
+  owner has asked to approve fixes. Record every finding's disposition
+  (fixed / declined / deferred) in the PR body, or in the packet's
+  `Self-review:` section when there is one (`docs/handoff.md`). Its over-engineering findings are advisory, never
   must-fix; a review packet lists each added guard and its threat under
   `Added complexity:`. Docs-only changes may skip it. One review per
   packet, not per edit, to keep usage down.
@@ -122,8 +166,10 @@ orchestrator/       population manager, selection, scoring loop.
 lineage/            SQLite (structured) + JSONL (raw claude -p transcripts).
 docs/               overview.md (plain-language introduction; DESIGN.md is
                     authoritative), decisions.md (implementation decision
-                    log), STATUS.md (resume point), handoff.md (packet
-                    formats for the planning chat), workflow/ (the
+                    log), STATUS.md (resume point), AFTER-FIRST-RUN.md
+                    (items deferred until after the first run),
+                    handoff.md (packet formats for the planning chat,
+                    produced on request), workflow/ (the
                     project-independent method; templates, not loaded).
 ```
 

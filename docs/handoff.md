@@ -3,10 +3,10 @@
 The planning/review chat cannot read the repo; it sees only what the owner
 pastes from a Code session. A packet is the smallest paste that lets the
 chat make a design decision, review code, or let the owner approve a
-commit or push. Code produces a packet by default at the end of every
-task, or when the owner asks for one by name ("design packet", "review
-packet", "approval packet", "sync packet since <sha>" or "sync packet
-since #N"); "no packet" in the task prompt opts out.
+commit or push. Code produces a packet only when the owner asks for one
+by name ("design packet", "review packet", "approval packet", "sync
+packet since <sha>" or "sync packet since #N"; CLAUDE.md, "Working mode:
+autonomous").
 
 ## Rules for every packet
 
@@ -74,7 +74,8 @@ be re-added from GitHub) before relying on them.
 
 ## Which packet
 
-At the end of a task, pick by what the next step needs:
+When the owner asks for a packet at the end of a task without naming
+its type, pick by what the next step needs:
 
 - Go change the chat has not reviewed: review packet.
 - Docs-only change, or a change already reviewed: approval packet.
@@ -116,12 +117,14 @@ For code review of a change.
   limit is never grounds for a guard beyond the mitigation sec 15 itself
   names (for example, the driver never passing candidate output into a
   prompt). A hypothetical item is not built by
-  default; it goes to docs/STATUS.md Parked, unless the owner asks for it
-  (a task prompt that specifies it counts as asking). Exception: a
+  default; it goes to docs/AFTER-FIRST-RUN.md (CLAUDE.md finding
+  routing), unless the owner asks for it (a task prompt that specifies it
+  counts as asking). Exception: a
   hypothetical that bears on a non-negotiable (hashcore isolation,
   protected paths, fail-closed classification, containment) is never
-  auto-parked; it goes to the owner as a question in the packet, and the
-  guard stays in the change until the owner answers. A hypothetical
+  auto-parked; it goes to the owner as a question (in the escalation
+  batch, CLAUDE.md "Working mode: autonomous", or in the packet when there
+  is one), and the guard stays in the change until the owner answers. A hypothetical
   fitness-integrity guard is parked like any other: per DESIGN.md sec 7,
   that concern rests on the live checks and the sec 15 accepted limits.
   Nothing in this section weakens an existing fail-closed rule.
