@@ -555,16 +555,37 @@ max. Earlier entries are not backfilled.
 - Revisit: a success hash that hashcore rejects is inferred unreachable (loadgen's classifier checks the hash first); host Verify time at r = 19 is unmeasured.
 - Origin: Code
 
-## 2026-10-26 · PR #51 (inferred) · The gate-pod series (DESIGN.md sec 7 "Planned") waits until after the first evolutionary run
+## 2026-10-26 · PR #51 · The gate-pod series (DESIGN.md sec 7 "Planned") waits until after the first evolutionary run
 - Decision: the first run's gate uses the bare boot (bwrap, the nsenter relay, Stage 1's docker run sub-check); the "Planned" text stays in DESIGN.md sec 7 with one sentence saying so, and the gate-pod design packet item moves to docs/AFTER-FIRST-RUN.md.
 - Rejected: building Stages 2-4 in a pod before the first run.
 - Reason: the bare boot is built and tested; the pod series is a design packet plus several PRs that a first, fitness-ranked run does not need.
 - Reverse: move the gate-pod item back to docs/STATUS.md Next and drop the sec 7 sentence.
 - Origin: chat
 
-## 2026-10-26 · PR #51 (inferred) · Autonomous working mode: Code works along STATUS.md Next and asks the owner only on direction questions
+## 2026-10-26 · PR #51 · Autonomous working mode: Code works along STATUS.md Next and asks the owner only on direction questions
 - Decision: CLAUDE.md "Working mode: autonomous": Code plans, implements, self-reviews, opens each PR and continues; technical decisions are Code's (Origin: Code); it asks the owner, in one batched message, only on the non-negotiables, DESIGN.md direction or scope, off-path work, or what it cannot do or verify; findings are fixed in the PR, put in Next if they block the first run, or appended to docs/AFTER-FIRST-RUN.md; Next and Parked capped at 10. Commit, push, packet and chat-approval rules in CLAUDE.md, docs/handoff.md and reviewer.md now apply only when the owner asks.
 - Rejected: the per-step chat relay (a chat-drafted prompt, a packet and an owner approval for each commit, push and step).
 - Reason: owner time and quota; the owner accepts Code's technical recommendations.
 - Reverse: drop the "Working mode: autonomous" section and restore the PR #51 edits to the commit, push, ask-before, DESIGN.md-approval, end-of-task packet, chat-material and self-review rules in CLAUDE.md, the packet-default, "Which packet" and hypothetical-routing lines in docs/handoff.md, and reviewer.md's description.
 - Origin: chat
+
+## 2026-10-26 · PR #52 · Owner answers to the skeleton plan batch (PR #51 comment)
+- Decision: the 9-step plan approved; S1-S3 and S6-S12 yes (Stage 5 PRs merged into two; JSONL lineage, no SQLite; genomes as files plus sha256; full host verification of every window; live cap 3 (4 in probation); FIFO eviction, hall of fame, stagnation, escalation, a retry/re-PUT, docker rmi, salt growth and HPA tuning deferred; mutation model pinned to Sonnet 5.5); N1-N4 no; N5 accepted for the first run (bare boot unbounded; pressure on the workstation, not an escape).
+- S4 yes, conditional: one baseline window and no stress half, only if none of the three fitness components S5 keeps (success_rate, p95 latency, cpu_per_success) needs the stress half (DESIGN.md sec 9); otherwise ask the owner before building fitness. Restore the stress half before any run that makes resilience claims.
+- Rejected: N1-N4 (each weakens a non-negotiable); a cgroup-bound PR for N5 before the first run.
+- Reverse: re-ask the owner.
+- Origin: owner
+
+## 2026-10-26 · PR #52 · Escalation list gains any third-party dependency
+- Decision: CLAUDE.md "Working mode: autonomous" stop-and-ask list adds "adds any third-party dependency (a Go module or a tool)".
+- Rejected: Code deciding dependencies itself and logging them (the earlier Working agreement default).
+- Reason: owner's call; supply-chain exposure in a run that executes model-written code.
+- Reverse: drop the clause from the escalation list.
+- Origin: owner
+
+## 2026-10-26 · PR #52 · Model-tier rule: Code stops when the next PR needs another tier
+- Decision: CLAUDE.md "Working mode: autonomous" adds: mid tier (Sonnet, medium) for skeleton PRs 1-4 and 8; top tier (Opus, high) for PRs 5-7 (driver sandbox, orchestrator integrity and verification); Code stops and tells the owner when the next PR needs a different tier than the session runs.
+- Rejected: one tier for every PR.
+- Reason: owner's call; spend top-tier effort where the non-negotiables bite.
+- Reverse: drop the "Model tier" bullet.
+- Origin: owner
