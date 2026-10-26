@@ -56,6 +56,13 @@ cleanup() {
 trap cleanup EXIT
 
 deploy/loadgen-up.sh "$rate"
+# At CI size the node cannot hold loadgen's 750m request, the system pods,
+# stress-ng and the candidate's 250m together (the hasher pod stayed
+# Unschedulable), so loadgen's request shrinks here; its limit stays. The
+# patch replaces the pod (Recreate), so a new boot_id, before any run.
+k -n "$sys" patch deploy/loadgen --type=json -p \
+	'[{"op":"replace","path":"/spec/template/spec/containers/0/resources/requests/cpu","value":"100m"}]'
+k -n "$sys" rollout status deploy/loadgen --timeout=180s || die "loadgen not Ready after the patch"
 
 # Generation 0's image, as gate Stage 1 builds it: a static binary in a
 # FROM scratch image tagged by the binary's sha256 (gate/docker.go).
@@ -71,8 +78,8 @@ image="ek8s-wrapper:$(sha256sum "$work/service" | cut -c1-12)"
 docker build -q -t "$image" "$work" >/dev/null
 
 # The orchestrator's job in a gap: stress-ng on, Running, before Stage 5.
-# At CI size the node has no CPU left for stress-ng's 500m request beside
-# loadgen (750m) and the candidate (250m), so its requests shrink here;
+# At CI size the node has no CPU left for stress-ng's 500m request, so
+# its requests shrink here;
 # its limits stay, so it still contends. deploy/up.sh restores the
 # requests on a re-run (apply -k).
 k -n ek8s-stress patch deploy/stress-ng --type=json -p \
