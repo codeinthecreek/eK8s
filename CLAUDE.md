@@ -28,6 +28,21 @@ per-step prompts and asks the owner only on direction questions.
   effort): skeleton PRs 1-4 and 8. Top tier (Opus, high effort): skeleton
   PRs 5-7 (driver sandbox, orchestrator integrity and verification).
   The skeleton PR list is in `docs/STATUS.md` Next.
+- Stop message: whenever Code stops (waiting for a merge, a model-tier
+  change, a question batch, a usage limit, or any other reason), its
+  final message ends with a ready-to-paste prompt for a fresh session,
+  in one fenced block, containing: the header line `Model: <tier for
+  the next PR> | Effort: <effort> | Why: <one line>`; `Prompt ID:
+  EK-RESUME-<UTC date and time, YYYYMMDD-HHMM>`; the standard Guard line
+  (check model and get_session effort_level against the header, stop
+  with "WRONG SETTINGS: model=<yours> effort=<yours or unknown>" on a
+  mismatch; reply only TRUNCATED unless the prompt ends with the line
+  END OF PROMPT; reply only "ALREADY RUN: <Prompt ID>" if
+  /tmp/ek8s-prompts.log has the ID, else append the ID and `date -u`
+  to it first); one or two lines saying what to do next; and the line
+  END OF PROMPT. Above the block, one line, "Or reply 'continue' in this
+  session", when the same session can carry on (same tier, not near its
+  context limit).
 - Finding routing: a review finding (reviewer subagent, CI, a review
   comment) is fixed in the current PR, or added to `docs/STATUS.md` Next
   only if it blocks the first run, or else appended to

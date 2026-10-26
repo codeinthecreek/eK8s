@@ -589,3 +589,10 @@ max. Earlier entries are not backfilled.
 - Reason: owner's call; spend top-tier effort where the non-negotiables bite.
 - Reverse: drop the "Model tier" bullet.
 - Origin: owner
+
+## 2026-10-26 · PR #53 · Every stop ends with a ready-to-paste resume prompt
+- Decision: CLAUDE.md "Working mode: autonomous" adds a "Stop message" bullet: each stop's final message ends with one fenced block (Model/Effort/Why header, Prompt ID EK-RESUME-<UTC YYYYMMDD-HHMM>, the Guard line, what to do next, END OF PROMPT), preceded by "Or reply 'continue' in this session" when the same session can carry on.
+- Rejected: free-form stop messages; a stored counter for prompt IDs.
+- Reason: owner's call; a fresh session resumes with no chat relay, and the timestamp ID is unique without stored state.
+- Reverse: drop the "Stop message" bullet.
+- Origin: owner
