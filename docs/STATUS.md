@@ -4,7 +4,7 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 *(inferred)* are guesses, not read from the repo; correct them.
 
 ## Now
-- claude/autonomous-mode (PR #51, inferred): autonomous working mode (CLAUDE.md section, approval and packet rules made owner-on-request in CLAUDE.md, docs/handoff.md and reviewer.md); docs/AFTER-FIRST-RUN.md with 20 items moved from Next and Parked; gate-pod series deferred (DESIGN.md sec 7); first-run item in Next; two decisions.md entries.
+- (nothing in flight)
 
 ## Next
 - First run (walking skeleton): about 10 generations on the workstation, end to end: driver mutates the wrapper (DESIGN.md sec 12, sandboxed), gate Stages 1-5, orchestrator with loadgen windows, fitness (sec 9), lineage records; see the skeleton plan.
@@ -21,8 +21,8 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 - HPA at 70% of a 250m request pins variants at maxReplicas under load; revisit with the observation-window design (also the default 300s scale-down stabilisation). Windows now start from an idle gap with no warm-up exclusion (DESIGN.md sec 11), so the gap length versus the scale-down stabilisation decides how many replicas a variant starts a window with.
 
 ## Recent
+- #51 Autonomous working mode: CLAUDE.md section, approval and packet rules made owner-on-request; docs/AFTER-FIRST-RUN.md with 20 deferred items; gate-pod series deferred (DESIGN.md sec 7); two decisions.md entries (2026-10-26)
 - #50 Gate Stage 5 PR4b3a, burst verdicts: gate/burstverdict.go (failed buckets and host verification over a burst's records); two decisions.md entries (Stage 5 as eight PRs; the burst verdict rules) (2026-10-26)
 - #49 Gate Stage 5 PR4b2, the control API transport: gate/controlproxy.go StartControlProxy (kubectl proxy on a unix socket in a private 0700 dir, --accept-paths to loadgen's control Service proxy path; the client refuses any 3xx and dials nothing after Close); a fake kubectl test harness; two decisions.md entries (2026-10-26)
 - #48 Gate Stage 5 PR4b1, cluster plumbing: runTool, one exec helper for docker, kubectl and kind (WaitDelay bound; docker() wraps it); gate/kube.go pod classifier (readyCheck, podHealth: gate faults vs candidate failures, no candidate text in verdicts) and the kubectl and kind wrappers (request timeout, selector required, waitReady bounded); three decisions.md entries (2026-10-25)
 - #47 loadgen response-header cap: MaxResponseHeaderBytes 1 KiB, 1xx included, an over-cap response is the variant's transport_error; four header-cap tests; BenchmarkStalledRequest in four stall shapes (worst ~56 KiB heap per stalled request); DESIGN.md sec 10; one decisions.md entry amending the PR #45 memory sum (2026-10-25)
-- #46 Gate Stage 5 PR4a, loadgen/wire, loadgen/client and internal/hostpairs: wire types in a std-only package pinned by golden files (TestWireGolden, TestWireGoldenFull); a strict control API client (boot_id, Content-Type, strict decoding, echo and size checks); host /verify pair generation (a mismatch hashes another fresh password; crypto/rand order) and full verification; DESIGN.md sec 5, 8, 10; four decisions.md entries (2026-10-24)

@@ -555,14 +555,14 @@ max. Earlier entries are not backfilled.
 - Revisit: a success hash that hashcore rejects is inferred unreachable (loadgen's classifier checks the hash first); host Verify time at r = 19 is unmeasured.
 - Origin: Code
 
-## 2026-10-26 · PR #51 (inferred) · The gate-pod series (DESIGN.md sec 7 "Planned") waits until after the first evolutionary run
+## 2026-10-26 · PR #51 · The gate-pod series (DESIGN.md sec 7 "Planned") waits until after the first evolutionary run
 - Decision: the first run's gate uses the bare boot (bwrap, the nsenter relay, Stage 1's docker run sub-check); the "Planned" text stays in DESIGN.md sec 7 with one sentence saying so, and the gate-pod design packet item moves to docs/AFTER-FIRST-RUN.md.
 - Rejected: building Stages 2-4 in a pod before the first run.
 - Reason: the bare boot is built and tested; the pod series is a design packet plus several PRs that a first, fitness-ranked run does not need.
 - Reverse: move the gate-pod item back to docs/STATUS.md Next and drop the sec 7 sentence.
 - Origin: chat
 
-## 2026-10-26 · PR #51 (inferred) · Autonomous working mode: Code works along STATUS.md Next and asks the owner only on direction questions
+## 2026-10-26 · PR #51 · Autonomous working mode: Code works along STATUS.md Next and asks the owner only on direction questions
 - Decision: CLAUDE.md "Working mode: autonomous": Code plans, implements, self-reviews, opens each PR and continues; technical decisions are Code's (Origin: Code); it asks the owner, in one batched message, only on the non-negotiables, DESIGN.md direction or scope, off-path work, or what it cannot do or verify; findings are fixed in the PR, put in Next if they block the first run, or appended to docs/AFTER-FIRST-RUN.md; Next and Parked capped at 10. Commit, push, packet and chat-approval rules in CLAUDE.md, docs/handoff.md and reviewer.md now apply only when the owner asks.
 - Rejected: the per-step chat relay (a chat-drafted prompt, a packet and an owner approval for each commit, push and step).
 - Reason: owner time and quota; the owner accepts Code's technical recommendations.
