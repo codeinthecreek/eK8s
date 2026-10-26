@@ -184,7 +184,8 @@ loadgen/            open-loop load generator (DESIGN.md sec 10): sustained
 deploy/             kind cluster config, k8s manifests, stress-ng.
 driver/             mutation driver wrapping `claude -p`.
 orchestrator/       population manager, selection, scoring loop.
-lineage/            SQLite (structured) + JSONL (raw claude -p transcripts).
+lineage/            run directory: genome archive (files + sha256), JSONL
+                    attempt records, raw claude -p transcripts (SQLite later).
 docs/               overview.md (plain-language introduction; DESIGN.md is
                     authoritative), decisions.md (implementation decision
                     log), STATUS.md (resume point), AFTER-FIRST-RUN.md

@@ -610,3 +610,10 @@ max. Earlier entries are not backfilled.
 - Reason: only the candidate's own behaviour may fail it; the stage must not start or stop stress itself (DESIGN.md sec 7).
 - Reverse: edit gate/stage5.go. Resolves the node-check Revisit of the PR #48 pod-state entry. DESIGN.md sec 7 pass condition 1 and sec 11 "Gate faults" now state the pod-state and retry rules (overview.md stale line extended).
 - Origin: Code
+
+## 2026-10-26 · PR #55 · lineage: JSONL attempt table, file genome archive, no candidate text in a record
+- Decision: package lineage keeps a run directory: genomes/<id>/ (files plus a sha256 over names, lengths and bytes, written once by rename, digest re-checked on read), attempts.jsonl (one validated Attempt per line, append-only; a later line with the same generation_id supersedes, which is how live flags change), transcripts/<id>.json (written once). A record has the gate stage and check name only, never a Detail; its other strings are ids, enum values, lowercase tokens, or the model's rationale (cut to 8 KiB); a gate-failed attempt is discarded with no fitness. Open refuses a torn last line.
+- Rejected: SQLite and git commits for the first run (S2, S3); storing gate Detail or evidence (candidate-controlled, never for a prompt); update-in-place of a record.
+- Reason: no dependency; the file loads into SQLite later; the prompt builder reads records, so they must not carry candidate text.
+- Reverse: replace lineage's storage; the Attempt struct is the contract. DESIGN.md sec 14 says so (overview.md stale line extended).
+- Origin: Code
