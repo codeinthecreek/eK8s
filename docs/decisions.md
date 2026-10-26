@@ -589,3 +589,17 @@ max. Earlier entries are not backfilled.
 - Reason: owner's call; spend top-tier effort where the non-negotiables bite.
 - Reverse: drop the "Model tier" bullet.
 - Origin: owner
+
+## 2026-10-26 · PR #53 · Every stop ends with a ready-to-paste resume prompt
+- Decision: CLAUDE.md "Working mode: autonomous" adds a "Stop message" bullet: each stop's final message ends with one fenced block (Model/Effort/Why header, Prompt ID EK-RESUME-<UTC YYYYMMDD-HHMM>, the Guard line, what to do next, END OF PROMPT), preceded by "Or reply 'continue' in this session" when the same session can carry on.
+- Rejected: free-form stop messages; a stored counter for prompt IDs.
+- Reason: owner's call; a fresh session resumes with no chat relay, and the timestamp ID is unique without stored state.
+- Reverse: drop the "Stop message" bullet.
+- Origin: owner
+
+## 2026-10-26 · PR #53 · Stage 5 burst run: every failure is a gate fault; the host's pairs are half matches; the canary is polled
+- Decision: gate/burstrun.go runBurst does config check (r, window_s, burst_rate exactly), a fresh target, host pairs (half match, half mismatch), PUT, canary polled until refused (30 s bound), start, a bounded poll (burst length + 7 s client timeout + 15 s slack), then a records read that requires one record per index, this run and target, no gap. On bound or ctx end it cancels on a detached context and drains. Errors carry no Result and only cut, quoted text; the target is left for the caller to DELETE through burstResult.Through.
+- Rejected: a candidate-failure Result for a run that ends error or cancelled; failing the gate at the first canary not refused; no drain; a real loadgen in the tests (a burst lasts 30 s).
+- Reason: only the candidate's responses may fail it; kindnet enforces a new pod's policy after a lag (DESIGN.md sec 11); the 50/50 split follows the pool pairs (DESIGN.md sec 7).
+- Reverse: edit gate/burstrun.go; merging 4b3b and 4b3c follows S1 (the PR #52 entry).
+- Origin: Code
