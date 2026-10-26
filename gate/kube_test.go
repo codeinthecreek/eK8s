@@ -98,6 +98,7 @@ func TestReadyCheck(t *testing.T) {
 		{name: "ErrImageNeverPull plus a restarting pod", fault: true, want: []string{"pod p1 container svc", "ErrImageNeverPull"},
 			pods: []string{`{"kind":"Pod","metadata":{"name":"p1"},"status":{"phase":"Pending","containerStatuses":[{"name":"svc","restartCount":0,"state":{"waiting":{"reason":"ErrImageNeverPull"}}}]}}`, restartP2}},
 		{name: "Evicted", pods: []string{evictedP1}, fault: true, want: []string{"pod p1", "Evicted"}},
+		{name: "ContainerStatusUnknown", pods: []string{`{"kind":"Pod","metadata":{"name":"p1"},"status":{"phase":"Running","containerStatuses":[{"name":"svc","restartCount":0,"state":{"terminated":{"reason":"ContainerStatusUnknown","exitCode":137}}}]}}`}, fault: true, want: []string{"pod p1 container svc", "ContainerStatusUnknown"}},
 		{name: "DisruptionTarget True", pods: []string{disruptedP1}, fault: true, want: []string{"pod p1", "DisruptionTarget"}},
 		{name: "deletionTimestamp", pods: []string{readyP1, deletingP2}, fault: true, want: []string{"pod p2", "deletionTimestamp"}},
 		{name: "restartCount 1", pods: []string{restartP1}, problem: "pod p1 container svc: restarts 1"},

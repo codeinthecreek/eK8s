@@ -20,6 +20,9 @@
 // a docker daemon; gcc and a static libc (libc6-dev, glibc-static) for
 // Stage 4's race build; kubectl and kind on PATH for Stage 5 (CI pins
 // kubectl v1.37.0 and kind v0.33.0, .github/workflows/deploy.yml). A
-// missing one is a gate fault (an error from Run), never a candidate
-// failure.
+// missing one is a gate fault (an error from Run or Stage5), never a
+// candidate failure.
+//
+// Stage 5 is Stage5, a separate call on the image Run kept: it needs the
+// kind cluster, loadgen and stress-ng, which the orchestrator owns.
 package gate

@@ -31,6 +31,10 @@ const (
 	reasonOOMKilled = "OOMKilled"
 	reasonError     = "Error"
 	reasonCompleted = "Completed"
+	// ContainerStatusUnknown is the kubelet's, set on a container whose
+	// node restarted or lost it (checked against kubernetes v1.37.0
+	// pkg/kubelet/kubelet_pods.go).
+	reasonStatusUnknown = "ContainerStatusUnknown"
 )
 
 // knownReasons are the only reasons a problem or fault prints verbatim;
@@ -222,6 +226,12 @@ func podFault(p pod) string {
 		return fmt.Sprintf("pod %s: phase Failed (%s)", name, reasonText(p.Status.Reason))
 	case conditionTrue(p.Status.Conditions, condDisruptionTarget):
 		return fmt.Sprintf("pod %s: DisruptionTarget True", name)
+	}
+	for _, c := range containersOf(p) {
+		if c.State.Terminated != nil && c.State.Terminated.Reason == reasonStatusUnknown ||
+			c.LastState.Terminated != nil && c.LastState.Terminated.Reason == reasonStatusUnknown {
+			return fmt.Sprintf("%s: ContainerStatusUnknown (the node lost it)", c.label)
+		}
 	}
 	return ""
 }
@@ -507,4 +517,45 @@ func podsRunning(ctx context.Context, kubeCtx, ns, selector string, want int) er
 		}
 	}
 	return nil
+}
+
+// nodeFault reads the output of kubectl get nodes -o json and returns an
+// error unless there is at least one node and every node's Ready
+// condition is True. A NotReady node says nothing about a candidate, so
+// Stage 5 asks before it scores a Running-but-never-Ready or restarted
+// pod against one (docs/decisions.md, the PR #48 pod-state entry).
+func nodeFault(b []byte) error {
+	var l struct {
+		Kind  string `json:"kind"`
+		Items []struct {
+			Metadata kubeMeta `json:"metadata"`
+			Status   struct {
+				Conditions []kubeCondition `json:"conditions"`
+			} `json:"status"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(b, &l); err != nil {
+		return fmt.Errorf("kubectl output: %w", err)
+	}
+	if l.Kind != "List" {
+		return fmt.Errorf("kubectl output: kind %q, want List", l.Kind)
+	}
+	if len(l.Items) == 0 {
+		return errors.New("no nodes")
+	}
+	for _, n := range l.Items {
+		if !conditionTrue(n.Status.Conditions, condReady) {
+			return fmt.Errorf("node %s: not Ready", n.Metadata.Name)
+		}
+	}
+	return nil
+}
+
+// nodesReady is nil only if every node is Ready (nodeFault).
+func nodesReady(ctx context.Context, kubeCtx string) error {
+	out, err := kubectl(ctx, kubeCtx, nil, "get", "nodes", "-o", "json")
+	if err != nil {
+		return fmt.Errorf("get nodes: %w", err)
+	}
+	return nodeFault([]byte(out))
 }
