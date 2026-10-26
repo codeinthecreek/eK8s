@@ -171,9 +171,11 @@ func result(subtype string, isError bool, text, model string) {
 // probe walks the whole tree the sandbox shows, but /proc, /dev and /sys,
 // and reports its top-level entries and every path that could hold the
 // fixed core or the repo: a path through this module, hashcore, the test
-// vectors, alexedwards/argon2id or x/crypto/argon2; a .go file declaring
-// package hashcore; the repo's go.mod; any .git. A system C library
-// named libargon2 is no such path.
+// vectors, alexedwards/argon2id or golang.org/x/crypto (whose argon2 the
+// core uses); a .go file declaring package hashcore; the repo's go.mod;
+// any .git. A host's other Argon2 code (libargon2.so, a Python argon2.py
+// under /usr/lib) is not the fixed core, and the session cannot read
+// /usr/lib anyway (--restricted confines Read to the work directory).
 func probe() map[string]any {
 	var top, found []string
 	ents, _ := os.ReadDir("/")
@@ -188,7 +190,7 @@ func probe() map[string]any {
 		n++
 		lower := strings.ToLower(p)
 		hit := filepath.Base(p) == ".git"
-		for _, s := range []string{"codeinthecreek", "hashcore", "testvectors", "alexedwards", "/argon2"} {
+		for _, s := range []string{"codeinthecreek", "hashcore", "testvectors", "alexedwards", "golang.org/x/crypto"} {
 			hit = hit || strings.Contains(lower, s)
 		}
 		if e != nil && e.Type().IsRegular() && (strings.HasSuffix(p, ".go") || filepath.Base(p) == "go.mod") {
