@@ -538,8 +538,15 @@ Procedure:
   a candidate failure.
 
 **Pass condition (two independent, zero-tolerance assertions):**
-1. Pod health: `restartCount == 0` and no container status reason of
-   `OOMKilled`, `CrashLoopBackOff`, or `Error`.
+1. Pod health, of every pod in the namespace after the burst: no
+   container has `restartCount` above 0, is waiting `CrashLoopBackOff`,
+   has terminated (any reason, `Completed` included; an init container
+   only for `OOMKilled` or `Error`) or last terminated `OOMKilled` or
+   `Error`. A pod deleted by others, evicted, failed by the node
+   (kubelet admission rejection) or whose container the node lost
+   (`ContainerStatusUnknown`) is a gate fault, never a candidate
+   failure, and so is any pod problem while a node is NotReady
+   (docs/decisions.md, PR #48 pod-state entry).
 2. Every observed response classifies as `success` or `graceful_shed` via
    the shared three-bucket classifier (section 8) -- never `failed`; a
    contract negative passes as a 400 or a `graceful_shed`, and any 2xx
@@ -1148,6 +1155,12 @@ in a gap before calling gate Stage 5 (section 7). A stress half starts
 once the stress-ng pods are Running; a window, and so its baseline half,
 starts only once the stress-ng pods are gone. Details are settled with
 the orchestrator design.
+
+**Gate faults.** A gate fault (a NotReady node, a refused admission, a
+cluster step that hung, loadgen misbehaving) says nothing about a
+candidate. The orchestrator retries the candidate once and halts the
+run on a second fault; the first run halts at the first one
+(docs/decisions.md, PR #52 answers, S10).
 
 **Excluded windows.** The orchestrator marks a window excluded from
 scoring for a loadgen restart during it (section 10) or a loadgen
