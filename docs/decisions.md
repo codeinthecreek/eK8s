@@ -624,3 +624,24 @@ max. Earlier entries are not backfilled.
 - Reason: DESIGN.md sec 9 wants cumulative CPU-seconds (resolves the STATUS Parked item); the smoke checks that the kubelet serves the series.
 - Reverse: edit fitness/; restoring the stress half needs only a second Score and Combine's stress argument.
 - Origin: Code
+
+## 2026-10-26 · PR #57 (inferred) · Driver invocation: acceptEdits, stream-json with an init check, "--" before the prompt
+- Decision: driver/ runs `claude -p --tools "Read,Edit" --restricted --model claude-sonnet-5-5 --permission-mode acceptEdits --permission-prompts none --max-turns 30 --strict-mcp-config --no-session-persistence --output-format stream-json --verbose -- <prompt>`, 15 min wall clock. It kills the session as soon as its first event is not an init with tools exactly Edit and Read, no MCP server, the pinned model, acceptEdits, cwd /sandbox/work and the pinned version; the result must be the last event, success, on the pinned model (modelUsage). Copy-back reads only the parent's names, as regular files (O_NOFOLLOW); extras are counted, never read. Usage is returned with every error that got as far as a result.
+- Rejected: DESIGN.md's argv as written (default mode with prompts none denies every Edit; json output shows the tool set only after the session ran); a prompt that could parse as a flag; trusting the flags without reading what the session reports.
+- Reason: verified on Claude Code 2.1.310 in the sandbox: the init event lists the real tool set before any API call, and `--` ends option parsing. DESIGN.md sec 12 updated (overview.md stale line extended).
+- Reverse: edit driver/sandbox.go claudeArgs and driver/stream.go. A session killed before its result event has no usage to count, so the usage ceiling undercounts such timeouts.
+- Origin: Code
+
+## 2026-10-26 · PR #57 (inferred) · Driver sandbox: fixed in-sandbox paths, token through --args, process-group kill, version pin by config
+- Decision: bwrap gets `--unshare-all --unshare-user --share-net --disable-userns --die-with-parent --new-session --cap-drop ALL --clearenv`, binds work and home at /sandbox/{work,home}, the resolved binary at /sandbox/bin/claude, lib dirs (host symlinks recreated), certs and resolver files, /proc, --dev, a 256 MiB tmpfs /tmp; options go through `--args 3` on a pipe so the token is in no command line. bwrap runs in its own process group, SIGKILLed on timeout or cancel; --die-with-parent (also bwrap's own death signal if the driver dies) and the pid namespace take the rest. Certificates are bound by directory, never /etc/ssl or /etc/pki whole (private keys). Config carries the expected version; New checks `--version` in the sandbox, and each call refuses a binary whose file changed.
+- Rejected: --unshare-user-try (falls back silently); the token in argv (/proc/*/cmdline); binding /usr or /etc whole; a hard-coded version (the owner's installer moves on).
+- Reason: bound the tree to what claude needs (tested: a walk of the sandbox finds no module path, hashcore, test vectors, go.mod or .git); no Pdeathsig of our own (gate/internal/relay's reason: it can fire when the forking OS thread exits; --die-with-parent carries the same caveat, harmless while no goroutine locks and exits a thread).
+- Reverse: edit driver/sandbox.go sandboxOptions and runSandboxed.
+- Origin: Code
+
+## 2026-10-26 · PR #57 (inferred) · Prompt builder: lineage records only; the lineage is the attempts made from the parent's ancestors
+- Decision: BuildPrompt(all attempts, parent id, fitness.Params) states the rules (non-negotiable line, pinned hasher.go, edit-only, fixed signatures, gate Stage 1's import list, hang timeout), the parent's components per half with normalized scores (fitness.Params.Normalize, shared with Score) and the weakest by weighted shortfall, and the last 3 attempts whose parent is the parent or an ancestor, each with outcome from ids, enums and numbers and its rationale cut to 600 bytes, one line, quotes and control characters removed, framed as data. Normal mode only (escalation deferred, PR #52).
+- Rejected: last 3 attempts of the run (other lines); the parent's descendants only (gen 0 has none); importing gate for the import list (gate's build holds hashcore and the pool; the driver's must not, TestDeps), so the list is copied and a test compares it with gate.AllowedImports.
+- Reason: DESIGN.md sec 12 per-call context; no input type carries gate Detail or candidate output.
+- Reverse: edit driver/prompt.go.
+- Origin: Code

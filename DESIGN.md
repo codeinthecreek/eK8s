@@ -1307,12 +1307,26 @@ directory outside the repo, never from the repo checkout (section 4).
 - `$RUN/home` -- `HOME`, outside the file tools' reach. A fresh `HOME`
   also means no user-level `CLAUDE.md` is loaded.
 
-**bubblewrap:** `--unshare-all --share-net --die-with-parent
---new-session --cap-drop ALL --clearenv`. Bind only:
+Both are fresh per call and removed after it; inside the sandbox they are
+`/sandbox/work` and `/sandbox/home`, fixed paths, so the session's cwd and
+`HOME` name no host directory (`/proc/self/mountinfo` still shows the bind
+sources, which are not secret).
+
+**bubblewrap:** `--unshare-all --unshare-user --share-net
+--disable-userns --die-with-parent --new-session --cap-drop ALL
+--clearenv`. Bind only:
 - `$RUN/work` and `$RUN/home` (rw);
 - the resolved, versioned `claude` binary (ro) -- which also pins the
-  Claude Code version;
-- system libs, certs, `resolv.conf` (ro).
+  Claude Code version: the driver resolves the symlink once, refuses a
+  `--version` other than the configured one, and refuses a call once the
+  file has changed;
+- system libs (`/lib`, `/lib64`, `/usr/lib`, `/usr/lib64`; a host symlink
+  is recreated as one), the CA certificate directories (never
+  `/etc/ssl` or `/etc/pki` whole: their `private/` holds host keys),
+  `resolv.conf`, `hosts`, `nsswitch.conf` (ro); plus `/proc`, a minimal `/dev` and a 256 MiB tmpfs `/tmp`.
+
+The options reach bwrap through `--args` on a pipe, so the token is never
+in a command line.
 
 Never bind `/home`, `/run` (docker.sock), or `/var`. bwrap sets
 `no_new_privs`, so setuid binaries cannot escalate.
@@ -1320,8 +1334,8 @@ Never bind `/home`, `/run` (docker.sock), or `/var`. bwrap sets
 **Environment:** built empty, then allowlisted back: `HOME`, `TMPDIR`,
 `PATH`, `LANG`, `CLAUDE_CODE_OAUTH_TOKEN` (a dedicated token from
 `claude setup-token`, revocable independently), `CLAUDE_CODE_RESTRICTED=1`,
-plus the autoupdate and nonessential-traffic disables. Must never be
-present:
+`DISABLE_AUTOUPDATER=1`, `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`
+(bwrap adds `PWD`). Must never be present:
 - `ANTHROPIC_API_KEY` -- in `-p` mode it is always used when present,
   which means metered billing, breaking the Pro-subscription premise
   (section 3);
@@ -1337,18 +1351,31 @@ backstop beyond `--max-turns`. Inside the sandbox, cwd `$RUN/work`:
 
 ```
 claude -p --tools "Read,Edit" --restricted \
-  --model <pinned-model> --permission-prompts none --max-turns <N> \
-  --output-format json "<constructed prompt>"
+  --model <pinned-model> --permission-mode acceptEdits \
+  --permission-prompts none --max-turns <N> \
+  --strict-mcp-config --no-session-persistence \
+  --output-format stream-json --verbose -- "<constructed prompt>"
 ```
 
+`acceptEdits` is needed because `--permission-prompts none` denies
+anything that would prompt, and an Edit prompts in the default mode;
+`--restricted` still confines the edits to the working directory. `--`
+keeps the prompt from ever being read as a flag. The first stream-json
+event is the session's init: the driver kills the session at once unless
+it reports exactly the tools Edit and Read, no MCP server, the pinned
+model, `acceptEdits`, cwd `/sandbox/work` and the pinned version. The
+last event is the result, the object `--output-format json` would print.
+
 **Copy-back:** only the pre-existing `.go` filenames are copied back from
-`$RUN/work`; symlinks and anything else are rejected. Consequence of
-`--tools "Read,Edit"`: the mutant cannot create files, so structural
+`$RUN/work`; a symlink or non-regular file under one of them fails the
+call, and anything else in the directory is never read. Consequence of
+`--tools "Read,Edit"`: the mutant cannot usefully create files (a new
+file is never copied back), so structural
 rewrites must fit in the existing files.
 
-**To verify at driver implementation time:** exact env var names for
-disabling autoupdate / nonessential traffic; bwrap flags against the
-installed bubblewrap version.
+**Verified at driver implementation** (docs/decisions.md, PR #57): the
+env var names, the flags and the init event against Claude Code 2.1.310,
+and the bwrap flags against bubblewrap 0.9.0.
 
 **Correction from earlier assumption:** `--allowedTools`/`--disallowedTools`
 only govern what runs *without a permission prompt* -- they are additive
@@ -1363,7 +1390,7 @@ inside the sandbox above (see section 4 for why this is necessary but not
 the primary defense).
 
 `--permission-prompts none` and `--max-turns` bound an unattended run so it
-cannot hang waiting on a prompt nobody will answer. `--output-format json`
+cannot hang waiting on a prompt nobody will answer. The result event
 returns `total_cost_usd`, `usage` (input/output/cache tokens), `num_turns`,
 `duration_ms`, `session_id` per invocation -- parsed straight into the
 lineage record (section 14).
@@ -1423,7 +1450,7 @@ the run-level summary record (`stagnation` / `usage_ceiling` / other):
 1. **Stagnation hard threshold**: the generations-since-global-best counter
    (section 11) exceeds a hard threshold even through escalated attempts.
 2. **Usage ceiling**: cumulative `num_turns` and/or token usage (from
-   section 12's parsed `--output-format json` fields) crosses a ceiling.
+   section 12's parsed result fields) crosses a ceiling.
 
 **On the usage ceiling specifically:** `total_cost_usd` from the CLI is a
 client-side *estimate* computed as if billed per-token; under a Pro
@@ -1455,7 +1482,7 @@ independent of whether the stagnation logic is itself working correctly.
   the genome archive is a directory of wrapper files plus a sha256, not
   git commits (docs/decisions.md, PR #52 S2, S3 and the PR #55 entry);
   SQLite and git archives come after the first run.
-- **JSONL** -- raw `claude -p --output-format json` transcripts per
+- **JSONL** -- raw `claude -p --output-format stream-json` transcripts per
   generation, archived but rarely queried directly.
 - **Eligible parent pool** (section 11) is a *view* over the SQLite table
   (gate-passed, within the FIFO cap or hall-of-fame), not a separate

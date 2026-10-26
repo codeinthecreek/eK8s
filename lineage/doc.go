@@ -7,7 +7,7 @@
 //	run.json              {"version":1}
 //	attempts.jsonl        one JSON Attempt per line, append-only
 //	genomes/<id>/         the wrapper files and their digest (sha256), made once
-//	transcripts/<id>.json the raw claude -p --output-format json output, made once
+//	transcripts/<id>.json the raw claude -p stream-json output (JSONL), made once
 //
 // For the first run the structured table of DESIGN.md sec 14 is this
 // JSONL file, not SQLite (docs/decisions.md, PR #52 S2 and the PR #55

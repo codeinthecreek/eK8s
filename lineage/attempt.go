@@ -13,9 +13,9 @@ import (
 	"time"
 )
 
-// maxRationale caps Attempt.Rationale, in bytes; the driver cuts the
+// MaxRationale caps Attempt.Rationale, in bytes; the driver cuts the
 // model's account to fit.
-const maxRationale = 8 << 10
+const MaxRationale = 8 << 10
 
 // Actions an attempt ends in (DESIGN.md sec 14).
 const (
@@ -107,8 +107,8 @@ func (a Attempt) validate() error {
 		return fmt.Errorf("lineage: action %q", a.Action)
 	case a.SelectionMode != ModeTournament && a.SelectionMode != ModeEscalated:
 		return fmt.Errorf("lineage: selection_mode %q", a.SelectionMode)
-	case len(a.Rationale) > maxRationale:
-		return fmt.Errorf("lineage: rationale is %d bytes, over %d", len(a.Rationale), maxRationale)
+	case len(a.Rationale) > MaxRationale:
+		return fmt.Errorf("lineage: rationale is %d bytes, over %d", len(a.Rationale), MaxRationale)
 	case a.Disqualified != "" && !nameTokenRE.MatchString(a.Disqualified):
 		return fmt.Errorf("lineage: disqualified %q is not a reason name", a.Disqualified)
 	case a.Disqualified != "" && (!a.Gate.Passed || a.Action != ActionArchived || a.CurrentlyLive):

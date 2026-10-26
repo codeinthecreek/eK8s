@@ -124,9 +124,7 @@ func Score(p Params, recs []wire.Record, cpuSeconds float64) (Result, error) {
 	}
 
 	res := Result{Stats: st}
-	res.SuccessScore = clamp01(st.SuccessRate)
-	res.LatencyScore = clamp01(float64(p.LatencyCeiling-st.P95Latency) / float64(p.LatencyCeiling-p.LatencyFloor))
-	res.CPUScore = clamp01((p.CPUCeiling - st.CPUPerSuccess) / (p.CPUCeiling - p.CPUFloor))
+	res.SuccessScore, res.LatencyScore, res.CPUScore = p.Normalize(st.SuccessRate, st.P95Latency, st.CPUPerSuccess)
 	// Latency and CPU are measured over successes only, so a wrapper that
 	// sheds almost everything would keep full marks on both for the few
 	// it serves. They count in proportion to the share served: a request
@@ -145,6 +143,16 @@ func Combine(baseline float64, stress *float64) float64 {
 		return baseline
 	}
 	return math.Min(baseline, *stress)
+}
+
+// Normalize maps a half's three components to their scores in 0 to 1:
+// success_rate clamped, and p95 latency and CPU-seconds per success
+// linear from 1 at their floor to 0 at their ceiling, clamped. Score
+// uses it, and the mutation prompt shows its values (driver).
+func (p Params) Normalize(successRate float64, p95 time.Duration, cpuPerSuccess float64) (success, latency, cpu float64) {
+	return clamp01(successRate),
+		clamp01(float64(p.LatencyCeiling-p95) / float64(p.LatencyCeiling-p.LatencyFloor)),
+		clamp01((p.CPUCeiling - cpuPerSuccess) / (p.CPUCeiling - p.CPUFloor))
 }
 
 func clamp01(x float64) float64 { return math.Max(0, math.Min(1, x)) }
