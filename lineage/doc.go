@@ -14,8 +14,8 @@
 // entry); the rows load into SQLite later.
 //
 // Archive entries and transcripts are written to a temporary name and
-// renamed into place, so a crash leaves either the whole entry or none,
-// and an entry is never overwritten: a second write under the same id is
+// renamed or linked into place, so a crash leaves either the whole entry or none,
+// (directories are synced after), and an entry is never overwritten: a second write under the same id is
 // an error. Reading an archived genome recomputes its digest and
 // refuses a mismatch. An attempt record carries no gate Detail, no
 // candidate output and no evidence: those are candidate-controlled text,

@@ -295,6 +295,7 @@ func TestAttemptRefusals(t *testing.T) {
 		"bad mode":            mut(passed("1", ""), func(a *Attempt) { a.SelectionMode = "" }),
 		"long rationale":      mut(passed("1", ""), func(a *Attempt) { a.Rationale = strings.Repeat("x", maxRationale+1) }),
 		"free text reason":    mut(passed("1", ""), func(a *Attempt) { a.Disqualified = "Request body: secret" }),
+		"disq promoted":       mut(passed("1", ""), func(a *Attempt) { a.Disqualified = "verify_mismatch" }),
 		"live never live":     mut(passed("1", ""), func(a *Attempt) { a.EverLive = false }),
 		"negative usage":      mut(passed("1", ""), func(a *Attempt) { a.Usage.NumTurns = -1 }),
 		"nan cost":            mut(passed("1", ""), func(a *Attempt) { a.Usage.CostUSD = nan }),
@@ -378,5 +379,139 @@ func TestConcurrentAppends(t *testing.T) {
 	got, err := r.Attempts()
 	if err != nil || len(got) != n {
 		t.Fatalf("%d attempts, %v; want %d", len(got), err, n)
+	}
+}
+
+// TestTranscriptConcurrent: of several writers of one id, exactly one
+// wins and the file holds that writer's bytes.
+func TestTranscriptConcurrent(t *testing.T) {
+	r := newRun(t)
+	const n = 16
+	errs := make([]error, n)
+	var wg sync.WaitGroup
+	for i := range n {
+		wg.Go(func() { errs[i] = r.WriteTranscript("5", []byte(fmt.Sprintf("writer %d", i))) })
+	}
+	wg.Wait()
+	winner := -1
+	for i, err := range errs {
+		switch {
+		case err == nil && winner < 0:
+			winner = i
+		case err == nil:
+			t.Fatalf("writers %d and %d both succeeded", winner, i)
+		case !errors.Is(err, ErrExists):
+			t.Fatalf("writer %d: %v", i, err)
+		}
+	}
+	if got, err := r.Transcript("5"); winner < 0 || err != nil || string(got) != fmt.Sprintf("writer %d", winner) {
+		t.Fatalf("transcript %q, %v; winner %d", got, err, winner)
+	}
+	if ents, _ := os.ReadDir(filepath.Join(r.dir, transcripts)); len(ents) != 1 {
+		t.Errorf("transcripts has %d entries, want 1", len(ents))
+	}
+}
+
+// TestLimitsAccepted: the limits are inclusive.
+func TestLimitsAccepted(t *testing.T) {
+	r := newRun(t)
+	files := map[string][]byte{"big.go": make([]byte, MaxGenomeFile)}
+	for i := 1; i < MaxGenomeFiles; i++ {
+		files[fmt.Sprintf("f%d.go", i)] = nil
+	}
+	if _, err := r.ArchiveGenome("999999999999999999", files); err != nil {
+		t.Errorf("16 files with a MaxGenomeFile file and an 18-digit id: %v", err)
+	}
+	if _, _, err := r.Genome("999999999999999999"); err != nil {
+		t.Errorf("reading it back: %v", err)
+	}
+	if _, err := r.ArchiveGenome("1000000000000000000", wrapperFiles); err == nil {
+		t.Error("a 19-digit id was accepted")
+	}
+	if err := r.WriteTranscript("1", make([]byte, MaxTranscript)); err != nil {
+		t.Errorf("a MaxTranscript transcript: %v", err)
+	}
+	tok40, tok41 := strings.Repeat("a", 40), strings.Repeat("a", 41)
+	for stage := 1; stage <= 5; stage += 4 {
+		a := failed("2")
+		a.Gate.FailStage, a.Gate.FailCheck = stage, tok40
+		a.Rationale = strings.Repeat("x", maxRationale)
+		if err := r.AppendAttempt(a); err != nil {
+			t.Errorf("stage %d, a 40-character check, a maxRationale rationale: %v", stage, err)
+		}
+	}
+	a := failed("3")
+	a.Gate.FailCheck = tok41
+	if err := r.AppendAttempt(a); err == nil {
+		t.Error("a 41-character check was accepted")
+	}
+	if got, err := r.Attempts(); err != nil || len(got) != 1 || got[0].Gate.FailStage != 5 {
+		t.Errorf("Attempts = %+v, %v", got, err)
+	}
+}
+
+func TestDisqualified(t *testing.T) {
+	r := newRun(t)
+	ok := passed("1", "")
+	ok.Disqualified, ok.Action, ok.CurrentlyLive = "verify_mismatch", ActionArchived, false
+	if err := r.AppendAttempt(ok); err != nil {
+		t.Fatalf("a passed, archived, disqualified attempt: %v", err)
+	}
+	for name, mut := range map[string]func(a *Attempt){
+		"promoted": func(a *Attempt) { a.Action = ActionPromoted },
+		"live":     func(a *Attempt) { a.CurrentlyLive = true },
+	} {
+		a := ok
+		mut(&a)
+		if err := r.AppendAttempt(a); err == nil {
+			t.Errorf("a disqualified attempt that is %s was accepted", name)
+		}
+	}
+}
+
+// TestAppendAfterTornTail: an append after a torn line is refused, not
+// made to corrupt a second record.
+func TestAppendAfterTornTail(t *testing.T) {
+	r := newRun(t)
+	f, err := os.OpenFile(filepath.Join(r.dir, attemptsFile), os.O_WRONLY|os.O_APPEND, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.WriteString(`{"generation_id":"1"`)
+	f.Close()
+	if err := r.AppendAttempt(passed("2", "")); err == nil || !strings.Contains(err.Error(), "torn") {
+		t.Errorf("AppendAttempt after a torn tail = %v", err)
+	}
+}
+
+func TestGenomeSymlinkedDir(t *testing.T) {
+	r := newRun(t)
+	if _, err := r.ArchiveGenome("3", wrapperFiles); err != nil {
+		t.Fatal(err)
+	}
+	g := filepath.Join(r.dir, genomesDir, "3")
+	other := filepath.Join(t.TempDir(), "elsewhere")
+	if err := os.Rename(filepath.Join(g, filesDir), other); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(other, filepath.Join(g, filesDir)); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := r.Genome("3"); err == nil {
+		t.Error("Genome followed a symlinked files directory")
+	}
+}
+
+func TestGenomeOversizedFile(t *testing.T) {
+	r := newRun(t)
+	if _, err := r.ArchiveGenome("3", wrapperFiles); err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(r.dir, genomesDir, "3", filesDir, "server.go")
+	if err := os.WriteFile(p, make([]byte, MaxGenomeFile+1), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := r.Genome("3"); err == nil {
+		t.Error("Genome read an oversized file")
 	}
 }

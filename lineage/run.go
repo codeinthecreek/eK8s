@@ -79,6 +79,9 @@ func Create(dir string) (*Run, error) {
 	if err := writeNew(filepath.Join(dir, attemptsFile), nil); err != nil {
 		return nil, err
 	}
+	if err := syncDir(dir); err != nil {
+		return nil, err
+	}
 	return &Run{dir: dir}, nil
 }
 
@@ -183,6 +186,9 @@ func (r *Run) ArchiveGenome(id string, files map[string][]byte) (string, error) 
 		}
 		return "", fmt.Errorf("lineage: %w", err)
 	}
+	if err := syncDir(filepath.Join(r.dir, genomesDir)); err != nil {
+		return "", err
+	}
 	return sum, nil
 }
 
@@ -194,6 +200,11 @@ func (r *Run) Genome(id string) (map[string][]byte, string, error) {
 		return nil, "", fmt.Errorf("lineage: genome id %q is not a decimal number", id)
 	}
 	dir := filepath.Join(r.dir, genomesDir, id)
+	for _, d := range []string{dir, filepath.Join(dir, filesDir)} {
+		if st, err := os.Lstat(d); err != nil || !st.IsDir() {
+			return nil, "", fmt.Errorf("lineage: genome %s: %s is not a directory", id, filepath.Base(d))
+		}
+	}
 	want, err := os.ReadFile(filepath.Join(dir, digestFile))
 	if err != nil {
 		return nil, "", fmt.Errorf("lineage: genome %s: %w", id, err)
@@ -206,6 +217,9 @@ func (r *Run) Genome(id string) (map[string][]byte, string, error) {
 	for _, e := range ents {
 		if !e.Type().IsRegular() || !nameRE.MatchString(e.Name()) {
 			return nil, "", fmt.Errorf("lineage: genome %s: unexpected entry %q", id, e.Name())
+		}
+		if info, err := e.Info(); err != nil || info.Size() > MaxGenomeFile {
+			return nil, "", fmt.Errorf("lineage: genome %s: file %s unreadable or over %d bytes", id, e.Name(), MaxGenomeFile)
 		}
 		b, err := os.ReadFile(filepath.Join(dir, filesDir, e.Name()))
 		if err != nil {
@@ -241,19 +255,25 @@ func (r *Run) WriteTranscript(id string, raw []byte) error {
 		return fmt.Errorf("lineage: transcript %s is %d bytes, over %d", id, len(raw), MaxTranscript)
 	}
 	final := filepath.Join(r.dir, transcripts, id+".json")
-	if _, err := os.Lstat(final); err == nil {
-		return fmt.Errorf("transcript %s: %w", id, ErrExists)
-	}
-	tmp := filepath.Join(r.dir, transcripts, ".tmp-"+id)
-	_ = os.Remove(tmp)
-	if err := writeNew(tmp, raw); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, final); err != nil {
-		_ = os.Remove(tmp)
+	f, err := os.CreateTemp(filepath.Join(r.dir, transcripts), ".tmp-")
+	if err != nil {
 		return fmt.Errorf("lineage: %w", err)
 	}
-	return nil
+	tmp := f.Name()
+	defer os.Remove(tmp)
+	f.Close()
+	if err := os.WriteFile(tmp, raw, 0o600); err != nil {
+		return fmt.Errorf("lineage: %w", err)
+	}
+	// Link, not rename: link fails if final exists, so two writers of one
+	// id cannot overwrite each other.
+	if err := os.Link(tmp, final); err != nil {
+		if errors.Is(err, fs.ErrExist) {
+			return fmt.Errorf("transcript %s: %w", id, ErrExists)
+		}
+		return fmt.Errorf("lineage: %w", err)
+	}
+	return syncDir(filepath.Join(r.dir, transcripts))
 }
 
 // Transcript returns the raw output stored for attempt id.
@@ -266,6 +286,19 @@ func (r *Run) Transcript(id string) ([]byte, error) {
 		return nil, fmt.Errorf("lineage: %w", err)
 	}
 	return b, nil
+}
+
+// syncDir syncs directory dir, so a rename or link in it survives a crash.
+func syncDir(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		return fmt.Errorf("lineage: %w", err)
+	}
+	defer d.Close()
+	if err := d.Sync(); err != nil {
+		return fmt.Errorf("lineage: %w", err)
+	}
+	return nil
 }
 
 // writeNew writes b to a new file path, mode 0600, and syncs it. It

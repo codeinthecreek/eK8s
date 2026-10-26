@@ -13,9 +13,6 @@ import (
 	"time"
 )
 
-// maxLine caps one attempt record's JSON, newline excluded.
-const maxLine = 1 << 20
-
 // maxRationale caps Attempt.Rationale, in bytes; the driver cuts the
 // model's account to fit.
 const maxRationale = 8 << 10
@@ -114,6 +111,8 @@ func (a Attempt) validate() error {
 		return fmt.Errorf("lineage: rationale is %d bytes, over %d", len(a.Rationale), maxRationale)
 	case a.Disqualified != "" && !nameTokenRE.MatchString(a.Disqualified):
 		return fmt.Errorf("lineage: disqualified %q is not a reason name", a.Disqualified)
+	case a.Disqualified != "" && (!a.Gate.Passed || a.Action != ActionArchived || a.CurrentlyLive):
+		return errors.New("lineage: a disqualified attempt must have passed the gate and be archived, not live")
 	case a.CurrentlyLive && !a.EverLive:
 		return errors.New("lineage: currently_live without ever_live")
 	case a.Usage.NumTurns < 0 || a.Usage.InputTokens < 0 || a.Usage.OutputTokens < 0 ||
@@ -162,11 +161,13 @@ func (r *Run) AppendAttempt(a Attempt) error {
 	if err != nil {
 		return fmt.Errorf("lineage: %w", err)
 	}
-	if len(b) > maxLine {
-		return fmt.Errorf("lineage: attempt record is %d bytes, over %d", len(b), maxLine)
-	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	// A failed earlier append (a full disk) may have left a torn line,
+	// which this one would corrupt too.
+	if err := r.checkTail(); err != nil {
+		return err
+	}
 	f, err := os.OpenFile(filepath.Join(r.dir, attemptsFile), os.O_WRONLY|os.O_APPEND, 0)
 	if err != nil {
 		return fmt.Errorf("lineage: %w", err)
@@ -201,9 +202,6 @@ func (r *Run) Attempts() ([]Attempt, error) {
 		}
 		if line[len(line)-1] != '\n' {
 			return nil, fmt.Errorf("lineage: %s line %d: torn (no newline)", attemptsFile, n+1)
-		}
-		if len(line)-1 > maxLine {
-			return nil, fmt.Errorf("lineage: %s line %d: over %d bytes", attemptsFile, n+1, maxLine)
 		}
 		var a Attempt
 		if err := strictDecode(line, &a); err != nil {
