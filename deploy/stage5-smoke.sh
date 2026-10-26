@@ -7,7 +7,10 @@
 #       hash-verify;
 #   (b) the candidate's Deployment is still Ready in ek8s-v<id> (a pass
 #       leaves the variant where it is, DESIGN.md sec 11);
-#   (c) loadgen still holds the candidate as a target.
+#   (c) loadgen still holds the candidate as a target;
+#   (d) the kubelet's /metrics/resource, through the API server, reports
+#       pod_cpu_usage_seconds_total for the candidate's pod (the counter
+#       fitness/ reads, DESIGN.md sec 9).
 # Exits non-zero on the first failed check. On exit it switches stress-ng
 # off and deletes the candidate's namespace and the loadgen Deployment
 # (its targets with it), so that a smoke run after this one finds neither.
@@ -100,3 +103,11 @@ ok "the candidate is still Ready in $ns"
 k get --raw "$proxy/targets" | grep -q "\"id\":\"$id\"" ||
 	die "loadgen does not hold target $id after the pass"
 ok "loadgen holds target $id"
+
+node=$(k get nodes -o jsonpath='{.items[0].metadata.name}')
+# Into a variable first: grep -q would end the pipe early and SIGPIPE
+# kubectl under pipefail.
+metrics=$(k get --raw "/api/v1/nodes/$node/proxy/metrics/resource")
+grep -Eq "^pod_cpu_usage_seconds_total\{[^}]*namespace=\"$ns\"[^}]*\} [0-9.e+-]+" <<<"$metrics" ||
+	die "the kubelet reports no pod_cpu_usage_seconds_total for namespace $ns"
+ok "the kubelet reports pod_cpu_usage_seconds_total for $ns"

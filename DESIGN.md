@@ -697,14 +697,16 @@ stress-active):
   Recorded via an HdrHistogram-style recorder under open-loop load
   generation (section 10) -- not a mean, since mean hides the tail
   behavior the evolvable wrapper is meant to affect.
-- `cpu_per_success` -- pod CPU-seconds (from metrics-server) divided by
-  count of successful responses. Contract negatives (section 8) are
+- `cpu_per_success` -- pod CPU-seconds (the difference of the kubelet's
+  cumulative `pod_cpu_usage_seconds_total` between the half's start and
+  end, read from `/metrics/resource`; metrics-server gives only a rate)
+  divided by count of successful responses. Contract negatives (section 8) are
   outside all three metrics. Since the fixed core's cost is constant
   across genomes, differences here are almost entirely wrapper overhead
   (goroutine scheduling, queueing, concurrency-control bookkeeping) -- a
   clean signal for exactly what is being evolved.
 
-**Stress-half bucketing:** `graceful_shed` responses get partial credit
+**Shed credit (every half):** `graceful_shed` responses get partial credit
 (starting point: 0.5, tune later) rather than being scored identically to
 `failed` -- otherwise a wrapper that evolves a genuinely good
 load-shedding strategy is penalized the same as one that simply falls
@@ -755,7 +757,15 @@ principles.
 
 **Per-half score** = weighted sum of the three normalized components
 (starting point: roughly equal weighting, slight lean toward
-`success_rate` given availability is arguably most load-bearing).
+`success_rate` given availability is arguably most load-bearing). `p95_latency` and
+`cpu_per_success` are measured over successes only, so their weighted
+terms count in proportion to the share of requests served (a half that
+sheds nearly everything keeps no latency or CPU credit for the few it
+serves; docs/decisions.md, PR #56 entry).
+
+**The first run scores a baseline half only**, so its fitness is the
+baseline score (docs/decisions.md, PR #52 S4 and the PR #56 entry);
+the rule below applies once the stress half is restored.
 
 **Combine across halves: `fitness = min(score_baseline, score_stress)`,
 not an average.** This operationalizes the resilience claim explicitly: a
