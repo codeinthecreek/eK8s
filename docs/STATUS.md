@@ -4,7 +4,7 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 *(inferred)* are guesses, not read from the repo; correct them.
 
 ## Now
-- claude/reconcile-after-49 (PR #50, inferred): gate Stage 5 PR4b3a, burst verdicts: gate/burstverdict.go (failed buckets and host verification over a burst's records); one decisions.md entry (Stage 5 as eight PRs).
+- claude/reconcile-after-49 (PR #50, inferred): gate Stage 5 PR4b3a, burst verdicts: gate/burstverdict.go (failed buckets and host verification over a burst's records); two decisions.md entries (Stage 5 as eight PRs; the burst verdict rules).
 
 ## Next
 - Extract docs/workflow/ into its own repo (links inside it are relative and stay within the folder); then decide whether eK8s's own CLAUDE.md, handoff.md and reviewer.md are regenerated from the templates (docs/decisions.md, PR #32 entry).
