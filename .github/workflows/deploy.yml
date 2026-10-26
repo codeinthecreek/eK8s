@@ -7,7 +7,8 @@ name: deploy smoke
 # terminating pod, namespace deletion), then deploy/loadgen-smoke.sh
 # (loadgen itself: readiness, memory limits, the policy canary, its one
 # listener, every control endpoint through the API server's proxy, the
-# largest upload). It proves the mechanics (pinned
+# largest upload), then deploy/stage5-smoke.sh (gate Stage 5 end to end:
+# gen 0 deployed, a real burst, host verification). It proves the mechanics (pinned
 # images, kustomizations, metrics-server, stress-ng on and off, the
 # variant bundle, ek8s-system), not the full-size numbers: those need the workstation
 # (docs/STATUS.md, Parked). workflow_dispatch only works once this file is
@@ -22,6 +23,12 @@ on:
       # loadgen-smoke.sh builds loadgen's image from these.
       - 'loadgen/**'
       - 'internal/classifier/**'
+      # stage5-smoke.sh runs gate Stage 5 from these.
+      - 'gate/**'
+      - 'internal/hashcore/**'
+      - 'internal/hostpairs/**'
+      - 'loadgen/client/**'
+      - 'loadgen/wire/**'
       - '.github/workflows/deploy.yml'
   workflow_dispatch:
 
@@ -73,6 +80,7 @@ jobs:
       - run: deploy/smoke.sh
       - run: deploy/variant-smoke.sh
       - run: deploy/loadgen-smoke.sh
+      - run: deploy/stage5-smoke.sh
       - name: Dump cluster state
         if: failure()
         run: |
@@ -80,7 +88,7 @@ jobs:
           k get pods -A -o wide || true
           k describe node || true
           # Every pod in the namespaces this PR deploys into, with events.
-          for ns in ek8s-stress kube-system ek8s-system ek8s-v999999; do
+          for ns in ek8s-stress kube-system ek8s-system ek8s-v999999 ek8s-v999998; do
             echo "=== pods in $ns"
             k -n "$ns" describe pods || true
           done
@@ -89,13 +97,15 @@ jobs:
           k get pods -A --no-headers \
             -o jsonpath='{range .items[*]}{.metadata.namespace}{" "}{.metadata.name}{" "}{.status.containerStatuses[*].ready}{"\n"}{end}' 2>/dev/null |
             while read -r ns name ready; do
-              case "$ns" in ek8s-stress|kube-system|ek8s-system|ek8s-v999999) continue ;; esac
+              case "$ns" in ek8s-stress|kube-system|ek8s-system|ek8s-v999999|ek8s-v999998) continue ;; esac
               if [ -z "$ready" ] || [[ " $ready " == *" false "* ]]; then
                 echo "--- $ns/$name (ready: ${ready:-none})"
                 k -n "$ns" describe pod "$name" || true
               fi
             done
           k -n ek8s-v999999 logs deploy/hasher --tail=50 || true
+          k -n ek8s-v999998 logs deploy/hasher --tail=50 || true
+          k -n ek8s-system logs deploy/loadgen --tail=50 || true
           k get networkpolicies,limitranges,hpa -A || true
           k -n ek8s-v999999 get endpointslices -o yaml || true
           k -n ek8s-system get services,endpointslices -o wide || true
