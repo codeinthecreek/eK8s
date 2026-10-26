@@ -27,7 +27,8 @@ import (
 // a symlink named kubectl. fakeKubectlMode selects it and its mode: ok,
 // fail-at-start, silent, wrong-line or die-later. It writes its pid to
 // fakeKubectlDir/pid and each request's path, one per line, to
-// fakeKubectlDir/reqs.
+// fakeKubectlDir/reqs. The modes noisy and noisy-ok write stdout noise
+// before (noisy: without) the start line.
 const (
 	fakeKubectlMode = "EK8S_FAKE_KUBECTL"
 	fakeKubectlDir  = "EK8S_FAKE_KUBECTL_DIR"
@@ -72,6 +73,14 @@ func fakeArgvMismatch(args []string) string {
 	return ""
 }
 
+// fakeStartFailure is what the fail-at-start mode writes to stderr.
+var fakeStartFailure = strings.Repeat("x", 8<<10) + "\nerror: fake start failure\n"
+
+// fakeNoise is n bytes of stdout lines.
+func fakeNoise(n int) string {
+	return strings.Repeat(strings.Repeat("x", 15)+"\n", n/16) + strings.Repeat("\n", n%16)
+}
+
 // fakeKubectl is the fake kubectl proxy: it returns its exit code.
 func fakeKubectl(mode string, args []string) int {
 	dir := os.Getenv(fakeKubectlDir)
@@ -85,7 +94,7 @@ func fakeKubectl(mode string, args []string) int {
 	}
 	sock := args[4]
 	if mode == "fail-at-start" {
-		fmt.Fprint(os.Stderr, strings.Repeat("x", 8<<10)+"\nerror: fake start failure\n")
+		fmt.Fprint(os.Stderr, fakeStartFailure)
 		return 1
 	}
 	// As kubectl's ListenUnix: remove a stale socket, listen with umask
@@ -102,6 +111,11 @@ func fakeKubectl(mode string, args []string) int {
 	}
 	switch mode {
 	case "silent":
+	case "noisy":
+		os.Stdout.WriteString(fakeNoise(maxProxyOutput + 1))
+	case "noisy-ok":
+		os.Stdout.WriteString(fakeNoise(maxProxyOutput))
+		os.Stdout.WriteString("Starting to serve on " + l.Addr().String() + "\n")
 	case "wrong-line":
 		fmt.Println("Starting to serve on " + sock + ".other")
 	default:
@@ -158,8 +172,10 @@ func unclean(p string) bool {
 	return false
 }
 
-// fakeProxy is the fake's server: the filter, the redirect of unclean
-// paths, then a fake loadgen behind the control Service's proxy path.
+// fakeProxy is the fake's server: the redirect of unclean paths (Go's
+// ServeMux does it before the handler), the filter, then a fake loadgen
+// behind the control Service's proxy path, and under it /redirect/<code>,
+// which answers <code> with a Location of /config.
 type fakeProxy struct {
 	reqs     string
 	mu       sync.Mutex
@@ -181,14 +197,21 @@ func (f *fakeProxy) log(p string) {
 
 func (f *fakeProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.log(r.URL.Path)
-	if !fakeAccepts(r) {
-		http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
-		return
-	}
 	if unclean(r.URL.Path) {
 		w.Header().Set("Location", path.Clean(r.URL.Path))
 		w.WriteHeader(http.StatusTemporaryRedirect)
 		return
+	}
+	if !fakeAccepts(r) {
+		http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
+		return
+	}
+	if s, ok := strings.CutPrefix(r.URL.Path, controlProxyPath+"/redirect/"); ok {
+		if code, err := strconv.Atoi(s); err == nil {
+			w.Header().Set("Location", controlProxyPath+"/config")
+			w.WriteHeader(code)
+			return
+		}
 	}
 	h := w.Header()
 	h.Set("Audit-Id", "6f1c2a3b-0000-4000-8000-000000000001")
@@ -327,9 +350,9 @@ func TestControlProxyOK(t *testing.T) {
 	}
 }
 
-// kubectl proxy redirects an accepted path with ".." segments to the
-// cleaned path, which can lie outside --accept-paths; the client must
-// never follow it.
+// kubectl proxy's server redirects any path with ".." segments to the
+// cleaned path, before its filter runs, and the cleaned path can lie
+// anywhere; the client must never follow it.
 func TestControlProxyRefusesRedirect(t *testing.T) {
 	fdir, _ := installFakeKubectl(t, "ok")
 	p, err := startProxy(t, context.Background())
@@ -340,20 +363,52 @@ func TestControlProxyRefusesRedirect(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "refused a redirect (status 307)") {
 		t.Errorf("PutTarget(..) = %v, want a refused redirect", err)
 	}
-	req, err := http.NewRequest(http.MethodGet, controlBaseURL+"/../../../../../namespaces", nil)
-	must(t, err)
-	var resp *http.Response
-	bounded(t, func() { resp, err = p.hc.Do(req) })
-	if err == nil {
-		resp.Body.Close()
-		t.Errorf("raw request: status %d, want an error", resp.StatusCode)
-	}
-	want := map[string]int{
-		controlProxyPath + "/targets/..":                1,
-		controlProxyPath + "/../../../../../namespaces": 1,
+	want := map[string]int{controlProxyPath + "/targets/..": 1}
+	for _, raw := range []string{
+		controlBaseURL + "/../../../../../namespaces",
+		controlBaseURL + "/../../../../pods",
+		"http://localhost/api/v1/../namespaces", // off the prefix: still a redirect, not a 403
+	} {
+		req, err := http.NewRequest(http.MethodGet, raw, nil)
+		must(t, err)
+		var resp *http.Response
+		bounded(t, func() { resp, err = p.hc.Do(req) })
+		if err == nil {
+			resp.Body.Close()
+			t.Errorf("GET %s: status %d, want an error", raw, resp.StatusCode)
+		}
+		want[req.URL.Path]++
 	}
 	if got := fakeRequests(t, fdir); !maps.Equal(got, want) {
 		t.Errorf("requests %v, want %v (no request to a cleaned path)", got, want)
+	}
+}
+
+// Every 3xx is refused, none reaches a caller as an answer, and the
+// Location is not followed.
+func TestControlProxyRefusesEveryRedirect(t *testing.T) {
+	fdir, _ := installFakeKubectl(t, "ok")
+	p, err := startProxy(t, context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]int{}
+	for _, code := range []int{301, 302, 303, 307, 308} {
+		url := controlBaseURL + "/redirect/" + strconv.Itoa(code)
+		req, err := http.NewRequest(http.MethodGet, url, nil)
+		must(t, err)
+		var resp *http.Response
+		bounded(t, func() { resp, err = p.hc.Do(req) })
+		if err == nil {
+			resp.Body.Close()
+			t.Errorf("status %d: got a response with status %d, want an error", code, resp.StatusCode)
+		} else if !strings.Contains(err.Error(), fmt.Sprintf("refused a redirect (status %d)", code)) {
+			t.Errorf("status %d: err = %v, want it to name the status", code, err)
+		}
+		want[controlProxyPath+"/redirect/"+strconv.Itoa(code)]++
+	}
+	if got := fakeRequests(t, fdir); !maps.Equal(got, want) {
+		t.Errorf("requests %v, want %v (no request to /config)", got, want)
 	}
 }
 
@@ -391,6 +446,7 @@ func TestControlProxyStartFailures(t *testing.T) {
 		{name: "fail at start", mode: "fail-at-start", want: "kubectl exited before serving: exit status 1: stderr: x"},
 		{name: "silent", mode: "silent", want: "no start line within 1s"},
 		{name: "wrong line", mode: "wrong-line", want: "start line names another socket"},
+		{name: "noisy", mode: "noisy", want: "over 4096 bytes of stdout"},
 		{name: "cancelled ctx", mode: "silent", cancel: true, want: "context canceled"},
 	}
 	for _, tc := range tests {
@@ -404,14 +460,30 @@ func TestControlProxyStartFailures(t *testing.T) {
 			if tc.cancel {
 				// Cancel only once the fake is running, however slowly a
 				// loaded runner starts it.
+				// The goroutine ends before the subtest does, so its t.Error
+				// cannot come after the subtest has returned.
+				stop := make(chan struct{})
+				var wg sync.WaitGroup
+				wg.Add(1)
+				t.Cleanup(func() { close(stop); wg.Wait() })
 				go func() {
+					defer wg.Done()
 					for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+						select {
+						case <-stop:
+							return
+						default:
+						}
 						if b, err := os.ReadFile(filepath.Join(fdir, "pid")); err == nil && len(b) > 0 {
 							cancel()
 							return
 						}
 					}
-					t.Error("fake kubectl wrote no pid within 5 s")
+					select {
+					case <-stop:
+					default:
+						t.Error("fake kubectl wrote no pid within 5 s")
+					}
 				}()
 			}
 			start := time.Now()
@@ -423,8 +495,14 @@ func TestControlProxyStartFailures(t *testing.T) {
 			if tc.cancel && !errors.Is(err, context.Canceled) {
 				t.Errorf("err = %v, want it to wrap context.Canceled", err)
 			}
-			if tc.mode == "fail-at-start" && err != nil && (!strings.HasSuffix(err.Error(), "error: fake start failure") || len(err.Error()) > maxProxyOutput+200) {
-				t.Errorf("err is %d bytes, want the stderr tail within %d bytes", len(err.Error()), maxProxyOutput)
+			if tc.mode == "fail-at-start" && err != nil {
+				tail := strings.TrimSpace(fakeStartFailure[len(fakeStartFailure)-maxProxyOutput:])
+				if !strings.HasSuffix(err.Error(), ": stderr: "+tail) {
+					t.Errorf("err (%d bytes) does not end with the last %d bytes of stderr", len(err.Error()), maxProxyOutput)
+				}
+				if len(err.Error()) > maxProxyOutput+200 {
+					t.Errorf("err is %d bytes, want the stderr tail within %d bytes", len(err.Error()), maxProxyOutput)
+				}
 			}
 			if tc.name == "silent" && elapsed < time.Second {
 				t.Errorf("failed after %v, before the 1s bound", elapsed)
@@ -539,5 +617,119 @@ func TestControlProxyTMPDIRMissing(t *testing.T) {
 	must(t, err)
 	if _, err := os.Lstat(p.dir); !os.IsNotExist(err) {
 		t.Errorf("dir after Close: %v, want it gone", err)
+	}
+}
+
+// Exactly maxProxyOutput bytes of stdout before the start line, which comes
+// in a write of its own, are not over the bound.
+func TestControlProxyNoisyStartAtBound(t *testing.T) {
+	installFakeKubectl(t, "noisy-ok")
+	p, err := startProxy(t, context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	bounded(t, func() { _, err = p.Client().Config(context.Background()) })
+	must(t, err)
+}
+
+func setMkdirTemp(t *testing.T, f func(dir, pattern string) (string, error)) {
+	t.Helper()
+	old := mkdirTemp
+	mkdirTemp = f
+	t.Cleanup(func() { mkdirTemp = old })
+}
+
+// mkPrivate makes dir with mode perm, whatever the umask.
+func mkPrivate(t *testing.T, dir string, perm os.FileMode) {
+	t.Helper()
+	must(t, os.Mkdir(dir, perm))
+	must(t, os.Chmod(dir, perm))
+}
+
+func TestControlProxyDir(t *testing.T) {
+	// sockDir is a directory name under base whose socket path, dir + "/s",
+	// is exactly n bytes.
+	sockDir := func(base string, n int) string {
+		pad := n - 2 - len(base) - 1
+		if pad < 1 {
+			t.Fatalf("base %s leaves no room for a %d-byte socket path", base, n)
+		}
+		return filepath.Join(base, strings.Repeat("d", pad))
+	}
+	t.Run("100 bytes", func(t *testing.T) {
+		tmp := t.TempDir()
+		t.Setenv("TMPDIR", tmp)
+		want := sockDir(tmp, maxSocketPath)
+		var bases []string
+		setMkdirTemp(t, func(base, _ string) (string, error) {
+			bases = append(bases, base)
+			mkPrivate(t, want, 0o700)
+			return want, nil
+		})
+		dir, err := controlProxyDir()
+		if err != nil || dir != want || len(filepath.Join(dir, "s")) != maxSocketPath {
+			t.Errorf("controlProxyDir = %q, %v, want %q (a %d-byte socket path)", dir, err, want, maxSocketPath)
+		}
+		if len(bases) != 1 || bases[0] != tmp {
+			t.Errorf("bases tried %q, want only %q", bases, tmp)
+		}
+	})
+	t.Run("101 bytes", func(t *testing.T) {
+		tmp := t.TempDir()
+		t.Setenv("TMPDIR", tmp)
+		long := sockDir(tmp, maxSocketPath+1)
+		short := filepath.Join(t.TempDir(), "short")
+		var bases []string
+		setMkdirTemp(t, func(base, _ string) (string, error) {
+			bases = append(bases, base)
+			if base == "/tmp" {
+				mkPrivate(t, short, 0o700)
+				return short, nil
+			}
+			mkPrivate(t, long, 0o700)
+			return long, nil
+		})
+		dir, err := controlProxyDir()
+		if err != nil || dir != short {
+			t.Errorf("controlProxyDir = %q, %v, want %q", dir, err, short)
+		}
+		if len(bases) != 2 || bases[0] != tmp || bases[1] != "/tmp" {
+			t.Errorf("bases tried %q, want %q then /tmp", bases, tmp)
+		}
+		if _, err := os.Lstat(long); !os.IsNotExist(err) {
+			t.Errorf("the 101-byte dir: %v, want it removed", err)
+		}
+	})
+	t.Run("not private", func(t *testing.T) {
+		tmp := t.TempDir()
+		t.Setenv("TMPDIR", tmp)
+		open := filepath.Join(tmp, "open")
+		setMkdirTemp(t, func(string, string) (string, error) {
+			mkPrivate(t, open, 0o755)
+			return open, nil
+		})
+		dir, err := controlProxyDir()
+		if err == nil || dir != "" || !strings.Contains(err.Error(), open) {
+			t.Errorf("controlProxyDir = %q, %v, want an error naming %s", dir, err, open)
+		}
+		if _, err := os.Lstat(open); !os.IsNotExist(err) {
+			t.Errorf("the 0755 dir: %v, want it removed", err)
+		}
+	})
+}
+
+func TestControlProxyCheckPrivateDir(t *testing.T) {
+	tmp := t.TempDir()
+	private, open, link := filepath.Join(tmp, "private"), filepath.Join(tmp, "open"), filepath.Join(tmp, "link")
+	mkPrivate(t, private, 0o700)
+	mkPrivate(t, open, 0o755)
+	must(t, os.Symlink(private, link))
+	if err := checkPrivateDir(private); err != nil {
+		t.Errorf("0700 dir: %v, want it accepted", err)
+	}
+	for name, dir := range map[string]string{"0755 dir": open, "symlink to a 0700 dir": link} {
+		if err := checkPrivateDir(dir); err == nil {
+			t.Errorf("%s: want it refused", name)
+		}
 	}
 }

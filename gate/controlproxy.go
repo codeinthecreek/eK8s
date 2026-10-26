@@ -25,9 +25,11 @@ const (
 	controlProxyPath = "/api/v1/namespaces/ek8s-system/services/loadgen:control/proxy"
 	// controlAcceptPaths is kubectl proxy's --accept-paths: only the
 	// control Service's proxy subtree, so the socket reaches nothing else
-	// the gate's kube credentials could. kubectl matches it against the
-	// path before cleaning, so it alone does not stop ".." segments; the
-	// client's redirect refusal does (controlHTTP).
+	// the gate's kube credentials could. Go's ServeMux answers a path with
+	// "." or ".." segments with a redirect to its cleaned form before
+	// kubectl's filter runs, so the filter never sees an unclean path and
+	// the cleaned form can lie anywhere; the client's redirect refusal
+	// stops that (controlHTTP).
 	controlAcceptPaths = "^" + controlProxyPath + "(/.*)?$"
 	controlBaseURL     = "http://localhost" + controlProxyPath
 )
@@ -190,6 +192,10 @@ func (p *ControlProxy) stop() error {
 	return errors.Join(errs...)
 }
 
+// mkdirTemp is os.MkdirTemp; tests replace it to place the socket's
+// directory.
+var mkdirTemp = os.MkdirTemp
+
 // controlProxyDir makes the socket's directory with os.MkdirTemp under
 // os.TempDir(), or under /tmp if the socket path there would be over
 // maxSocketPath bytes (a long TMPDIR) or MkdirTemp fails there (a TMPDIR
@@ -199,7 +205,7 @@ func controlProxyDir() (string, error) {
 	var sock string
 	var mkErr error
 	for _, base := range []string{os.TempDir(), "/tmp"} {
-		dir, err := os.MkdirTemp(base, "ek8s-proxy-")
+		dir, err := mkdirTemp(base, "ek8s-proxy-")
 		if err != nil {
 			mkErr = errors.Join(mkErr, err)
 			continue
@@ -242,11 +248,12 @@ func checkPrivateDir(dir string) error {
 // The transport dials sock whatever the request's address, so no request
 // leaves the host; it uses no proxy (HTTP_PROXY and its kin would
 // otherwise apply) and HTTP/1.1 only, as kubectl proxy serves. The client
-// follows no redirect: kubectl proxy answers a path with "." or ".."
-// segments, which --accept-paths admits, with a redirect to the cleaned
-// path, which can lie outside it. CheckRedirect stops the client following
-// one and refuseRedirects makes it an error, so neither the loadgen
-// client nor a caller of the http.Client sees a 3xx as an answer.
+// follows no redirect: kubectl proxy's server (a Go ServeMux) answers any
+// path with "." or ".." segments, before the --accept-paths filter runs,
+// with a redirect to the cleaned path, which can lie anywhere.
+// CheckRedirect stops the client following one and refuseRedirects makes
+// it an error, so neither the loadgen client nor a caller of the
+// http.Client sees a 3xx as an answer.
 func controlHTTP(sock string, timeout time.Duration) (*http.Transport, *http.Client) {
 	tr := http.DefaultTransport.(*http.Transport).Clone()
 	tr.Proxy = nil
