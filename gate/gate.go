@@ -20,7 +20,7 @@ type Config struct {
 }
 
 // Run gates the candidate through Stages 1-4 (DESIGN.md sec 7); Stage 5
-// comes in a later PR (docs/STATUS.md). A check that fails is a
+// is Stage5, which needs the cluster. A check that fails is a
 // Result in the Report and stops the run; the error is only for the gate
 // itself failing (no go, bwrap, nsenter, docker daemon, or gcc and a
 // static libc for the race build; I/O), which says nothing about the

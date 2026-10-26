@@ -51,10 +51,11 @@ type fakeLoadgen struct {
 	pairs   wire.Upload
 	runID   string
 
-	runError     string // the target's error text in a run
-	startGarbage bool   // the start is applied, but its response is unreadable
-	pageMax      int    // records per page, when not 0
-	stuckNext    bool   // a records page does not advance next
+	runError     string   // the target's error text in a run
+	deletes      []string // DELETE /targets/{id}?through=S, as id:S
+	startGarbage bool     // the start is applied, but its response is unreadable
+	pageMax      int      // records per page, when not 0
+	stuckNext    bool     // a records page does not advance next
 }
 
 func newFake() *fakeLoadgen {
@@ -111,6 +112,10 @@ func (f *fakeLoadgen) handler() http.Handler {
 		status := cmpOr(f.putStatus, 201)
 		f.targets[r.PathValue("id")] = true
 		f.reply(w, status, wire.PutTarget{BootID: f.bootNow(), ID: r.PathValue("id"), Next: 0})
+	}))
+	mux.HandleFunc("DELETE /targets/{id}", lock(func(w http.ResponseWriter, r *http.Request) {
+		f.deletes = append(f.deletes, r.PathValue("id")+":"+r.URL.Query().Get("through"))
+		f.reply(w, 200, wire.BootID{BootID: f.bootNow()})
 	}))
 	mux.HandleFunc("PUT /targets/{id}/pairs/{run}", lock(func(w http.ResponseWriter, r *http.Request) {
 		f.pairs = wire.Upload{}
