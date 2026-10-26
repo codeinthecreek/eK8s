@@ -1440,6 +1440,11 @@ independent of whether the stagnation logic is itself working correctly.
   ever-live / currently-live flags, usage fields from section 12/13.
   Keep this table unbounded -- it is the basis for convergence plots and
   writeup analysis.
+- **First run:** the structured table is an append-only JSONL file in
+  the run directory, one record per attempt with the same fields, and
+  the genome archive is a directory of wrapper files plus a sha256, not
+  git commits (docs/decisions.md, PR #52 S2, S3 and the PR #55 entry);
+  SQLite and git archives come after the first run.
 - **JSONL** -- raw `claude -p --output-format json` transcripts per
   generation, archived but rarely queried directly.
 - **Eligible parent pool** (section 11) is a *view* over the SQLite table
