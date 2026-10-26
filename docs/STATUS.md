@@ -4,7 +4,7 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 *(inferred)* are guesses, not read from the repo; correct them.
 
 ## Now
-- claude/skeleton-4 (PR #55, inferred): skeleton PR 3, lineage/: run directory with genome archive (files + sha256, verified on read), JSONL attempt records (strict, validated, supersede by generation id), raw transcripts; DESIGN.md sec 14 first-run note; one decisions.md entry.
+- claude/skeleton-5 (PR #56, inferred): skeleton PR 4, fitness/ (per-window score from loadgen's records and kubelet CPU counters, baseline half only).
 
 ## Next
 - First run (walking skeleton): about 10 generations on the workstation, end to end: driver mutates the wrapper (DESIGN.md sec 12, sandboxed), gate Stages 1-5, orchestrator with loadgen windows, fitness (sec 9), lineage records; see the skeleton PR list below (owner answers: docs/decisions.md, PR #52).
@@ -21,8 +21,8 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 - HPA at 70% of a 250m request pins variants at maxReplicas under load; revisit with the observation-window design (also the default 300s scale-down stabilisation). Windows now start from an idle gap with no warm-up exclusion (DESIGN.md sec 11), so the gap length versus the scale-down stabilisation decides how many replicas a variant starts a window with.
 
 ## Recent
+- #55 lineage (skeleton PR 3): lineage/ run directory (genome archive with sha256 verified on read, strict JSONL attempt records, write-once transcripts), no candidate text in a record; DESIGN.md sec 14 first-run note; one decisions.md entry (2026-10-26)
 - #54 gate.Stage5 (skeleton PR 2): gate/stage5.go, cmd/gate -stage5, deploy/stage5-smoke.sh in deploy CI (first real-cluster run; CI-size CPU requests of stress-ng and loadgen shrunk in the smoke), node Ready check and ContainerStatusUnknown as gate faults; DESIGN.md sec 7 pass condition 1 and sec 11 gate-fault rule aligned (2026-10-26)
 - #53 Stage 5 burst run (skeleton PR 1): gate/burstrun.go runBurst (pre-run steps, bounded burst run, cancel and drain, records completeness) tested against a fake loadgen; CLAUDE.md stop-message rule; two decisions.md entries (2026-10-26)
 - #52 Owner's skeleton answers (decisions.md, Origin: owner); third-party dependencies escalated and model tiers (CLAUDE.md); the skeleton PR list in Next (2026-10-26)
 - #51 Autonomous working mode: CLAUDE.md section, approval and packet rules made owner-on-request; docs/AFTER-FIRST-RUN.md with 20 deferred items; gate-pod series deferred (DESIGN.md sec 7); two decisions.md entries (2026-10-26)
-- #50 Gate Stage 5 PR4b3a, burst verdicts: gate/burstverdict.go (failed buckets and host verification over a burst's records); two decisions.md entries (Stage 5 as eight PRs; the burst verdict rules) (2026-10-26)
