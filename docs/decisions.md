@@ -535,7 +535,7 @@ max. Earlier entries are not backfilled.
 
 ## 2026-10-26 · PR #49 (inferred) · Stage 5 lands as six PRs: the transport alone, then burst evaluation (amends the PR #48 five-PR entry)
 - Decision: 4b2 is the kubectl proxy transport alone (gate/controlproxy.go); then 4b3 burst evaluation (gate/burst.go), 4b4 gate.Stage5, and 4c cmd/gate -stage5 and deploy/stage5-smoke.sh in deploy CI.
-- Rejected: 4b2 as planned, holding the transport and burst evaluation (about 1,600 lines); burst evaluation inside the gate.Stage5 PR (over 1,000 lines).
-- Reason: the transport with its tests came to about 900 lines, over the ~600-line review packet limit on its own.
+- Rejected: 4b2 as planned, holding the transport and burst evaluation (about 2,000 lines); burst evaluation inside the gate.Stage5 PR (over 1,000 lines).
+- Reason: the transport with its tests came to about 1,300 lines with its review fixes, over the ~600-line review packet limit on its own.
 - Reverse: merge burst evaluation back into the transport PR.
 - Origin: chat
