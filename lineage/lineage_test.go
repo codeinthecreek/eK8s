@@ -293,7 +293,7 @@ func TestAttemptRefusals(t *testing.T) {
 		"no time":             mut(passed("1", ""), func(a *Attempt) { a.Time = time.Time{} }),
 		"bad action":          mut(passed("1", ""), func(a *Attempt) { a.Action = "kept" }),
 		"bad mode":            mut(passed("1", ""), func(a *Attempt) { a.SelectionMode = "" }),
-		"long rationale":      mut(passed("1", ""), func(a *Attempt) { a.Rationale = strings.Repeat("x", maxRationale+1) }),
+		"long rationale":      mut(passed("1", ""), func(a *Attempt) { a.Rationale = strings.Repeat("x", MaxRationale+1) }),
 		"free text reason":    mut(passed("1", ""), func(a *Attempt) { a.Disqualified = "Request body: secret" }),
 		"disq promoted":       mut(passed("1", ""), func(a *Attempt) { a.Disqualified = "verify_mismatch" }),
 		"live never live":     mut(passed("1", ""), func(a *Attempt) { a.EverLive = false }),
@@ -435,9 +435,9 @@ func TestLimitsAccepted(t *testing.T) {
 	for stage := 1; stage <= 5; stage += 4 {
 		a := failed("2")
 		a.Gate.FailStage, a.Gate.FailCheck = stage, tok40
-		a.Rationale = strings.Repeat("x", maxRationale)
+		a.Rationale = strings.Repeat("x", MaxRationale)
 		if err := r.AppendAttempt(a); err != nil {
-			t.Errorf("stage %d, a 40-character check, a maxRationale rationale: %v", stage, err)
+			t.Errorf("stage %d, a 40-character check, a MaxRationale rationale: %v", stage, err)
 		}
 	}
 	a := failed("3")

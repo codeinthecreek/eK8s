@@ -36,6 +36,11 @@ var allowedImports = []string{
 	modulePath + "/internal/classifier",
 }
 
+// AllowedImports returns a copy of allowedImports. The mutation prompt
+// lists the same packages (driver keeps its own list, since its build
+// must not depend on gate; a driver test compares the two).
+func AllowedImports() []string { return slices.Clone(allowedImports) }
+
 // denyReason labels a disallowed import for the failure detail. It
 // never decides anything: allowedImports alone does.
 func denyReason(path string) string {
