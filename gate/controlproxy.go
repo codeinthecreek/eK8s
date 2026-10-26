@@ -58,6 +58,9 @@ var proxyStartTimeout = 10 * time.Second
 // private directory, and the loadgen control API client that reaches
 // loadgen through it. It is the gate's only path to the control API.
 // Every error it returns is a gate fault: none involves the candidate.
+// Once Close begins it dials nothing: Close removes the directory, whose
+// name any local user can see in /tmp, and who could then recreate the
+// socket path and forge loadgen's answers to a Client used after Close.
 type ControlProxy struct {
 	cmd    *exec.Cmd
 	dir    string
@@ -66,6 +69,7 @@ type ControlProxy struct {
 	// read only after done is closed.
 	done    chan struct{}
 	waitErr error
+	dialer  *sockDialer
 	tr      *http.Transport
 	hc      *http.Client
 	cl      *client.Client
@@ -100,8 +104,8 @@ func StartControlProxy(ctx context.Context, kubeCtx string, timeout time.Duratio
 		return nil, fmt.Errorf("control proxy: %w", err)
 	}
 	sock := filepath.Join(dir, "s")
-	p := &ControlProxy{dir: dir, stderr: &tailWriter{max: maxProxyOutput}, done: make(chan struct{})}
-	p.tr, p.hc = controlHTTP(sock, timeout)
+	p := &ControlProxy{dir: dir, stderr: &tailWriter{max: maxProxyOutput}, done: make(chan struct{}), dialer: &sockDialer{sock: sock}}
+	p.tr, p.hc = controlHTTP(p.dialer, timeout)
 	p.cl = client.New(controlBaseURL, p.hc)
 	start := &startWatcher{want: proxyStartPrefix + sock, result: make(chan error, 1)}
 	p.cmd = exec.Command(kubectlPath, "--context", kubeCtx, "proxy",
@@ -125,6 +129,10 @@ func StartControlProxy(ctx context.Context, kubeCtx string, timeout time.Duratio
 
 // Client returns the loadgen control API client that goes through the
 // proxy, the same one on every call, so its Expect state is shared.
+// Once Close begins, its requests fail with errControlProxyClosed and
+// dial nothing, so none can reach a socket recreated at the removed path.
+// Until then, kubectl exiting on its own leaves the directory ours and
+// 0700, and requests just fail to connect.
 func (p *ControlProxy) Client() *client.Client { return p.cl }
 
 // awaitStart waits for kubectl's start line. On failure it stops kubectl
@@ -158,9 +166,11 @@ func (p *ControlProxy) awaitStart(ctx context.Context, start *startWatcher) erro
 	return fmt.Errorf("control proxy: start: %w", err)
 }
 
-// Close stops kubectl, waits for it, closes idle connections and removes
-// the directory. It is idempotent and safe after kubectl has exited on
-// its own; later requests through Client fail.
+// Close stops new dials, then stops kubectl, waits for it, closes idle
+// connections and removes the directory. It is idempotent and safe after
+// kubectl has exited on its own. Later requests through Client fail with
+// errControlProxyClosed without dialling: once the directory is gone,
+// another local user could recreate the socket path and answer them.
 func (p *ControlProxy) Close() error {
 	p.closeOnce.Do(func() { p.closeErr = p.stop() })
 	if p.closeErr != nil {
@@ -169,11 +179,14 @@ func (p *ControlProxy) Close() error {
 	return nil
 }
 
-// stop kills kubectl and waits for it, then closes idle connections and
-// removes the directory. SIGKILL ends kubectl at once and WaitDelay then
-// bounds Wait's draining of its pipes, so the timer below fires only for
-// a process the kernel cannot end.
+// stop closes the dialer, kills kubectl and waits for it, then closes
+// idle connections and removes the directory. The dialer is closed first,
+// so no dial is in flight or can start once the directory is removed.
+// SIGKILL ends kubectl at once and WaitDelay then bounds Wait's draining
+// of its pipes, so the timer below fires only for a process the kernel
+// cannot end.
 func (p *ControlProxy) stop() error {
+	p.dialer.close()
 	var errs []error
 	if err := p.cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
 		errs = append(errs, fmt.Errorf("kill kubectl: %w", err))
@@ -244,8 +257,40 @@ func checkPrivateDir(dir string) error {
 	return nil
 }
 
-// controlHTTP returns the transport and client for the socket at sock.
-// The transport dials sock whatever the request's address, so no request
+// errControlProxyClosed is the error of every dial once Close has begun.
+var errControlProxyClosed = errors.New("control proxy: closed")
+
+// sockDialer dials the socket at sock until close, and never after. A dial
+// holds the read lock across its closed check and the connect; close takes
+// the write lock to set closed, so it returns only once no dial is in
+// flight, and no dial starts after it. stop calls close before it removes
+// the directory, so no dial reaches a socket another local user recreated
+// at the removed path. A unix connect to a full backlog fails at once
+// (EAGAIN) rather than waiting, so the read lock is never held for long.
+type sockDialer struct {
+	sock   string
+	d      net.Dialer
+	mu     sync.RWMutex
+	closed bool
+}
+
+func (s *sockDialer) DialContext(ctx context.Context, _, _ string) (net.Conn, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.closed {
+		return nil, errControlProxyClosed
+	}
+	return s.d.DialContext(ctx, "unix", s.sock)
+}
+
+func (s *sockDialer) close() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.closed = true
+}
+
+// controlHTTP returns the transport and client for the socket d dials.
+// The transport dials it whatever the request's address, so no request
 // leaves the host; it uses no proxy (HTTP_PROXY and its kin would
 // otherwise apply) and HTTP/1.1 only, as kubectl proxy serves. The client
 // follows no redirect: kubectl proxy's server (a Go ServeMux) answers any
@@ -254,14 +299,11 @@ func checkPrivateDir(dir string) error {
 // CheckRedirect stops the client following one and refuseRedirects makes
 // it an error, so neither the loadgen client nor a caller of the
 // http.Client sees a 3xx as an answer.
-func controlHTTP(sock string, timeout time.Duration) (*http.Transport, *http.Client) {
+func controlHTTP(d *sockDialer, timeout time.Duration) (*http.Transport, *http.Client) {
 	tr := http.DefaultTransport.(*http.Transport).Clone()
 	tr.Proxy = nil
 	tr.ForceAttemptHTTP2 = false
-	var d net.Dialer
-	tr.DialContext = func(ctx context.Context, _, _ string) (net.Conn, error) {
-		return d.DialContext(ctx, "unix", sock)
-	}
+	tr.DialContext = d.DialContext
 	hc := &http.Client{
 		Transport: refuseRedirects{tr},
 		CheckRedirect: func(*http.Request, []*http.Request) error {

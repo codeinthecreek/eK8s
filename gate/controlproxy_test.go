@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -541,6 +542,124 @@ func TestControlProxyKubectlDies(t *testing.T) {
 		t.Errorf("dir after Close: %v, want it gone", err)
 	}
 	fakeGone(t, fdir)
+}
+
+// countingListener counts the connections it accepts.
+type countingListener struct {
+	net.Listener
+	n atomic.Int64
+}
+
+func (l *countingListener) Accept() (net.Conn, error) {
+	c, err := l.Listener.Accept()
+	if err == nil {
+		l.n.Add(1)
+	}
+	return c, err
+}
+
+// Once Close has removed the directory, another local user can recreate
+// the socket path and serve forged answers there; the Client must dial
+// nothing. The forger here is this user, which can do no less.
+func TestControlProxyNoDialAfterClose(t *testing.T) {
+	installFakeKubectl(t, "ok")
+	p, err := startProxy(t, context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	bounded(t, func() { _, err = p.Client().Config(context.Background()) })
+	must(t, err)
+	bounded(t, func() { err = p.Close() })
+	must(t, err)
+
+	mkPrivate(t, p.dir, 0o700)
+	t.Cleanup(func() { os.RemoveAll(p.dir) })
+	sock := filepath.Join(p.dir, "s")
+	ln, err := net.Listen("unix", sock)
+	must(t, err)
+	l := &countingListener{Listener: ln}
+	srv := &http.Server{Handler: &fakeProxy{reqs: filepath.Join(t.TempDir(), "reqs")}}
+	served := make(chan struct{})
+	go func() {
+		defer close(served)
+		srv.Serve(l)
+	}()
+	t.Cleanup(func() {
+		srv.Close()
+		<-served
+	})
+
+	// The forged socket answers a fresh client as loadgen would.
+	ftr, fhc := controlHTTP(&sockDialer{sock: sock}, 5*time.Second)
+	var cfg wire.Config
+	bounded(t, func() { cfg, err = client.New(controlBaseURL, fhc).Config(context.Background()) })
+	ftr.CloseIdleConnections()
+	if err != nil || cfg != fakeConfig {
+		t.Fatalf("Config at the forged socket = %+v, %v, want %+v", cfg, err, fakeConfig)
+	}
+	before := l.n.Load()
+
+	bounded(t, func() { cfg, err = p.Client().Config(context.Background()) })
+	if !errors.Is(err, errControlProxyClosed) || !strings.Contains(err.Error(), "control proxy: closed") {
+		t.Errorf("Config after Close = %+v, %v, want an error naming the closed proxy", cfg, err)
+	}
+	if n := l.n.Load() - before; n != 0 {
+		t.Errorf("the recreated socket accepted %d connections from the closed proxy, want 0", n)
+	}
+}
+
+// Requests through Client in several goroutines while Close runs each
+// succeed or fail, and every goroutine returns.
+func TestControlProxyCloseDuringRequests(t *testing.T) {
+	installFakeKubectl(t, "ok")
+	p, err := startProxy(t, context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	const workers = 8
+	var started, wg sync.WaitGroup
+	started.Add(workers)
+	wg.Add(workers)
+	// last[i] is worker i's first error; it stops there.
+	last := make([]error, workers)
+	for i := range workers {
+		go func() {
+			defer wg.Done()
+			started.Done()
+			for deadline := time.Now().Add(15 * time.Second); time.Now().Before(deadline); {
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				_, err := p.Client().Config(ctx)
+				cancel()
+				if err != nil {
+					last[i] = err
+					return
+				}
+			}
+		}()
+	}
+	started.Wait()
+	time.Sleep(20 * time.Millisecond)
+	bounded(t, func() { err = p.Close() })
+	must(t, err)
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("requests did not all return within 10 s of Close")
+	}
+	for i, err := range last {
+		if err == nil {
+			t.Errorf("worker %d: no request failed after Close", i)
+		}
+	}
+	bounded(t, func() { _, err = p.Client().Config(context.Background()) })
+	if !errors.Is(err, errControlProxyClosed) {
+		t.Errorf("Config after Close = %v, want errControlProxyClosed", err)
+	}
 }
 
 // A TMPDIR so long that the socket path would be over maxSocketPath puts
