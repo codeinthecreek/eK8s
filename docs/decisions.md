@@ -652,3 +652,17 @@ max. Earlier entries are not backfilled.
 - Reason: owner's call (session prompt, "I accept all the recommendations in PR #57"); no PR comment.
 - Reverse: re-ask the owner.
 - Origin: owner
+
+## 2026-10-27 · PR #58 (inferred) · Orchestrator window mechanics: one Session per loadgen, run-wide exclusions, CPU fail-closed per variant
+- Decision: orchestrator.Session checks GET /config's r, window_s and burst_rate exactly and expects its boot_id. RunWindow uploads one host Batch per live variant (batches name no target, so the gap makes live + 1 before the gate), stops stress and waits until its pods are gone, excludes without starting on a kindnet DaemonSet not Ready or a canary not refused (polled up to 30 s after a new boot_id), samples the kubelet's CPU counters around the run, polls it, reads every record, and excludes run-wide for a run not done, a ring gap, a skipped or faulted send, lag p99 over 10 ms or any lag over 100 ms. A restart is an exclusion; Recover re-PUTs the live targets. Drop DELETEs through the last Seq read, then the namespace. A variant whose pod vanished or whose counter reset scores at the CPU ceiling. Streak halts after 3 excluded windows. First run: a window is one baseline half, every hash verified every window (PR #52 S4, S9).
+- Rejected: excluding the window for a variant's own CPU failure (a variant could stall the run at will); running a window already excluded by its canary (5 min of load for nothing); batches bound to ids before the gate (a newcomer would have none); every kubectl or loadgen error as an exclusion (the first run halts on faults, S10).
+- Reason: DESIGN.md sec 10, sec 11; every Session error is a harness fault, never a variant's.
+- Reverse: edit orchestrator/session.go and window.go; DESIGN.md sec 11 "Stress state" and "Excluded windows" edits (overview.md stale line extended).
+- Origin: Code
+
+## 2026-10-27 · PR #58 (inferred) · Host confirmation of integrity claims: the shared classifier on the evidence, a host salt history, unconfirmed claims a fault
+- Decision: the host re-checks each claim's evidence with internal/classifier: a /hash answer on the variant's host salt history (a classifier.Run with no Verifier fed every recorded pair hash: the Stage 5 burst's via gate.Report.BurstHashes, then each window's, never emptied on a loadgen restart), then hashcore Verify; a /verify answer against the host's own batch truth; a negative's 2xx only if its request bytes break the contract on every endpoint its class can go to. Pairs that fail full verification or repeat a salt are confirmed by construction. Any host-found integrity reason confirms, excluded window or not; claims of which none confirm are a fault. loadgen/client gains ExpectAny, so Recover can read a new boot_id.
+- Rejected: taking loadgen's reason (DESIGN.md sec 9 asks for the host); host checks written apart from the classifier (two implementations could drift); culling on an unconfirmed claim (a loadgen bug would cull an honest variant); dropping unconfirmed claims silently (a disagreement nobody sees).
+- Reason: settles DESIGN.md sec 10 "Evidence" (PR #41 entry: "settled in the orchestrator design"); a salt first seen in the burst needs the burst's hashes on the host.
+- Reverse: edit orchestrator/integrity.go; DESIGN.md sec 10 "Evidence".
+- Origin: Code
