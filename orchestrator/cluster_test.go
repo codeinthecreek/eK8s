@@ -129,6 +129,10 @@ func TestKubeCalls(t *testing.T) {
 	if err := k5.DeleteNamespace(ctx, "kube-system"); err == nil {
 		t.Error("DeleteNamespace(kube-system): want a refusal")
 	}
+	k6, calls6 := stubKube("namespace/ek8s-v3\nnamespace/ek8s-v10")
+	if ns, err := k6.VariantNamespaces(ctx); err != nil || !slices.Equal(ns, []string{"ek8s-v10", "ek8s-v3"}) {
+		t.Fatalf("VariantNamespaces = %q, %v", ns, err)
+	}
 
 	want := [][]string{
 		{"-n", "ek8s-stress", "scale", "deploy/stress-ng", "--replicas=0"},
@@ -141,9 +145,10 @@ func TestKubeCalls(t *testing.T) {
 		{"get", "--raw", "/api/v1/nodes/ek8s-control-plane/proxy/metrics/resource"},
 		{"get", "--raw", "/api/v1/nodes/ek8s-control-plane/proxy/metrics/resource"},
 		{"delete", "namespace", "ek8s-v7", "--ignore-not-found", "--wait=true", "--timeout=3m0s"},
+		{"get", "namespaces", "-l", "ek8s.io/role=variant", "-o", "name"},
 	}
 	var got [][]string
-	for _, c := range [][][]string{*calls, *calls2, *calls3, *calls4, *calls5} {
+	for _, c := range [][][]string{*calls, *calls2, *calls3, *calls4, *calls5, *calls6} {
 		got = append(got, c...)
 	}
 	if len(got) != len(want) {

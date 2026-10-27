@@ -253,6 +253,22 @@ func oneNode(b []byte) (string, error) {
 	return name, nil
 }
 
+// VariantNamespaces lists the namespaces labelled as a variant's
+// (DESIGN.md sec 11), sorted: a new run starts with none, since Stage 5
+// creates ek8s-v<id> and refuses one that exists.
+func (k *Kube) VariantNamespaces(ctx context.Context) ([]string, error) {
+	out, err := k.kubectl(ctx, "get", "namespaces", "-l", "ek8s.io/role=variant", "-o", "name")
+	if err != nil {
+		return nil, err
+	}
+	names := strings.Fields(out)
+	for i, n := range names {
+		names[i] = strings.TrimPrefix(n, "namespace/")
+	}
+	slices.Sort(names)
+	return names, nil
+}
+
 func (k *Kube) DeleteNamespace(ctx context.Context, ns string) error {
 	if !strings.HasPrefix(ns, "ek8s-v") {
 		return fmt.Errorf("orchestrator: refusing to delete namespace %q, not a variant's", ns)

@@ -10,4 +10,11 @@
 // score per variant; Adopt, Recover and Drop follow a variant's and
 // loadgen's lifecycle. The host runs Argon2 here, so no call may overlap
 // a window or a gate run (internal/hostpairs).
+//
+// Loop is the generational process over them: tournament selection
+// from the lineage archive, a mutation (driver) while the host makes the
+// next window's pairs, the gate (GateRunner: Stages 1-4, stress on,
+// Stage 5), the newcomer's probation window, integrity culls, then the
+// lowest score back to LiveCap, every attempt recorded in lineage, and
+// the run's stopping rules. cmd/orchestrator runs it.
 package orchestrator
