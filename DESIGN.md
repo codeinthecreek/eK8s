@@ -958,10 +958,10 @@ times, and computes every per-half statistic (lag p99, `success_rate`,
 the orchestrator read one clock: the kind node is a container on the host.
 
 **Evidence.** A record whose reason is an integrity reason (section 9)
-carries the request path and body, the response status and the response body (at
-most `MaxBodyBytes`+1 bytes), for the first 8 such records per target per
-window or burst; later ones carry the verdict only, so a variant that
-fails every request cannot fill loadgen's memory. Section 9 requires the
+carries the request path and body, the response status and the response
+body (at most `MaxBodyBytes`+1 bytes), for the first 8 such records
+per target per window or burst; later ones carry the verdict only, so a
+variant that fails every request cannot fill loadgen's memory. Section 9 requires the
 host to confirm an integrity failure before it culls. The host re-checks
 each claim from its evidence with the shared classifier, never taking
 loadgen's reason: a `/hash` answer against the variant's host salt
