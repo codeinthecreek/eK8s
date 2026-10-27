@@ -210,6 +210,9 @@ docs/               overview.md (plain-language introduction; DESIGN.md is
   static libc (libc6-dev / glibc-static), since it is linked statically
   to boot in the same sandbox; it is a separate binary, never the
   deployed image.
+- `go run ./orchestrator/cmd/orchestrator -run DIR -rate R -claude PATH
+  -claude-version V` -- one evolutionary run on the kind cluster, with
+  `CLAUDE_CODE_OAUTH_TOKEN` set (workstation only; see its doc comment).
 - Driver tests run a fake claude (driver/internal/fakeclaude) under real
   bwrap; they skip without bwrap unless `EK8S_GATE_REQUIRE_TOOLS=1`.
   `EK8S_DRIVER_LIVE=1` with `CLAUDE_CODE_OAUTH_TOKEN` runs one real

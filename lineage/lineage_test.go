@@ -515,3 +515,69 @@ func TestGenomeOversizedFile(t *testing.T) {
 		t.Error("Genome read an oversized file")
 	}
 }
+
+func noCandidate(id, why string) Attempt {
+	return Attempt{
+		GenerationID: id, ParentID: "1", Time: t0, Mutation: why, Action: ActionDiscarded, SelectionMode: ModeTournament,
+		Usage: Usage{NumTurns: 30, OutputTokens: 900}, Rationale: "left it as is",
+	}
+}
+
+func TestNoCandidate(t *testing.T) {
+	r := newRun(t)
+	for _, a := range []Attempt{noCandidate("2", MutationNoChange), noCandidate("3", MutationFailed)} {
+		if err := r.AppendAttempt(a); err != nil {
+			t.Fatalf("attempt %s (%s): %v", a.GenerationID, a.Mutation, err)
+		}
+	}
+	got, err := r.Attempts()
+	if err != nil || len(got) != 2 || got[0].Mutation != MutationNoChange || got[1].Mutation != MutationFailed {
+		t.Fatalf("Attempts = %+v, %v", got, err)
+	}
+	mut := func(f func(a *Attempt)) Attempt { a := noCandidate("4", MutationFailed); f(&a); return a }
+	for name, a := range map[string]Attempt{
+		"unknown reason": mut(func(a *Attempt) { a.Mutation = "timeout" }),
+		"gate result":    mut(func(a *Attempt) { a.Gate = Gate{FailStage: 1, FailCheck: "build"} }),
+		"passed gate":    mut(func(a *Attempt) { a.Gate.Passed = true }),
+		"promoted":       mut(func(a *Attempt) { a.Action = ActionPromoted }),
+		"fitness":        mut(func(a *Attempt) { a.Fitness = &Fitness{} }),
+		"live":           mut(func(a *Attempt) { a.EverLive = true }),
+		"genome":         mut(func(a *Attempt) { a.GenomeSHA256 = sha() }),
+		"disqualified":   mut(func(a *Attempt) { a.Disqualified = "salt_reused" }),
+	} {
+		if err := r.AppendAttempt(a); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+}
+
+func TestSummary(t *testing.T) {
+	r := newRun(t)
+	if _, err := r.ReadSummary(); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("ReadSummary of a running run: %v", err)
+	}
+	s := Summary{Reason: "usage_ceiling", Generations: 7, Usage: Usage{NumTurns: 120, InputTokens: 5}, Time: t0}
+	if err := r.WriteSummary(s); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.WriteSummary(s); !errors.Is(err, ErrExists) {
+		t.Errorf("second WriteSummary: %v, want ErrExists", err)
+	}
+	got, err := r.ReadSummary()
+	if err != nil || got.Reason != s.Reason || got.Generations != 7 || got.Usage != s.Usage || !got.Time.Equal(t0) {
+		t.Errorf("ReadSummary = %+v, %v", got, err)
+	}
+	if mode(t, filepath.Join(r.dir, summaryFile)) != 0o600 {
+		t.Error("summary.json is not 0600")
+	}
+	for name, bad := range map[string]Summary{
+		"free text": {Reason: "fault: kubectl said x", Time: t0},
+		"negative":  {Reason: "fault", Generations: -1, Time: t0},
+		"no time":   {Reason: "fault"},
+		"usage":     {Reason: "fault", Time: t0, Usage: Usage{OutputTokens: -1}},
+	} {
+		if err := newRun(t).WriteSummary(bad); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+}

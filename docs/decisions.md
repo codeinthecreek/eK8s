@@ -646,23 +646,37 @@ max. Earlier entries are not backfilled.
 - Reverse: edit driver/prompt.go.
 - Origin: Code
 
-## 2026-10-26 · PR #58 (inferred) · Owner answers to the PR #57 driver questions: all four yes
+## 2026-10-26 · PR #58 · Owner answers to the PR #57 driver questions: all four yes
 - Decision: the four PR #57 questions are approved as built: the extra flags (acceptEdits, --strict-mcp-config, --no-session-persistence, "--"); stream-json with the init check; the bwrap hardening beyond DESIGN.md sec 12; the claude version pinned by config. The three PR #57 entries above stand.
 - Rejected: none proposed by the owner.
 - Reason: owner's call (session prompt, "I accept all the recommendations in PR #57"); no PR comment.
 - Reverse: re-ask the owner.
 - Origin: owner
 
-## 2026-10-27 · PR #58 (inferred) · Orchestrator window mechanics: one Session per loadgen, run-wide exclusions, CPU fail-closed per variant
+## 2026-10-27 · PR #58 · Orchestrator window mechanics: one Session per loadgen, run-wide exclusions, CPU fail-closed per variant
 - Decision: orchestrator.Session checks GET /config's r, window_s and burst_rate exactly and expects its boot_id. RunWindow uploads one host Batch per live variant (batches name no target, so the gap makes live + 1 before the gate), stops stress and waits until its pods are gone, excludes without starting on a kindnet DaemonSet not Ready or a canary not refused (polled up to 30 s after a new boot_id), samples the kubelet's CPU counters around the run, polls it, reads every record, and excludes run-wide for a run not done, a ring gap, a skipped or faulted send, lag p99 over 10 ms or any lag over 100 ms. A restart is an exclusion; Recover re-PUTs the live targets. Drop DELETEs through the last Seq read, then the namespace. A variant whose pod vanished or whose counter reset scores at the CPU ceiling; every variant's at once (more than one) is a fault. A batch is refused if used before. Excluded is sorted. Streak halts after 3 excluded windows. First run: a window is one baseline half, every hash verified every window (PR #52 S4, S9).
 - Rejected: excluding the window for a variant's own CPU failure (a variant could stall the run at will); running a window already excluded by its canary (5 min of load for nothing); batches bound to ids before the gate (a newcomer would have none); every kubectl or loadgen error as an exclusion (the first run halts on faults, S10).
 - Reason: DESIGN.md sec 10, sec 11; every Session error is a harness fault, never a variant's.
 - Reverse: edit orchestrator/session.go and window.go; DESIGN.md sec 11 "Stress state" and "Excluded windows" edits (overview.md stale line extended).
 - Origin: Code
 
-## 2026-10-27 · PR #58 (inferred) · Host confirmation of integrity claims: the shared classifier on the evidence, a host salt history, unconfirmed claims a fault
+## 2026-10-27 · PR #58 · Host confirmation of integrity claims: the shared classifier on the evidence, a host salt history, unconfirmed claims a fault
 - Decision: the host re-checks each claim's evidence with internal/classifier: a /hash answer on the variant's host salt history (a classifier.Run with no Verifier fed every recorded pair hash: the Stage 5 burst's via gate.Report.BurstHashes, then each window's, never emptied on a loadgen restart), then hashcore Verify; a /verify answer against the host's own batch truth; a negative's 2xx only if its request bytes break the contract on the endpoint they went to, read as gen-0 reads them (encoding/json, unknown members ignored); for that, evidence carries the request path (wire.Evidence.path, a wire format addition). Pairs that fail full verification or repeat a salt are confirmed by construction. Any host-found integrity reason confirms, excluded window or not; claims of which none confirm are a fault. loadgen/client gains ExpectAny, so Recover can read a new boot_id.
 - Rejected: taking loadgen's reason (DESIGN.md sec 9 asks for the host); host checks written apart from the classifier (two implementations could drift); culling on an unconfirmed claim (a loadgen bug would cull an honest variant); a strict reading of requests (an honest wrapper that ignores unknown members could be culled); checking a negative on every endpoint its class allows, without the path (verify_wrong_type_hash reads as a valid /hash body, so a mutant failing open on it would leave only unconfirmed claims and could halt the run at will); dropping unconfirmed claims silently (a disagreement nobody sees).
 - Reason: settles DESIGN.md sec 10 "Evidence" (PR #41 entry: "settled in the orchestrator design"); a salt first seen in the burst needs the burst's hashes on the host.
 - Reverse: edit orchestrator/integrity.go; DESIGN.md sec 10 "Evidence".
+- Origin: Code
+
+## 2026-10-27 · PR #59 (inferred) · Orchestrator loop: windows only after a promotion, until scored; a loadgen restart halts
+- Decision: orchestrator.Loop gates and scores generation 0 alone, then per generation: tournament (k = 2, distinct, ties to the first drawn) over passed, undisqualified, scored genomes; driver.Mutate while Session.Batches makes live + 1 batches, the gate only after; StressOn, Stage 5, Adopt; then probation windows (fresh batches each) until one is scored or the newcomer is culled; integrity culls every window, scored or not; the lowest score culled back to 3, a tie culling the newer. Recorded fitness is the latest scored window's. No candidate (a session that failed or edited nothing): recorded, no gate, no window, batches cancelled; a Mutate error with no session started is a harness fault. Stress-ng is off at start and again right after Stage 5. Halts: S10 loadgen restart, from a window or a cull's DELETE (Session.Recover unused in the first run, superseding the STATUS Next wording), gate fault (no attempt record: not the candidate's outcome), 3 excluded windows, no parent; stops: N generations, a num_turns or token ceiling (all four token kinds).
+- Rejected: Recover after a restart (owner's S10 says halt); a window after every generation (5 min with nothing to cull); culling on an excluded window's scores, or leaving 4 live past it; the mean over windows as fitness (mixes conditions further; revisit with the archive design); halting on a failed session (a model's bad session is an outcome, not a fault); stress left on until the next window (the next host pairs and gate run would share the host with it).
+- Reason: DESIGN.md sec 11 steps 1-9 with PR #52 S4, S8-S10; the gap order of sec 11.
+- Reverse: edit orchestrator/loop.go; DESIGN.md sec 11 and sec 13 "First run" paragraphs.
+- Origin: Code
+
+## 2026-10-27 · PR #59 (inferred) · Lineage: a mutation reason for attempts with no candidate, and summary.json; cmd/orchestrator start-up guards
+- Decision: lineage.Attempt gains `mutation` (`no-change`, `session-failed`), set only with a zero gate result, discarded, no fitness, flags, genome or reason; driver's prompt names those outcomes. Run.WriteSummary writes summary.json once (reason token, generations, total usage, time). cmd/orchestrator reads CLAUDE_CODE_OAUTH_TOKEN and unsets it before any child runs, and refuses to start with a variant namespace or a loadgen target left from an earlier run; a halted run leaves its variants for inspection. A failing gate Detail (candidate-controlled) goes to the operator's stderr only, %q-quoted (no terminal escapes) and cut to 1 KiB; never to lineage or a prompt.
+- Rejected: recording a driver failure as a gate failure at some stage (a lie in the table); no record for it (DESIGN.md sec 11 step 8 records every attempt); the run summary as an attempts.jsonl line (it is not an attempt); the token as a flag (visible in ps); no Detail anywhere (a failed candidate is not archived, so the log is the only clue to why it failed).
+- Reason: DESIGN.md sec 13 summary record and sec 14 schema; schema additions only, older records still read.
+- Reverse: drop Attempt.Mutation and lineage/summary.go; edit cmd/orchestrator/main.go.
 - Origin: Code

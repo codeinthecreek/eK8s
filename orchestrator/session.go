@@ -128,6 +128,14 @@ func (s *Session) readConfig(ctx context.Context) error {
 // WindowPairs is how many pairs each Batch needs.
 func (s *Session) Config() wire.Config { return s.cfg }
 
+// Batches makes n batches of GET /config's window_pairs pairs each
+// (GenerateBatches) with the Session's core and workers. It reads only
+// what NewSession set, so the loop may call it while a mutation runs;
+// never during a window, a gate run or Recover.
+func (s *Session) Batches(ctx context.Context, n int) ([]Batch, error) {
+	return GenerateBatches(ctx, s.c.Core, n, s.cfg.WindowPairs, s.c.Workers)
+}
+
 // Restarted reports whether loadgen's boot_id changed since NewSession
 // or the last Recover: Recover must run before the next window.
 func (s *Session) Restarted() bool { return s.restarted }
