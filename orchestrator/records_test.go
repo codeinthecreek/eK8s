@@ -73,6 +73,7 @@ func TestLoadgenExclusions(t *testing.T) {
 		{"max over", map[string][]wire.Record{"1": lagged(append(many(199, ms), 101*ms)...)}, []string{ExcludedLagMax}},
 		// At the thresholds exactly is not over them.
 		{"p99 at 10 ms", map[string][]wire.Record{"1": lagged(append(many(197, ms), 10*ms, 10*ms, 10*ms)...)}, nil},
+		{"p99 just over 10 ms", map[string][]wire.Record{"1": lagged(append(many(197, ms), 11*ms, 11*ms, 11*ms)...)}, []string{ExcludedLagP99}},
 		{"max at 100 ms", map[string][]wire.Record{"1": lagged(append(many(199, ms), 100*ms)...)}, nil},
 		// Lag is loadgen-wide: one target's lag excludes for all.
 		{"across targets", map[string][]wire.Record{"1": lagged(many(100, ms)...), "2": lagged(many(100, 20*ms)...)}, []string{ExcludedLagP99}},

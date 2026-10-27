@@ -15,19 +15,16 @@ import (
 	"github.com/codeinthecreek/eK8s/loadgen/wire"
 )
 
-// Record kinds and negative classes as the wire carries them
-// (loadgen/request.go, loadgen/negative.go). An unknown kind or class
-// fails closed: its record is never confirmed.
+// Record kinds and request paths as the wire carries them
+// (loadgen/request.go). An unknown kind or path fails closed: its record
+// is never confirmed.
 const (
 	kindHash     = "hash"
 	kindVerify   = "verify"
 	kindNegative = "negative"
 
-	classMalformedHash  = "malformed_hash"
-	classNonExactParams = "non_exact_params"
-	classEmptyPassword  = "empty_password"
-	classTooLong        = "password_too_long"
-	classInvalidJSON    = "invalid_json"
+	pathHash   = "/hash"
+	pathVerify = "/verify"
 )
 
 // maxPasswordBytes is the HTTP contract's password cap (DESIGN.md sec 8).
@@ -172,12 +169,12 @@ func verifyAll(ctx context.Context, core *hashcore.Core, recs map[string][]wire.
 //     against every hash the host has read for it.
 //   - verify: the classifier on the response, with the host's own ground
 //     truth for the pair in the request.
+//   - negative: a 2xx to a request the HTTP contract rejects on the
+//     endpoint it was sent to; the request bytes must show the defect.
 //
 // Requests are read leniently, as the gen-0 wrapper reads them
-// (readRequest).
-//   - negative: a 2xx to a request the HTTP contract rejects. The class
-//     only picks which endpoints the request is checked against; the
-//     request bytes must show the defect.
+// (readRequest), so a negative is confirmed only if an honest wrapper
+// must reject it.
 func confirm(core *hashcore.Core, h *history, truth map[pairKey]bool, r wire.Record) classifier.Reason {
 	e := r.Evidence
 	o := classifier.Observation{Status: e.Status, Header: http.Header{}, Body: e.Body}
@@ -202,7 +199,7 @@ func confirm(core *hashcore.Core, h *history, truth map[pairKey]bool, r wire.Rec
 		_, reason := classifier.NewRun(nil).Classify(o)
 		return integrityOnly(reason)
 	case kindNegative:
-		if !rejected(core, r.Class, e.RequestBody) {
+		if !rejected(core, e.Path, e.RequestBody) {
 			return classifier.ReasonNone
 		}
 		o.Kind = classifier.Negative
@@ -305,18 +302,17 @@ func validVerifyRequest(core *hashcore.Core, body []byte) bool {
 	return err == nil
 }
 
-// rejected reports whether the HTTP contract rejects a negative of class
-// class with this body: the two hash classes go to /verify only
-// (loadgen/negative.go), so the body must be invalid there; the other
-// three may go to either endpoint, so it must be invalid on both. An
-// unknown class is never rejected.
-func rejected(core *hashcore.Core, class string, body []byte) bool {
-	switch class {
-	case classMalformedHash, classNonExactParams:
+// rejected reports whether the HTTP contract rejects body on path, the
+// endpoint loadgen sent it to (Evidence.Path): /hash takes a valid
+// password, /verify a valid password and a hash the fixed core takes.
+// Any other path is never rejected.
+func rejected(core *hashcore.Core, path string, body []byte) bool {
+	switch path {
+	case pathHash:
+		_, ok := hashRequest(body)
+		return !ok
+	case pathVerify:
 		return !validVerifyRequest(core, body)
-	case classEmptyPassword, classTooLong, classInvalidJSON:
-		_, okHash := hashRequest(body)
-		return !okHash && !validVerifyRequest(core, body)
 	}
 	return false
 }

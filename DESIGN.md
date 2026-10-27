@@ -958,7 +958,7 @@ times, and computes every per-half statistic (lag p99, `success_rate`,
 the orchestrator read one clock: the kind node is a container on the host.
 
 **Evidence.** A record whose reason is an integrity reason (section 9)
-carries the request body, the response status and the response body (at
+carries the request path and body, the response status and the response body (at
 most `MaxBodyBytes`+1 bytes), for the first 8 such records per target per
 window or burst; later ones carry the verdict only, so a variant that
 fails every request cannot fill loadgen's memory. Section 9 requires the
@@ -969,10 +969,10 @@ history (every recorded hash of its Stage 5 burst and of its windows,
 kept across loadgen restarts) and then the fixed core's Verify; a
 `/verify` answer against the host's own ground truth for the pair in the
 request (a pair the host never made confirms nothing); a negative's 2xx
-only when the request bytes break the HTTP contract on every endpoint
-its class can go to, read as leniently as the gen-0 wrapper reads them
-(unknown members ignored), so an honest wrapper is never culled for a
-request it may accept. Whatever integrity reason the host finds confirms,
+only when the request bytes break the HTTP contract on the endpoint they
+were sent to, read as leniently as the gen-0 wrapper reads them (unknown
+members ignored), so an honest wrapper is never culled for a request it
+may accept. Whatever integrity reason the host finds confirms,
 and so does any failure its full verification and salt history find in
 the recorded pairs. Claims for a variant of which the host confirms none
 are a fault (loadgen and the host disagree about the same bytes), which

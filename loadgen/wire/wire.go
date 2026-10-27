@@ -177,6 +177,7 @@ type Pair struct {
 
 // Evidence is a Record's evidence, in GET /targets/{id}/records's response.
 type Evidence struct {
+	Path        string `json:"path"` // the request path: /hash or /verify
 	RequestBody []byte `json:"request_body"`
 	Status      int    `json:"status"`
 	Body        []byte `json:"body"`

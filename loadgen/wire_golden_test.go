@@ -137,7 +137,7 @@ func wireCases() []struct {
 	const boot = "00112233445566778899aabbccddeeff"
 	wall := time.Date(2026, 10, 18, 2, 4, 5, 123456789, time.UTC)
 	pair := wire.Pair{Password: "PW", Hash: "$argon2id$v=19$m=19456,t=2,p=1$c2FsdA$a2V5"}
-	evidence := wire.Evidence{RequestBody: []byte(`{"password":"PW"}`), Status: 200, Body: []byte("x\x00")}
+	evidence := wire.Evidence{Path: "/hash", RequestBody: []byte(`{"password":"PW"}`), Status: 200, Body: []byte("x\x00")}
 	record := wire.Record{
 		Seq: 4, Target: "12", RunID: "b1", Index: 3, Kind: "negative", Class: "invalid_json",
 		IntendedWall: wall, IntendedMonoNS: 1500000000, ActualMonoNS: 1501000000, LatencyNS: 250000000,

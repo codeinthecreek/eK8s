@@ -46,7 +46,7 @@ func TestClientRecordsCap(t *testing.T) {
 		Skipped:        true,
 		Fault:          strings.Repeat("f", 4096), // longer than any fault: one error's message
 		Pair:           &wire.Pair{Password: strings.Repeat("A", maxPasswordLen), Hash: randomExactPHC()},
-		Evidence:       &wire.Evidence{RequestBody: evidence, Status: 599, Body: evidence},
+		Evidence:       &wire.Evidence{Path: "/verify", RequestBody: evidence, Status: 599, Body: evidence},
 	}
 	recs := make([]wire.Record, maxRecordsPage)
 	for i := range recs {

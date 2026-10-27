@@ -4,7 +4,7 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 *(inferred)* are guesses, not read from the repo; correct them.
 
 ## Now
-- claude/skeleton-7 (PR #58, inferred): skeleton PR 6, orchestrator part 1: orchestrator.Session (config shape check, boot_id, Recover, Drop), RunWindow (host batches uploaded, stress off, kindnet and canary first, kubelet CPU around the run, records read and checked, run-wide exclusions, host full verification and per-reason confirmation of integrity claims, baseline scores), Kube (kubectl), Streak; gate.Report.BurstHashes; loadgen/client ExpectAny; DESIGN.md sec 10 Evidence and sec 11 stress and exclusions settled; two decisions.md entries. Next: skeleton PR 7 (orchestrator part 2) needs Opus, high.
+- claude/skeleton-7 (PR #58, inferred): skeleton PR 6, orchestrator part 1: orchestrator.Session (config shape check, boot_id, Recover, Drop), RunWindow (host batches uploaded, stress off, kindnet and canary first, kubelet CPU around the run, records read and checked, run-wide exclusions, host full verification and per-reason confirmation of integrity claims, baseline scores), Kube (kubectl), Streak; gate.Report.BurstHashes; loadgen/client ExpectAny; loadgen evidence carries the request path (wire.Evidence.path); DESIGN.md sec 10 Evidence and sec 11 stress and exclusions settled; two decisions.md entries. Next: skeleton PR 7 (orchestrator part 2) needs Opus, high.
 
 ## Next
 - First run (walking skeleton): about 10 generations on the workstation, end to end: driver mutates the wrapper (DESIGN.md sec 12, sandboxed), gate Stages 1-5, orchestrator with loadgen windows, fitness (sec 9), lineage records; see the skeleton PR list below (owner answers: docs/decisions.md, PR #52).

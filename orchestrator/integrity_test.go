@@ -70,8 +70,9 @@ func TestReadRequest(t *testing.T) {
 }
 
 // TestRejected checks the host's contract check on each negative form
-// loadgen builds (loadgen/negative.go), and that a request the contract
-// accepts is never taken for a negative, whatever its class.
+// loadgen builds (loadgen/negative.go), on the endpoint it goes to, and
+// that a request the contract accepts on its endpoint is never taken for
+// a negative.
 func TestRejected(t *testing.T) {
 	core := hashcore.New()
 	good := mustHash(t, core, "pw")
@@ -79,48 +80,49 @@ func TestRejected(t *testing.T) {
 	verify := func(pw, hash string) []byte { return mustJSON(t, map[string]string{"password": pw, "hash": hash}) }
 	hash := func(pw string) []byte { return mustJSON(t, map[string]string{"password": pw}) }
 	for _, tc := range []struct {
-		class string
-		body  []byte
-		want  bool
+		path string
+		body []byte
+		want bool
 	}{
-		{classMalformedHash, verify("pw", "not a phc"), true},
-		{classMalformedHash, verify("pw", good[:20]), true},
-		{classMalformedHash, verify("pw", good+"\n"), true},
-		{classNonExactParams, verify("pw", strings.Replace(good, "t=2", "t=1", 1)), true},
-		{classNonExactParams, verify("pw", strings.Replace(good, "argon2id", "argon2i", 1)), true},
-		{classEmptyPassword, hash(""), true},
-		{classEmptyPassword, []byte(`{}`), true},
-		{classEmptyPassword, verify("", good), true},
-		{classEmptyPassword, mustJSON(t, map[string]string{"hash": good}), true},
-		{classTooLong, hash(long), true},
-		{classTooLong, verify(long, good), true},
-		{classInvalidJSON, []byte(`{"password":"pw"`), true},
-		{classInvalidJSON, []byte(`{"password":"pw"}x`), true},
-		{classInvalidJSON, []byte(`{"password":7}`), true},
-		{classInvalidJSON, mustJSON(t, map[string]any{"password": 7, "hash": good}), true},
+		{pathVerify, verify("pw", "not a phc"), true},
+		{pathVerify, verify("pw", good[:20]), true},
+		{pathVerify, verify("pw", good+"\n"), true},
+		{pathVerify, verify("pw", strings.Replace(good, "t=2", "t=1", 1)), true},
+		{pathVerify, verify("pw", strings.Replace(good, "argon2id", "argon2i", 1)), true},
+		{pathHash, hash(""), true},
+		{pathHash, []byte(`{}`), true},
+		{pathVerify, verify("", good), true},
+		{pathVerify, mustJSON(t, map[string]string{"hash": good}), true},
+		{pathHash, hash(long), true},
+		{pathVerify, verify(long, good), true},
+		{pathHash, []byte(`{"password":"pw"`), true},
+		{pathVerify, []byte(`{"password":"pw","hash":"x"`), true},
+		{pathHash, []byte(`{"password":"pw"}x`), true},
+		{pathVerify, append(verify("pw", good), "{}"...), true},
+		{pathHash, []byte(`{"password":7}`), true},
+		{pathVerify, mustJSON(t, map[string]any{"password": []string{"pw"}, "hash": good}), true},
+		// verify_wrong_type_hash: rejected on /verify, where loadgen sends it.
+		{pathVerify, mustJSON(t, map[string]any{"password": "pw", "hash": true}), true},
 
-		// The contract accepts these, so a 2xx to one is no failure.
-		{classMalformedHash, verify("pw", good), false},
-		{classNonExactParams, verify("pw", good), false},
-		{classEmptyPassword, hash("pw"), false},
-		{classTooLong, hash(strings.Repeat("a", 1024)), false},
-		{classInvalidJSON, verify("pw", good), false},
-		{classInvalidJSON, hash("pw"), false},
-		// verify_wrong_type_hash is read as a valid /hash request (the
-		// hash member is ignored), so it never confirms on its own.
-		{classInvalidJSON, mustJSON(t, map[string]any{"password": "pw", "hash": true}), false},
-		{"unknown_class", []byte(`{`), false},
+		// The contract accepts these on their endpoint, so a 2xx to one
+		// is no failure.
+		{pathVerify, verify("pw", good), false},
+		{pathHash, hash("pw"), false},
+		{pathHash, hash(strings.Repeat("a", 1024)), false},
+		{pathHash, mustJSON(t, map[string]any{"password": "pw", "hash": true}), false},
+		{"/other", []byte(`{`), false},
+		{"", []byte(`{`), false},
 	} {
-		if got := rejected(core, tc.class, tc.body); got != tc.want {
-			t.Errorf("rejected(%s, %.60q) = %v, want %v", tc.class, tc.body, got, tc.want)
+		if got := rejected(core, tc.path, tc.body); got != tc.want {
+			t.Errorf("rejected(%s, %.60q) = %v, want %v", tc.path, tc.body, got, tc.want)
 		}
 	}
 }
 
-// claim is an integrity record of kind with evidence.
-func claim(kind, class, reason string, req []byte, status int, body []byte) wire.Record {
-	return wire.Record{Kind: kind, Class: class, Bucket: "failed", Reason: reason,
-		Evidence: &wire.Evidence{RequestBody: req, Status: status, Body: body}}
+// claim is an integrity record of kind with evidence for path.
+func claim(kind, path, reason string, req []byte, status int, body []byte) wire.Record {
+	return wire.Record{Kind: kind, Bucket: "failed", Reason: reason,
+		Evidence: &wire.Evidence{Path: path, RequestBody: req, Status: status, Body: body}}
 }
 
 func TestConfirm(t *testing.T) {
@@ -138,28 +140,29 @@ func TestConfirm(t *testing.T) {
 		seed []string // hashes already in the variant's history
 		want classifier.Reason
 	}{
-		{"hash non-canonical", claim(kindHash, "", "non_canonical_phc", hashReq, 200, resp("hash", hashOf+"\n")), nil, classifier.ReasonNonCanonicalPHC},
-		{"hash malformed body", claim(kindHash, "", "malformed_body", hashReq, 200, []byte(`{"hash":"x","extra":1}`)), nil, classifier.ReasonMalformedBody},
-		{"hash salt seen", claim(kindHash, "", "salt_reused", hashReq, 200, resp("hash", hashOf)), []string{hashOf}, classifier.ReasonSaltReused},
-		{"hash salt seen, late 201", claim(kindHash, "", "salt_reused", hashReq, 201, resp("hash", hashOf)), []string{hashOf}, classifier.ReasonSaltReused},
-		{"hash salt new, verifies", claim(kindHash, "", "salt_reused", hashReq, 200, resp("hash", hashOf)), nil, classifier.ReasonNone},
-		{"hash salt new, wrong key", claim(kindHash, "", "salt_reused", hashReq, 200, resp("hash", fakePHC(1, 2))), nil, classifier.ReasonVerifyMismatch},
-		{"hash of another password", claim(kindHash, "", "salt_reused", hashReq, 200, resp("hash", other)), nil, classifier.ReasonVerifyMismatch},
-		{"hash request unreadable", claim(kindHash, "", "non_canonical_phc", []byte(`{"password":`), 200, resp("hash", hashOf+"\n")), nil, classifier.ReasonNone},
-		{"hash request no password", claim(kindHash, "", "non_canonical_phc", []byte(`{}`), 200, resp("hash", hashOf+"\n")), nil, classifier.ReasonNone},
+		{"hash non-canonical", claim(kindHash, pathHash, "non_canonical_phc", hashReq, 200, resp("hash", hashOf+"\n")), nil, classifier.ReasonNonCanonicalPHC},
+		{"hash malformed body", claim(kindHash, pathHash, "malformed_body", hashReq, 200, []byte(`{"hash":"x","extra":1}`)), nil, classifier.ReasonMalformedBody},
+		{"hash salt seen", claim(kindHash, pathHash, "salt_reused", hashReq, 200, resp("hash", hashOf)), []string{hashOf}, classifier.ReasonSaltReused},
+		{"hash salt seen, late 201", claim(kindHash, pathHash, "salt_reused", hashReq, 201, resp("hash", hashOf)), []string{hashOf}, classifier.ReasonSaltReused},
+		{"hash salt new, verifies", claim(kindHash, pathHash, "salt_reused", hashReq, 200, resp("hash", hashOf)), nil, classifier.ReasonNone},
+		{"hash salt new, wrong key", claim(kindHash, pathHash, "salt_reused", hashReq, 200, resp("hash", fakePHC(1, 2))), nil, classifier.ReasonVerifyMismatch},
+		{"hash of another password", claim(kindHash, pathHash, "salt_reused", hashReq, 200, resp("hash", other)), nil, classifier.ReasonVerifyMismatch},
+		{"hash request unreadable", claim(kindHash, pathHash, "non_canonical_phc", []byte(`{"password":`), 200, resp("hash", hashOf+"\n")), nil, classifier.ReasonNone},
+		{"hash request no password", claim(kindHash, pathHash, "non_canonical_phc", []byte(`{}`), 200, resp("hash", hashOf+"\n")), nil, classifier.ReasonNone},
 
-		{"verify wrong match", claim(kindVerify, "", "wrong_match", verifyReq(other), 200, resp("match", true)), nil, classifier.ReasonWrongMatch},
-		{"verify wrong reject", claim(kindVerify, "", "wrong_match", verifyReq(hashOf), 200, resp("match", false)), nil, classifier.ReasonWrongMatch},
-		{"verify malformed", claim(kindVerify, "", "malformed_body", verifyReq(hashOf), 200, []byte(`{"match":"yes"}`)), nil, classifier.ReasonMalformedBody},
-		{"verify right", claim(kindVerify, "", "wrong_match", verifyReq(hashOf), 200, resp("match", true)), nil, classifier.ReasonNone},
-		{"verify pair not the host's", claim(kindVerify, "", "wrong_match", verifyReq(fakePHC(3, 4)), 200, resp("match", true)), nil, classifier.ReasonNone},
+		{"verify wrong match", claim(kindVerify, pathVerify, "wrong_match", verifyReq(other), 200, resp("match", true)), nil, classifier.ReasonWrongMatch},
+		{"verify wrong reject", claim(kindVerify, pathVerify, "wrong_match", verifyReq(hashOf), 200, resp("match", false)), nil, classifier.ReasonWrongMatch},
+		{"verify malformed", claim(kindVerify, pathVerify, "malformed_body", verifyReq(hashOf), 200, []byte(`{"match":"yes"}`)), nil, classifier.ReasonMalformedBody},
+		{"verify right", claim(kindVerify, pathVerify, "wrong_match", verifyReq(hashOf), 200, resp("match", true)), nil, classifier.ReasonNone},
+		{"verify pair not the host's", claim(kindVerify, pathVerify, "wrong_match", verifyReq(fakePHC(3, 4)), 200, resp("match", true)), nil, classifier.ReasonNone},
 
-		{"negative accepted", claim(kindNegative, classEmptyPassword, "negative_accepted", []byte(`{}`), 200, nil), nil, classifier.ReasonNegativeAccepted},
-		{"negative accepted late 204", claim(kindNegative, classMalformedHash, "negative_accepted", verifyReq("bad"), 204, nil), nil, classifier.ReasonNegativeAccepted},
-		{"negative not a negative", claim(kindNegative, classEmptyPassword, "negative_accepted", hashReq, 200, nil), nil, classifier.ReasonNone},
-		{"negative 400", claim(kindNegative, classEmptyPassword, "negative_accepted", []byte(`{}`), 400, nil), nil, classifier.ReasonNone},
+		{"negative accepted", claim(kindNegative, pathHash, "negative_accepted", []byte(`{}`), 200, nil), nil, classifier.ReasonNegativeAccepted},
+		{"negative accepted late 204", claim(kindNegative, pathVerify, "negative_accepted", verifyReq("bad"), 204, nil), nil, classifier.ReasonNegativeAccepted},
+		{"negative not a negative", claim(kindNegative, pathHash, "negative_accepted", hashReq, 200, nil), nil, classifier.ReasonNone},
+		{"negative on no path", claim(kindNegative, "", "negative_accepted", []byte(`{}`), 200, nil), nil, classifier.ReasonNone},
+		{"negative 400", claim(kindNegative, pathHash, "negative_accepted", []byte(`{}`), 400, nil), nil, classifier.ReasonNone},
 
-		{"unknown kind", claim("other", "", "malformed_body", hashReq, 200, []byte(`x`)), nil, classifier.ReasonNone},
+		{"unknown kind", claim("other", pathHash, "malformed_body", hashReq, 200, []byte(`x`)), nil, classifier.ReasonNone},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newHistory()
@@ -213,7 +216,7 @@ func TestJudgeIntegrity(t *testing.T) {
 	}
 	// Claims the host does not confirm are counted, and so are claims
 	// without evidence.
-	unconfirmed := claim(kindHash, "", "salt_reused", mustJSON(t, map[string]string{"password": "pw"}), 200, mustJSON(t, map[string]string{"hash": mustHash(t, core, "pw")}))
+	unconfirmed := claim(kindHash, pathHash, "salt_reused", mustJSON(t, map[string]string{"password": "pw"}), 200, mustJSON(t, map[string]string{"hash": mustHash(t, core, "pw")}))
 	unconfirmed.Index = 2
 	bare := wire.Record{Index: 4, Kind: kindVerify, Bucket: "failed", Reason: "wrong_match"}
 	if v := run(newHistory(), []wire.Record{unconfirmed, bare}); v.Reason != "" || v.Claims != 2 || v.Unconfirmed != 1 {

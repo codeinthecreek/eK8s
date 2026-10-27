@@ -65,6 +65,11 @@ func (fakeHasher) Hash(string) (string, error) {
 	return "$argon2id$v=19$m=19456,t=2,p=1$" + b64(randBytes(16)) + "$" + b64(randBytes(32)), nil
 }
 
+// bothHasher fakes every /hash and answers every /verify wrongly.
+type bothHasher struct{ fakeHasher }
+
+func (h bothHasher) Verify(pw, enc string) (bool, error) { return invertHasher{h.Core}.Verify(pw, enc) }
+
 func randBytes(n int) []byte {
 	b := make([]byte, n)
 	rand.Read(b)
@@ -646,7 +651,9 @@ func checkCancelled(t *testing.T, fx *fixture) {
 // and its records are still judged.
 func TestWindowRunNotDone(t *testing.T) {
 	core := hashcore.New()
-	fx := newFixture(t, map[string]http.Handler{"1": gen0(core), "2": noShed(fakeHasher{core})}, "1", "2")
+	// The cheat fails every /hash and every /verify, so the sends made
+	// before the cancel hold one whichever kinds they are.
+	fx := newFixture(t, map[string]http.Handler{"1": gen0(core), "2": noShed(bothHasher{fakeHasher{core}})}, "1", "2")
 	other := client.New(fx.srvURL, http.DefaultClient)
 	fx.rec.setHook(func(req *http.Request) {
 		if strings.HasSuffix(req.URL.Path, "/start") {
@@ -661,8 +668,8 @@ func TestWindowRunNotDone(t *testing.T) {
 	if strings.Join(res.Excluded, ",") != ExcludedRunEnded {
 		t.Fatalf("excluded %v, want run-not-done", res.Excluded)
 	}
-	if v := res.Variants["2"]; v.Disqualified != classifier.ReasonVerifyMismatch {
-		t.Errorf("cheat in a cancelled run: %+v, want verify_mismatch", v)
+	if v := res.Variants["2"]; v.Disqualified != classifier.ReasonVerifyMismatch && v.Disqualified != classifier.ReasonWrongMatch {
+		t.Errorf("cheat in a cancelled run: %+v, want verify_mismatch or wrong_match", v)
 	}
 	if v := res.Variants["1"]; v.Records == 0 || v.Records >= 20 || v.Score != nil {
 		t.Errorf("honest variant: %+v; want some records, not all, no score", v)
