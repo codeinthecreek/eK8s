@@ -24,6 +24,13 @@ const (
 	ActionArchived  = "archived"
 )
 
+// Why a mutation call made no candidate (Attempt.Mutation): the attempt
+// is discarded without a gate run.
+const (
+	MutationNoChange = "no-change"      // the session edited no file
+	MutationFailed   = "session-failed" // the session gave no edited files (driver.Mutate's error)
+)
+
 // Selection modes (DESIGN.md sec 11). The first run uses tournament only.
 const (
 	ModeTournament = "tournament"
@@ -83,7 +90,8 @@ type Attempt struct {
 	GenerationID  string    `json:"generation_id"`
 	ParentID      string    `json:"parent_id"` // "" for generation 0; may be an archived genome
 	Time          time.Time `json:"time"`
-	Gate          Gate      `json:"gate"`
+	Gate          Gate      `json:"gate"`                    // zero when Mutation is set: no gate ran
+	Mutation      string    `json:"mutation,omitempty"`      // MutationNoChange or MutationFailed; "" when a candidate was gated
 	GenomeSHA256  string    `json:"genome_sha256,omitempty"` // the Digest of its archived genome; required when Gate.Passed
 	Fitness       *Fitness  `json:"fitness,omitempty"`       // only a gate-passing, scored variant has one
 	Action        string    `json:"action"`
@@ -121,6 +129,17 @@ func (a Attempt) validate() error {
 		return errors.New("lineage: negative or non-finite usage")
 	}
 	g := a.Gate
+	if a.Mutation != "" {
+		switch {
+		case a.Mutation != MutationNoChange && a.Mutation != MutationFailed:
+			return fmt.Errorf("lineage: mutation %q", a.Mutation)
+		case g != Gate{}:
+			return errors.New("lineage: an attempt with no candidate has a gate result")
+		case a.Action != ActionDiscarded || a.Fitness != nil || a.EverLive || a.CurrentlyLive || a.GenomeSHA256 != "" || a.Disqualified != "":
+			return fmt.Errorf("lineage: an attempt with no candidate must be %s, with no fitness, live flag, genome or reason", ActionDiscarded)
+		}
+		return nil
+	}
 	if g.Passed {
 		switch {
 		case g.FailStage != 0 || g.FailCheck != "":

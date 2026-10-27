@@ -191,6 +191,10 @@ func BuildPrompt(all []lineage.Attempt, parentID string, p fitness.Params) (stri
 // values and numbers only; parent is its parent's fitness, if any.
 func outcome(a lineage.Attempt, parent *lineage.Fitness) string {
 	switch {
+	case a.Mutation == lineage.MutationNoChange:
+		return "edited no file; discarded without a gate run"
+	case a.Mutation != "":
+		return "the session gave no edited files; discarded"
 	case !a.Gate.Passed:
 		return fmt.Sprintf("failed the gate at stage %d (%s), check %s", a.Gate.FailStage, stageNames[a.Gate.FailStage], a.Gate.FailCheck)
 	case a.Disqualified != "":

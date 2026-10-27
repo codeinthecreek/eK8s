@@ -128,6 +128,24 @@ func TestBuildPrompt(t *testing.T) {
 		t.Error("a stress half with no stress record")
 	}
 
+	// Attempts that made no candidate (lineage.Attempt.Mutation).
+	more := append(slices.Clone(all),
+		lineage.Attempt{GenerationID: "3", ParentID: "0", Time: time.Unix(3, 0), Mutation: lineage.MutationNoChange,
+			Action: lineage.ActionDiscarded, SelectionMode: lineage.ModeTournament, Rationale: "Nothing to change."},
+		lineage.Attempt{GenerationID: "4", ParentID: "2", Time: time.Unix(4, 0), Mutation: lineage.MutationFailed,
+			Action: lineage.ActionDiscarded, SelectionMode: lineage.ModeTournament})
+	if p, err = BuildPrompt(more, "2", testParams()); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`- Generation 3 (from 0): edited no file; discarded without a gate run. Note: "Nothing to change."`,
+		`- Generation 4 (from 2): the session gave no edited files; discarded. Note: ""`,
+	} {
+		if !strings.Contains(p, want) {
+			t.Errorf("prompt lacks %q:\n%s", want, p)
+		}
+	}
+
 	g, err := BuildPrompt(all[:1], "0", testParams())
 	if err != nil {
 		t.Fatal(err)
