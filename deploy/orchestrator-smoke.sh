@@ -49,6 +49,10 @@ k get nodes >/dev/null || die "cluster unreachable (context $ctx); run deploy/up
 k get namespace "$sys" >/dev/null 2>&1 || die "namespace $sys missing; run deploy/up.sh"
 [ -z "$(k -n "$sys" get pods -l app=loadgen -o name)" ] ||
 	die "pods labelled app=loadgen exist in $sys (a running loadgen, or a failed earlier smoke?); delete them first"
+# The earlier smokes delete their namespaces with --wait=false: let those
+# finish. One that stays is a failed earlier run's, and the orchestrator
+# would refuse to start with it.
+k wait --for=delete namespace -l ek8s.io/role=variant --timeout=120s >/dev/null 2>&1 || true
 [ -z "$(k get namespaces -l ek8s.io/role=variant -o name)" ] ||
 	die "variant namespaces exist (a failed earlier run?); delete them first"
 
