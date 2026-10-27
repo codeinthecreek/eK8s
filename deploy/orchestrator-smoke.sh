@@ -17,6 +17,11 @@
 #   (d) the cluster agrees with the records: a variant namespace exists for
 #       exactly the variants recorded as currently live, and none for a
 #       culled or gate-failed one.
+# Not covered: a cull (the population cap is 3, and 4 live variants do not
+# fit the CI node), so (d) shows only that live and recorded agree. If
+# attempt 1 fails for a real reason, attempt 2 sees one earlier attempt
+# and breaks the build too, and the job fails on "no mutation passed".
+# The first CI run is also the capacity test (a Pending pod in ek8s-v*).
 # Exits non-zero on the first failed check. On exit it switches stress-ng
 # off and deletes every variant namespace and the loadgen Deployment, so
 # that a smoke run after this one finds none. Refuses to start if a
@@ -51,6 +56,8 @@ work=$(mktemp -d)
 cleanup() {
 	status=$?
 	if [ "$status" -ne 0 ]; then
+		# The run directory goes with $work: show it first.
+		cat "$work/run/attempts.jsonl" "$work/run/summary.json" 2>&1 | cut -c1-600 || true
 		k get pods -A -o wide 2>&1 | tail -n 40 || true
 		k -n "$sys" logs deploy/loadgen --tail=40 2>&1 || true
 	fi

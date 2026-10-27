@@ -12,10 +12,12 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/codeinthecreek/eK8s/fitness"
 	"github.com/codeinthecreek/eK8s/gate"
 	"github.com/codeinthecreek/eK8s/lineage"
 )
@@ -147,21 +149,24 @@ func TestMutateNoop(t *testing.T) {
 func TestFakeDryRun(t *testing.T) {
 	d := newDriver(t)
 	parent := gen0(t)
-	attempt := "\n- Generation 1 (from 0): passed the gate and scored 0.500. Note: \"x\"\n"
-	for _, c := range []struct {
-		earlier int
-		broken  bool
-	}{{0, false}, {1, true}, {2, false}} {
-		prompt := "You are the mutation operator.\nRecent attempts in this lineage:" + strings.Repeat(attempt, c.earlier)
+	half := &lineage.Half{SuccessRate: 0.9, P95LatencyMS: 500, CPUPerSuccess: 0.1}
+	scored := &lineage.Fitness{Score: 0.5, Baseline: half}
+	all := []lineage.Attempt{{GenerationID: "0", Gate: lineage.Gate{Passed: true}, Fitness: scored}}
+	for earlier := 0; earlier <= 2; earlier++ {
+		prompt, err := BuildPrompt(all, "0", fitness.DefaultParams())
+		if err != nil {
+			t.Fatal(err)
+		}
 		m, err := d.Mutate(context.Background(), parent, prompt)
 		if err != nil {
 			t.Fatal(err)
 		}
 		got := string(m.Files["tunables.go"])
-		if !slices.Equal(m.Changed, []string{"tunables.go"}) || strings.Contains(got, "dryRunBreak") != c.broken ||
-			!strings.HasSuffix(got, fmt.Sprintf("// after %d earlier attempts\n", c.earlier)) {
-			t.Errorf("%d earlier: changed %q, tunables.go ends %q", c.earlier, m.Changed, got[len(got)-80:])
+		if !slices.Equal(m.Changed, []string{"tunables.go"}) || strings.Contains(got, "dryRunBreak") != (earlier == 1) ||
+			!strings.HasSuffix(got, fmt.Sprintf("// after %d earlier attempts\n", earlier)) {
+			t.Errorf("%d earlier: changed %q, tunables.go ends %q", earlier, m.Changed, got[len(got)-80:])
 		}
+		all = append(all, lineage.Attempt{GenerationID: strconv.Itoa(earlier + 1), ParentID: "0", Mutation: lineage.MutationNoChange})
 	}
 }
 
