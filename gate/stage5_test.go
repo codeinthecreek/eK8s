@@ -133,6 +133,48 @@ func TestStage5Pass(t *testing.T) {
 	}
 }
 
+// TestStage5BurstHashes checks that a pass hands over the burst's
+// recorded hashes, in record order, and a failure none.
+func TestStage5BurstHashes(t *testing.T) {
+	core := hashcore.New()
+	var hashes []string
+	for _, pw := range []string{"first password", "second password"} {
+		h, err := core.Hash(pw)
+		must(t, err)
+		hashes = append(hashes, h)
+	}
+	withPairs := func(bad bool) func(target, run string, n int) []wire.Record {
+		return func(target, run string, n int) []wire.Record {
+			recs := cleanRecords(target, run, n)
+			for i, pw := range []string{"first password", "second password"} {
+				recs[i+3].Kind, recs[i+3].Pair = "hash", &wire.Pair{Password: pw, Hash: hashes[i]}
+			}
+			if bad {
+				recs[4].Pair.Password = "not the password"
+			}
+			return recs
+		}
+	}
+	fx := newStage5(t, []string{nodesOK, stressRunning, "", readyList, readyList}, nil)
+	fx.f.records = withPairs(false)
+	r, err := fx.run(t)
+	if err != nil || !r.Passed() {
+		t.Fatalf("Stage5 = %s, %v; want a pass", summary(r), err)
+	}
+	if fmt.Sprint(r.BurstHashes) != fmt.Sprint(hashes) {
+		t.Errorf("BurstHashes %q, want %q", r.BurstHashes, hashes)
+	}
+
+	fx = newStage5(t, []string{nodesOK, stressRunning, "", readyList, readyList}, nil)
+	fx.f.records = withPairs(true)
+	if r, err = fx.run(t); err != nil || r.Passed() {
+		t.Fatalf("Stage5 = %s, %v; want a hash-verify failure", summary(r), err)
+	}
+	if r.BurstHashes != nil {
+		t.Errorf("a failed candidate's BurstHashes %q, want none", r.BurstHashes)
+	}
+}
+
 func TestStage5CandidateFailures(t *testing.T) {
 	for _, tc := range []struct {
 		name    string

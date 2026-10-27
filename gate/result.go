@@ -18,6 +18,13 @@ type Report struct {
 	// candidate passed; Stage 5 loads it into kind. On a failure the gate
 	// removes the image, unless it existed before the run.
 	Image string
+
+	// BurstHashes are the hashes of the Stage 5 burst's recorded /hash
+	// pairs, in record order, set only when Stage 5 passed: the
+	// orchestrator seeds the variant's host salt history with them, so a
+	// window hash that replays a burst salt is confirmed on the host
+	// (orchestrator.Session.Adopt). They are the candidate's output.
+	BurstHashes []string
 }
 
 // Passed reports whether every check ran and passed.

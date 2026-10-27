@@ -107,6 +107,15 @@ func (c *Client) Expect(bootID string) {
 	c.want, c.expecting = bootID, true
 }
 
+// ExpectAny undoes Expect: any boot_id is accepted again until the next
+// Expect. The orchestrator calls it after a loadgen restart, to read the
+// new boot_id from GET /config before it expects that one.
+func (c *Client) ExpectAny() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.want, c.expecting = "", false
+}
+
 // expected returns an error matching ErrBootChanged if Expect was
 // called with another boot_id than got.
 func (c *Client) expected(got string) error {
