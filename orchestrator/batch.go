@@ -23,6 +23,15 @@ type Batch struct {
 
 type pairKey struct{ password, hash string }
 
+// key names b by its first pair's hash, which has a fresh random salt,
+// so Session can refuse a batch used twice; "" for an empty batch.
+func (b Batch) key() string {
+	if len(b.pairs) == 0 {
+		return ""
+	}
+	return b.pairs[0].Hash
+}
+
 // Len is how many pairs b holds.
 func (b Batch) Len() int { return len(b.pairs) }
 

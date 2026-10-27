@@ -38,30 +38,33 @@ func fakePHC(salt, key byte) string {
 	return "$argon2id$v=19$m=19456,t=2,p=1$" + b64([]byte(strings.Repeat(string(salt), 16))) + "$" + b64([]byte(strings.Repeat(string(key), 32)))
 }
 
-func TestDecodeRequest(t *testing.T) {
+func TestReadRequest(t *testing.T) {
 	for _, tc := range []struct {
 		body string
+		pw   string
 		ok   bool
 	}{
-		{`{"password":"p"}`, true},
-		{` {"password":"p","hash":"h"} ` + "\n", true},
-		{`{"password":"p"}`, true},
-		{`{}`, true},
-		{`{"password":"p"`, false},
-		{`{"password":"p"}x`, false},
-		{`{"password":"p"}{}`, false},
-		{`{"password":"p"}0`, false},
-		{`{"password":5}`, false},
-		{`{"password":["p"]}`, false},
-		{`{"password":null}`, false},
-		{`{"password":"p","password":"q"}`, false},
-		{`["p"]`, false},
-		{`"p"`, false},
-		{"{\"password\":\"\xff\"}", false},
-		{``, false},
+		{`{"password":"p"}`, "p", true},
+		{` {"password":"p"} ` + "\n", "p", true},
+		{`{"password":"\u0070"}`, "p", true},
+		// Read as the gen-0 wrapper reads it: unknown members ignored,
+		// the last of a repeated member wins, names matched as
+		// encoding/json matches them.
+		{`{"password":"p","hash":7}`, "p", true},
+		{`{"password":"q","password":"p"}`, "p", true},
+		{`{"PASSWORD":"p"}`, "p", true},
+		{`{}`, "", false},
+		{`{"password":null}`, "", false},
+		{`{"password":""}`, "", false},
+		{`{"password":"p"`, "", false},
+		{`{"password":"p"}x`, "", false},
+		{`{"password":"p"}{}`, "", false},
+		{`{"password":5}`, "", false},
+		{`["p"]`, "", false},
+		{``, "", false},
 	} {
-		if _, ok := decodeRequest([]byte(tc.body)); ok != tc.ok {
-			t.Errorf("decodeRequest(%q) ok = %v, want %v", tc.body, ok, tc.ok)
+		if pw, ok := hashRequest([]byte(tc.body)); pw != tc.pw || ok != tc.ok {
+			t.Errorf("hashRequest(%q) = %q, %v; want %q, %v", tc.body, pw, ok, tc.pw, tc.ok)
 		}
 	}
 }
@@ -94,7 +97,7 @@ func TestRejected(t *testing.T) {
 		{classInvalidJSON, []byte(`{"password":"pw"`), true},
 		{classInvalidJSON, []byte(`{"password":"pw"}x`), true},
 		{classInvalidJSON, []byte(`{"password":7}`), true},
-		{classInvalidJSON, mustJSON(t, map[string]any{"password": "pw", "hash": true}), true},
+		{classInvalidJSON, mustJSON(t, map[string]any{"password": 7, "hash": good}), true},
 
 		// The contract accepts these, so a 2xx to one is no failure.
 		{classMalformedHash, verify("pw", good), false},
@@ -103,6 +106,9 @@ func TestRejected(t *testing.T) {
 		{classTooLong, hash(strings.Repeat("a", 1024)), false},
 		{classInvalidJSON, verify("pw", good), false},
 		{classInvalidJSON, hash("pw"), false},
+		// verify_wrong_type_hash is read as a valid /hash request (the
+		// hash member is ignored), so it never confirms on its own.
+		{classInvalidJSON, mustJSON(t, map[string]any{"password": "pw", "hash": true}), false},
 		{"unknown_class", []byte(`{`), false},
 	} {
 		if got := rejected(core, tc.class, tc.body); got != tc.want {

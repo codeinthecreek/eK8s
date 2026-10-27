@@ -104,6 +104,9 @@ func (s *Session) RunWindow(ctx context.Context, live []string, batches []Batch)
 		return WindowResult{RunID: res.RunID, Excluded: []string{why}, Variants: map[string]VariantResult{}}, nil
 	}
 
+	for i := range live {
+		s.used[batches[i].key()] = true
+	}
 	since, err := s.cursors(ctx, live)
 	if err != nil {
 		return restart(err)
@@ -181,10 +184,12 @@ func (s *Session) RunWindow(ctx context.Context, live []string, batches []Batch)
 		}
 		res.Variants[id] = VariantResult{Records: len(recs[id]), Disqualified: v.Reason, DisqualifiedIndex: v.Index}
 	}
+	slices.Sort(why)
 	res.Excluded = why
 	if !res.Scored() {
 		return res, nil
 	}
+	scored, unmeasured := 0, 0
 	for _, id := range live {
 		vr := res.Variants[id]
 		if vr.Disqualified != classifier.ReasonNone {
@@ -203,6 +208,16 @@ func (s *Session) RunWindow(ctx context.Context, live []string, batches []Batch)
 		}
 		vr.Score = &score
 		res.Variants[id] = vr
+		scored++
+		if vr.CPUUnmeasured != "" {
+			unmeasured++
+		}
+	}
+	// Every variant at once is the counters', not the variants' doing
+	// (a metrics endpoint that drops pods); one variant alone cannot be
+	// told apart, and pays for it.
+	if scored > 1 && unmeasured == scored {
+		return WindowResult{}, fmt.Errorf("orchestrator: no variant's CPU counters were usable (%d variants)", scored)
 	}
 	return res, nil
 }
@@ -218,6 +233,7 @@ func (s *Session) checkWindow(live []string, batches []Batch) error {
 		return fmt.Errorf("orchestrator: %d batches for %d live variants", len(batches), len(live))
 	}
 	seen := make(map[string]bool, len(live))
+	keys := make(map[string]bool, len(live))
 	for i, id := range live {
 		if seen[id] {
 			return fmt.Errorf("orchestrator: variant %s is live twice", id)
@@ -229,6 +245,13 @@ func (s *Session) checkWindow(live []string, batches []Batch) error {
 		if batches[i].Len() < s.cfg.WindowPairs {
 			return fmt.Errorf("orchestrator: batch of %d pairs, want %d", batches[i].Len(), s.cfg.WindowPairs)
 		}
+		// A pair is sent once, to one variant (DESIGN.md sec 10): a batch
+		// used before, or twice now, would let a mutant memoize it.
+		k := batches[i].key()
+		if s.used[k] || keys[k] {
+			return errors.New("orchestrator: a batch is used twice")
+		}
+		keys[k] = true
 	}
 	return nil
 }
@@ -252,6 +275,9 @@ func (s *Session) cursors(ctx context.Context, live []string) (map[string]uint64
 			return nil, fmt.Errorf("orchestrator: live variant %s has no loadgen target", id)
 		}
 		since[id] = n
+		// Records before n are the gate's (its Stage 5 burst) or an
+		// earlier window's: all read, so Drop may go through n - 1.
+		s.next[id] = n
 	}
 	return since, nil
 }

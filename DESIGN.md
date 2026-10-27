@@ -970,7 +970,9 @@ kept across loadgen restarts) and then the fixed core's Verify; a
 `/verify` answer against the host's own ground truth for the pair in the
 request (a pair the host never made confirms nothing); a negative's 2xx
 only when the request bytes break the HTTP contract on every endpoint
-its class can go to. Whatever integrity reason the host finds confirms,
+its class can go to, read as leniently as the gen-0 wrapper reads them
+(unknown members ignored), so an honest wrapper is never culled for a
+request it may accept. Whatever integrity reason the host finds confirms,
 and so does any failure its full verification and salt history find in
 the recorded pairs. Claims for a variant of which the host confirms none
 are a fault (loadgen and the host disagree about the same bytes), which
@@ -1190,13 +1192,15 @@ exclusion trigger (lag, a skipped send, a loadgen fault, a ring gap, a
 policy canary that connects, or reads error). A kindnet DaemonSet that
 is not Ready, or a canary not refused, excludes the window before it
 starts. Exclusion is from scoring only: the host verifies and judges
-every window whose records it can read, so a confirmed integrity
-failure in an excluded window still culls. Probe Events (readiness
+every window whose records it reads in full (a loadgen restart loses
+them), so a confirmed integrity failure in an excluded window still
+culls. Probe Events (readiness
 failures, restarts) are diagnostics only, never a reason to exclude: a
 variant's own readiness behaviour is part of what is scored. For the
 same reason a variant's pod that vanishes or resets its CPU counter in a
 window is no exclusion: that variant scores at the CPU ceiling, with no
-CPU credit (docs/decisions.md, PR #58 window entry).
+CPU credit; every variant's counters failing at once is a fault
+(docs/decisions.md, PR #58 window entry).
 
 **Readiness probe.** `/readyz` every 2s, `timeoutSeconds` 2,
 `failureThreshold` 3. Under a 1-CPU limit with hashes in flight a 1s

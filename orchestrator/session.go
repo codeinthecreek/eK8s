@@ -79,6 +79,7 @@ type Session struct {
 
 	hist map[string]*history // by variant id: every variant Adopted and not Dropped
 	next map[string]uint64   // by variant id: the Seq after the last record read
+	used map[string]bool     // Batch.key of every batch uploaded
 
 	// restarted is set when loadgen's boot_id changed: Recover must run
 	// before the next window. pollCanary is set at start and by Recover:
@@ -95,7 +96,7 @@ func NewSession(ctx context.Context, c SessionConfig) (*Session, error) {
 	if err := c.Params.Validate(); err != nil {
 		return nil, err
 	}
-	s := &Session{c: c, t: timing{}.withDefaults(), hist: make(map[string]*history), next: make(map[string]uint64), pollCanary: true}
+	s := &Session{c: c, t: timing{}.withDefaults(), hist: make(map[string]*history), next: make(map[string]uint64), used: make(map[string]bool), pollCanary: true}
 	if err := s.readConfig(ctx); err != nil {
 		return nil, err
 	}
@@ -157,8 +158,12 @@ func (s *Session) Adopt(id string, burstHashes []string) error {
 // emptied loadgen's salt sets; the host's histories stay. The next
 // window polls the canary until it reads refused before it starts.
 func (s *Session) Recover(ctx context.Context, live []string) error {
+	old := s.cfg.BootID
 	s.c.Client.ExpectAny()
 	if err := s.readConfig(ctx); err != nil {
+		// Back to the old boot_id, so every call fails as a restart
+		// until a Recover succeeds, rather than accepting any.
+		s.c.Client.Expect(old)
 		return err
 	}
 	for _, id := range live {
@@ -181,9 +186,9 @@ func (s *Session) Recover(ctx context.Context, live []string) error {
 // Drop retires variant id from loadgen after its last records are read
 // (DESIGN.md sec 11): it DELETEs the target through the last Seq the
 // Session read, so loadgen refuses if any record is still unread, then
-// deletes the variant's namespace and forgets its history. A variant
-// the Session never read records for is refused: its records are the
-// gate's (a Stage 5 failure, whose target gate.Stage5 drops itself).
+// deletes the variant's namespace and forgets its history. A variant no
+// window has named is refused: its records are the gate's (a Stage 5
+// failure, whose target gate.Stage5 drops itself).
 func (s *Session) Drop(ctx context.Context, id string) error {
 	next, ok := s.next[id]
 	if !ok {

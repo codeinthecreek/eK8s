@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"unicode/utf8"
 
 	"github.com/codeinthecreek/eK8s/internal/classifier"
 	"github.com/codeinthecreek/eK8s/internal/hashcore"
@@ -173,6 +172,9 @@ func verifyAll(ctx context.Context, core *hashcore.Core, recs map[string][]wire.
 //     against every hash the host has read for it.
 //   - verify: the classifier on the response, with the host's own ground
 //     truth for the pair in the request.
+//
+// Requests are read leniently, as the gen-0 wrapper reads them
+// (readRequest).
 //   - negative: a 2xx to a request the HTTP contract rejects. The class
 //     only picks which endpoints the request is checked against; the
 //     request bytes must show the defect.
@@ -181,17 +183,15 @@ func confirm(core *hashcore.Core, h *history, truth map[pairKey]bool, r wire.Rec
 	o := classifier.Observation{Status: e.Status, Header: http.Header{}, Body: e.Body}
 	switch r.Kind {
 	case kindHash:
-		if !validHashRequest(e.RequestBody) {
+		pw, ok := hashRequest(e.RequestBody)
+		if !ok {
 			return classifier.ReasonNone
 		}
-		req, _ := decodeRequest(e.RequestBody)
-		o.Kind, o.Password = classifier.Hash, req["password"]
+		o.Kind, o.Password = classifier.Hash, pw
 		return classifyWithCore(core, h.run, o)
 	case kindVerify:
-		req, ok := decodeRequest(e.RequestBody)
-		pw, okPW := req["password"]
-		hash, okHash := req["hash"]
-		if !ok || !okPW || !okHash || len(req) != 2 {
+		pw, hash, ok := verifyRequest(e.RequestBody)
+		if !ok {
 			return classifier.ReasonNone
 		}
 		match, known := truth[pairKey{pw, hash}]
@@ -250,64 +250,55 @@ func integrityOnly(reason classifier.Reason) classifier.Reason {
 	return classifier.ReasonNone
 }
 
-// decodeRequest decodes body as one JSON object of string members and
-// nothing after it but white space. ok is false for anything else: not
-// an object, a member that is not a string, a repeated member, trailing
-// data, invalid UTF-8.
-func decodeRequest(body []byte) (map[string]string, bool) {
-	if !utf8.Valid(body) {
-		return nil, false
-	}
+// readRequest decodes body into v as the gen-0 wrapper does
+// (internal/wrapper decode): one JSON value with nothing after it but
+// white space, members matched as encoding/json matches them, unknown
+// members ignored. The host reads a request this leniently so that it
+// never takes for a contract negative a request an honest wrapper may
+// accept.
+func readRequest(body []byte, v any) bool {
 	dec := json.NewDecoder(bytes.NewReader(body))
-	if t, err := dec.Token(); err != nil || t != json.Delim('{') {
-		return nil, false
+	if err := dec.Decode(v); err != nil {
+		return false
 	}
-	out := make(map[string]string)
-	for dec.More() {
-		t, err := dec.Token()
-		if err != nil {
-			return nil, false
-		}
-		key := t.(string) // a key token in an object is always a string
-		// A RawMessage first: null decodes into a string with no error.
-		var raw json.RawMessage
-		var v string
-		if err := dec.Decode(&raw); err != nil || len(raw) == 0 || raw[0] != '"' || json.Unmarshal(raw, &v) != nil {
-			return nil, false
-		}
-		if _, dup := out[key]; dup {
-			return nil, false
-		}
-		out[key] = v
-	}
-	if t, err := dec.Token(); err != nil || t != json.Delim('}') {
-		return nil, false
-	}
-	if _, err := dec.Token(); err != io.EOF {
-		return nil, false
-	}
-	return out, true
+	_, err := dec.Token()
+	return err == io.EOF
 }
 
 func validPassword(pw string) bool { return pw != "" && len(pw) <= maxPasswordBytes }
 
-// validHashRequest reports whether body is a /hash request the HTTP
-// contract accepts: exactly a password member, valid.
-func validHashRequest(body []byte) bool {
-	req, ok := decodeRequest(body)
-	pw, okPW := req["password"]
-	return ok && okPW && len(req) == 1 && validPassword(pw)
+// hashRequest returns the password of a /hash request the HTTP contract
+// accepts, read as readRequest does; ok is false for any other body.
+func hashRequest(body []byte) (pw string, ok bool) {
+	var req struct {
+		Password string `json:"password"`
+	}
+	if !readRequest(body, &req) || !validPassword(req.Password) {
+		return "", false
+	}
+	return req.Password, true
+}
+
+// verifyRequest returns the password and hash of a /verify request whose
+// members are valid, read as readRequest does, whatever the fixed core
+// makes of the hash; ok is false for any other body.
+func verifyRequest(body []byte) (pw, hash string, ok bool) {
+	var req struct {
+		Password string `json:"password"`
+		Hash     string `json:"hash"`
+	}
+	if !readRequest(body, &req) || !validPassword(req.Password) || req.Hash == "" {
+		return "", "", false
+	}
+	return req.Password, req.Hash, true
 }
 
 // validVerifyRequest reports whether body is a /verify request the HTTP
-// contract accepts: exactly a valid password and a hash the fixed core
-// takes (no Argon2 runs when it does not: Verify checks the parameters
-// first).
+// contract accepts: valid members and a hash the fixed core takes (no
+// Argon2 runs when it does not: Verify checks the parameters first).
 func validVerifyRequest(core *hashcore.Core, body []byte) bool {
-	req, ok := decodeRequest(body)
-	pw, okPW := req["password"]
-	hash, okHash := req["hash"]
-	if !ok || !okPW || !okHash || len(req) != 2 || !validPassword(pw) {
+	pw, hash, ok := verifyRequest(body)
+	if !ok {
 		return false
 	}
 	_, err := core.Verify(pw, hash)
@@ -324,7 +315,8 @@ func rejected(core *hashcore.Core, class string, body []byte) bool {
 	case classMalformedHash, classNonExactParams:
 		return !validVerifyRequest(core, body)
 	case classEmptyPassword, classTooLong, classInvalidJSON:
-		return !validHashRequest(body) && !validVerifyRequest(core, body)
+		_, okHash := hashRequest(body)
+		return !okHash && !validVerifyRequest(core, body)
 	}
 	return false
 }

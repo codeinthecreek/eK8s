@@ -5,6 +5,8 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -207,6 +209,48 @@ type fixture struct {
 	s       *Session
 	cl      *client.Client
 	live    []string
+	srvURL  string
+	rec     *recorder
+}
+
+// recorder is an http.RoundTripper that records each request's method,
+// path and query, and calls hook, if set, after each response.
+type recorder struct {
+	rt   http.RoundTripper
+	mu   sync.Mutex
+	reqs []string
+	hook func(req *http.Request)
+}
+
+func (r *recorder) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := r.rt.RoundTrip(req)
+	r.mu.Lock()
+	r.reqs = append(r.reqs, req.Method+" "+req.URL.RequestURI())
+	hook := r.hook
+	r.mu.Unlock()
+	if hook != nil {
+		hook(req)
+	}
+	return resp, err
+}
+
+// sent returns the recorded requests that start with prefix.
+func (r *recorder) sent(prefix string) []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []string
+	for _, q := range r.reqs {
+		if strings.HasPrefix(q, prefix) {
+			out = append(out, q)
+		}
+	}
+	return out
+}
+
+func (r *recorder) setHook(f func(req *http.Request)) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.hook = f
 }
 
 func newFixture(t *testing.T, variants map[string]http.Handler, live ...string) *fixture {
@@ -220,7 +264,8 @@ func newFixture(t *testing.T, variants map[string]http.Handler, live ...string) 
 	fx.restartLoadgen()
 	srv := httptest.NewServer(fx.lg)
 	t.Cleanup(srv.Close)
-	fx.cl = client.New(srv.URL, srv.Client())
+	fx.srvURL, fx.rec = srv.URL, &recorder{rt: srv.Client().Transport}
+	fx.cl = client.New(srv.URL, &http.Client{Transport: fx.rec})
 	for _, id := range live {
 		if _, _, err := fx.cl.PutTarget(t.Context(), id); err != nil {
 			t.Fatal(err)
@@ -272,15 +317,21 @@ func refusingAddr(t *testing.T) string {
 
 func (fx *fixture) window() WindowResult {
 	fx.t.Helper()
-	bs, err := GenerateBatches(fx.t.Context(), hashcore.New(), len(fx.live)+1, fx.s.Config().WindowPairs, 0)
-	if err != nil {
-		fx.t.Fatal(err)
-	}
-	res, err := fx.s.RunWindow(fx.t.Context(), fx.live, bs)
+	res, err := fx.s.RunWindow(fx.t.Context(), fx.live, fx.batches())
 	if err != nil {
 		fx.t.Fatalf("RunWindow: %v", err)
 	}
 	return res
+}
+
+// batches makes one batch per live variant plus a spare.
+func (fx *fixture) batches() []Batch {
+	fx.t.Helper()
+	bs, err := GenerateBatches(fx.t.Context(), hashcore.New(), len(fx.live)+1, fx.s.Config().WindowPairs, 0)
+	if err != nil {
+		fx.t.Fatal(err)
+	}
+	return bs
 }
 
 func TestWindowScored(t *testing.T) {
@@ -307,14 +358,28 @@ func TestWindowScored(t *testing.T) {
 	if res2 := fx.window(); !res2.Scored() || res2.Variants["1"].Records != 20 {
 		t.Errorf("second window: %+v", res2)
 	}
-	// The DELETE handshake: every record was read, so loadgen lets go.
+	// The DELETE handshake: every record was read, so loadgen lets go,
+	// and Drop names the last of them, not some larger through.
+	ts, err := fx.cl.Targets(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var last uint64
+	for _, tg := range ts.Targets {
+		if tg.ID == "2" {
+			last = tg.Next - 1
+		}
+	}
 	if err := fx.s.Drop(t.Context(), "2"); err != nil {
 		t.Fatalf("Drop: %v", err)
+	}
+	if got := fx.rec.sent("DELETE "); len(got) != 1 || got[0] != fmt.Sprintf("DELETE /targets/2?through=%d", last) {
+		t.Errorf("DELETE requests %q, want one through=%d", got, last)
 	}
 	if strings.Join(fx.cluster.deleted, ",") != "ek8s-v2" {
 		t.Errorf("deleted namespaces %v, want ek8s-v2", fx.cluster.deleted)
 	}
-	ts, err := fx.cl.Targets(t.Context())
+	ts, err = fx.cl.Targets(t.Context())
 	if err != nil || len(ts.Targets) != 1 || ts.Targets[0].ID != "1" {
 		t.Errorf("targets after Drop: %+v, %v", ts, err)
 	}
@@ -455,7 +520,8 @@ func TestWindowRestart(t *testing.T) {
 
 func TestNewSessionShape(t *testing.T) {
 	fx := newFixture(t, map[string]http.Handler{"1": gen0(hashcore.New())}, "1")
-	for _, want := range []Shape{{11, 2, 4}, {10, 300, 4}, {10, 2, 40}} {
+	// The shape is compared exactly: the smallest differences count.
+	for _, want := range []Shape{{11, 2, 4}, {10, 300, 4}, {10, 2, 40}, {10.000000001, 2, 4}, {10, 1.999999999, 4}, {10, 2, 4.000000001}} {
 		_, err := NewSession(t.Context(), SessionConfig{
 			Client: fx.cl, Cluster: fx.cluster, Core: hashcore.New(), Want: want, Params: fitness.DefaultParams(),
 		})
@@ -475,5 +541,151 @@ func TestStreak(t *testing.T) {
 		if got := s.Add(tc.w); got != tc.halt {
 			t.Errorf("window %d: halt %v, want %v", i, got, tc.halt)
 		}
+	}
+}
+
+// TestWindowUnconfirmed checks that integrity claims the host cannot
+// confirm are a fault, never a score: here the host has lost the ground
+// truth of the pairs the cheat answers wrongly.
+func TestWindowUnconfirmed(t *testing.T) {
+	core := hashcore.New()
+	fx := newFixture(t, map[string]http.Handler{"9": noShed(invertHasher{core})}, "9")
+	bs := fx.batches()
+	bs[0].truth = map[pairKey]bool{}
+	_, err := fx.s.RunWindow(t.Context(), fx.live, bs)
+	if !errors.Is(err, errUnconfirmed) {
+		t.Errorf("RunWindow = %v, want errUnconfirmed", err)
+	}
+}
+
+// TestWindowCanaryPoll checks that after a new boot_id the canary is
+// polled until it reads refused: it connects at first, then the
+// listener closes.
+func TestWindowCanaryPoll(t *testing.T) {
+	core := hashcore.New()
+	fx := newFixture(t, map[string]http.Handler{"1": gen0(core)}, "1")
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fx.cfg.CanaryAddr = l.Addr().String()
+	fx.restartLoadgen()
+	if res := fx.window(); strings.Join(res.Excluded, ",") != ExcludedRestart {
+		t.Fatalf("after a restart: %+v", res)
+	}
+	if err := fx.s.Recover(t.Context(), fx.live); err != nil {
+		t.Fatalf("Recover: %v", err)
+	}
+	fx.s.t.canaryBound = 20 * time.Second
+	fx.rec.setHook(func(req *http.Request) {
+		if req.URL.Path == "/canary" && len(fx.rec.sent("POST /canary")) == 3 {
+			l.Close()
+		}
+	})
+	res := fx.window()
+	if !res.Scored() {
+		t.Errorf("window after the canary turned refused: excluded %v", res.Excluded)
+	}
+	if n := len(fx.rec.sent("POST /canary")); n < 4 {
+		t.Errorf("%d canary calls, want at least 4 (3 connected, then refused)", n)
+	}
+}
+
+// TestWindowAbandon checks the run's bound and a cancelled context: both
+// cancel the run in loadgen and drain it, and are faults.
+func TestWindowAbandon(t *testing.T) {
+	core := hashcore.New()
+	t.Run("bound", func(t *testing.T) {
+		fx := newFixture(t, map[string]http.Handler{"1": gen0(core)}, "1")
+		fx.s.cfg.WindowS = 0
+		fx.s.t.clientTimeout, fx.s.t.runSlack = time.Nanosecond, time.Nanosecond
+		if _, err := fx.s.RunWindow(t.Context(), fx.live, fx.batches()); err == nil || !strings.Contains(err.Error(), "past its bound") {
+			t.Errorf("RunWindow = %v, want the bound's fault", err)
+		}
+		checkCancelled(t, fx)
+	})
+	t.Run("ctx", func(t *testing.T) {
+		fx := newFixture(t, map[string]http.Handler{"1": gen0(core)}, "1")
+		ctx, cancel := context.WithCancel(t.Context())
+		fx.rec.setHook(func(req *http.Request) {
+			if strings.HasSuffix(req.URL.Path, "/start") {
+				cancel()
+			}
+		})
+		if _, err := fx.s.RunWindow(ctx, fx.live, fx.batches()); !errors.Is(err, context.Canceled) {
+			t.Errorf("RunWindow = %v, want context.Canceled", err)
+		}
+		checkCancelled(t, fx)
+	})
+}
+
+// checkCancelled checks the window run was cancelled and has drained:
+// no target is running.
+func checkCancelled(t *testing.T, fx *fixture) {
+	t.Helper()
+	cancels := fx.rec.sent("POST /runs/")
+	var runID string
+	for _, c := range cancels {
+		if strings.HasSuffix(c, "/cancel") {
+			runID = strings.TrimSuffix(strings.TrimPrefix(c, "POST /runs/"), "/cancel")
+		}
+	}
+	if runID == "" {
+		t.Fatalf("no cancel sent: %q", cancels)
+	}
+	run, err := fx.cl.Run(t.Context(), runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st := run.Targets["1"].State; st != "cancelled" && st != "done" {
+		t.Errorf("run %s target 1 is %q after the drain", runID, st)
+	}
+}
+
+// TestWindowRunNotDone checks a run cancelled from outside is excluded,
+// and its records are still judged.
+func TestWindowRunNotDone(t *testing.T) {
+	core := hashcore.New()
+	fx := newFixture(t, map[string]http.Handler{"1": gen0(core), "2": noShed(fakeHasher{core})}, "1", "2")
+	other := client.New(fx.srvURL, http.DefaultClient)
+	fx.rec.setHook(func(req *http.Request) {
+		if strings.HasSuffix(req.URL.Path, "/start") {
+			runID := strings.TrimSuffix(strings.TrimPrefix(req.URL.Path, "/runs/"), "/start")
+			go func() {
+				time.Sleep(1200 * time.Millisecond)
+				other.Cancel(context.Background(), runID)
+			}()
+		}
+	})
+	res := fx.window()
+	if strings.Join(res.Excluded, ",") != ExcludedRunEnded {
+		t.Fatalf("excluded %v, want run-not-done", res.Excluded)
+	}
+	if v := res.Variants["2"]; v.Disqualified != classifier.ReasonVerifyMismatch {
+		t.Errorf("cheat in a cancelled run: %+v, want verify_mismatch", v)
+	}
+	if v := res.Variants["1"]; v.Records == 0 || v.Records >= 20 || v.Score != nil {
+		t.Errorf("honest variant: %+v; want some records, not all, no score", v)
+	}
+}
+
+// TestWindowGuards checks a batch is never used twice and that every
+// variant's CPU unmeasured at once is a fault.
+func TestWindowGuards(t *testing.T) {
+	core := hashcore.New()
+	fx := newFixture(t, map[string]http.Handler{"1": gen0(core), "2": gen0(core)}, "1", "2")
+	bs := fx.batches()
+	if _, err := fx.s.RunWindow(t.Context(), fx.live, []Batch{bs[0], bs[0]}); err == nil || !strings.Contains(err.Error(), "used twice") {
+		t.Errorf("one batch for two variants: %v", err)
+	}
+	if _, err := fx.s.RunWindow(t.Context(), fx.live, bs); err != nil {
+		t.Fatalf("RunWindow: %v", err)
+	}
+	if _, err := fx.s.RunWindow(t.Context(), fx.live, bs); err == nil || !strings.Contains(err.Error(), "used twice") {
+		t.Errorf("batches used again: %v", err)
+	}
+	fx.cluster.gone = map[string]bool{"1": true, "2": true}
+	if _, err := fx.s.RunWindow(t.Context(), fx.live, fx.batches()); err == nil || !strings.Contains(err.Error(), "CPU counters") {
+		t.Errorf("every variant's CPU unmeasured: %v", err)
 	}
 }
