@@ -625,23 +625,44 @@ max. Earlier entries are not backfilled.
 - Reverse: edit fitness/; restoring the stress half needs only a second Score and Combine's stress argument.
 - Origin: Code
 
-## 2026-10-26 · PR #57 (inferred) · Driver invocation: acceptEdits, stream-json with an init check, "--" before the prompt
+## 2026-10-26 · PR #57 · Driver invocation: acceptEdits, stream-json with an init check, "--" before the prompt
 - Decision: driver/ runs `claude -p --tools "Read,Edit" --restricted --model claude-sonnet-5-5 --permission-mode acceptEdits --permission-prompts none --max-turns 30 --strict-mcp-config --no-session-persistence --output-format stream-json --verbose -- <prompt>`, 15 min wall clock. It kills the session as soon as its first event is not an init with tools exactly Edit and Read, no MCP server, the pinned model, acceptEdits, cwd /sandbox/work and the pinned version; the result must be the last event, success, on the pinned model (modelUsage). Copy-back reads only the parent's names, as regular files (O_NOFOLLOW); extras are counted, never read. Usage is returned with every error that got as far as a result.
 - Rejected: DESIGN.md's argv as written (default mode with prompts none denies every Edit; json output shows the tool set only after the session ran); a prompt that could parse as a flag; trusting the flags without reading what the session reports.
 - Reason: verified on Claude Code 2.1.310 in the sandbox: the init event lists the real tool set before any API call, and `--` ends option parsing. DESIGN.md sec 12 updated (overview.md stale line extended).
 - Reverse: edit driver/sandbox.go claudeArgs and driver/stream.go. A session killed before its result event has no usage to count, so the usage ceiling undercounts such timeouts.
 - Origin: Code
 
-## 2026-10-26 · PR #57 (inferred) · Driver sandbox: fixed in-sandbox paths, token through --args, process-group kill, version pin by config
+## 2026-10-26 · PR #57 · Driver sandbox: fixed in-sandbox paths, token through --args, process-group kill, version pin by config
 - Decision: bwrap gets `--unshare-all --unshare-user --share-net --disable-userns --die-with-parent --new-session --cap-drop ALL --clearenv`, binds work and home at /sandbox/{work,home}, the resolved binary at /sandbox/bin/claude, lib dirs (host symlinks recreated), certs and resolver files, /proc, --dev, a 256 MiB tmpfs /tmp; options go through `--args 3` on a pipe so the token is in no command line. bwrap runs in its own process group, SIGKILLed on timeout or cancel; --die-with-parent (also bwrap's own death signal if the driver dies) and the pid namespace take the rest. Certificates are bound by directory, never /etc/ssl or /etc/pki whole (private keys). Config carries the expected version; New checks `--version` in the sandbox, and each call refuses a binary whose file changed.
 - Rejected: --unshare-user-try (falls back silently); the token in argv (/proc/*/cmdline); binding /usr or /etc whole; a hard-coded version (the owner's installer moves on).
 - Reason: bound the tree to what claude needs (tested: a walk of the sandbox finds no module path, hashcore, test vectors, go.mod or .git); no Pdeathsig of our own (gate/internal/relay's reason: it can fire when the forking OS thread exits; --die-with-parent carries the same caveat, harmless while no goroutine locks and exits a thread).
 - Reverse: edit driver/sandbox.go sandboxOptions and runSandboxed.
 - Origin: Code
 
-## 2026-10-26 · PR #57 (inferred) · Prompt builder: lineage records only; the lineage is the attempts made from the parent's ancestors
+## 2026-10-26 · PR #57 · Prompt builder: lineage records only; the lineage is the attempts made from the parent's ancestors
 - Decision: BuildPrompt(all attempts, parent id, fitness.Params) states the rules (non-negotiable line, pinned hasher.go, edit-only, fixed signatures, gate Stage 1's import list, hang timeout), the parent's components per half with normalized scores (fitness.Params.Normalize, shared with Score) and the weakest by weighted shortfall, and the last 3 attempts whose parent is the parent or an ancestor, each with outcome from ids, enums and numbers and its rationale cut to 600 bytes, one line, quotes and control characters removed, framed as data. Normal mode only (escalation deferred, PR #52).
 - Rejected: last 3 attempts of the run (other lines); the parent's descendants only (gen 0 has none); importing gate for the import list (gate's build holds hashcore and the pool; the driver's must not, TestDeps), so the list is copied and a test compares it with gate.AllowedImports.
 - Reason: DESIGN.md sec 12 per-call context; no input type carries gate Detail or candidate output.
 - Reverse: edit driver/prompt.go.
+- Origin: Code
+
+## 2026-10-26 · PR #58 (inferred) · Owner answers to the PR #57 driver questions: all four yes
+- Decision: the four PR #57 questions are approved as built: the extra flags (acceptEdits, --strict-mcp-config, --no-session-persistence, "--"); stream-json with the init check; the bwrap hardening beyond DESIGN.md sec 12; the claude version pinned by config. The three PR #57 entries above stand.
+- Rejected: none proposed by the owner.
+- Reason: owner's call (session prompt, "I accept all the recommendations in PR #57"); no PR comment.
+- Reverse: re-ask the owner.
+- Origin: owner
+
+## 2026-10-27 · PR #58 (inferred) · Orchestrator window mechanics: one Session per loadgen, run-wide exclusions, CPU fail-closed per variant
+- Decision: orchestrator.Session checks GET /config's r, window_s and burst_rate exactly and expects its boot_id. RunWindow uploads one host Batch per live variant (batches name no target, so the gap makes live + 1 before the gate), stops stress and waits until its pods are gone, excludes without starting on a kindnet DaemonSet not Ready or a canary not refused (polled up to 30 s after a new boot_id), samples the kubelet's CPU counters around the run, polls it, reads every record, and excludes run-wide for a run not done, a ring gap, a skipped or faulted send, lag p99 over 10 ms or any lag over 100 ms. A restart is an exclusion; Recover re-PUTs the live targets. Drop DELETEs through the last Seq read, then the namespace. A variant whose pod vanished or whose counter reset scores at the CPU ceiling; every variant's at once (more than one) is a fault. A batch is refused if used before. Excluded is sorted. Streak halts after 3 excluded windows. First run: a window is one baseline half, every hash verified every window (PR #52 S4, S9).
+- Rejected: excluding the window for a variant's own CPU failure (a variant could stall the run at will); running a window already excluded by its canary (5 min of load for nothing); batches bound to ids before the gate (a newcomer would have none); every kubectl or loadgen error as an exclusion (the first run halts on faults, S10).
+- Reason: DESIGN.md sec 10, sec 11; every Session error is a harness fault, never a variant's.
+- Reverse: edit orchestrator/session.go and window.go; DESIGN.md sec 11 "Stress state" and "Excluded windows" edits (overview.md stale line extended).
+- Origin: Code
+
+## 2026-10-27 · PR #58 (inferred) · Host confirmation of integrity claims: the shared classifier on the evidence, a host salt history, unconfirmed claims a fault
+- Decision: the host re-checks each claim's evidence with internal/classifier: a /hash answer on the variant's host salt history (a classifier.Run with no Verifier fed every recorded pair hash: the Stage 5 burst's via gate.Report.BurstHashes, then each window's, never emptied on a loadgen restart), then hashcore Verify; a /verify answer against the host's own batch truth; a negative's 2xx only if its request bytes break the contract on the endpoint they went to, read as gen-0 reads them (encoding/json, unknown members ignored); for that, evidence carries the request path (wire.Evidence.path, a wire format addition). Pairs that fail full verification or repeat a salt are confirmed by construction. Any host-found integrity reason confirms, excluded window or not; claims of which none confirm are a fault. loadgen/client gains ExpectAny, so Recover can read a new boot_id.
+- Rejected: taking loadgen's reason (DESIGN.md sec 9 asks for the host); host checks written apart from the classifier (two implementations could drift); culling on an unconfirmed claim (a loadgen bug would cull an honest variant); a strict reading of requests (an honest wrapper that ignores unknown members could be culled); checking a negative on every endpoint its class allows, without the path (verify_wrong_type_hash reads as a valid /hash body, so a mutant failing open on it would leave only unconfirmed claims and could halt the run at will); dropping unconfirmed claims silently (a disagreement nobody sees).
+- Reason: settles DESIGN.md sec 10 "Evidence" (PR #41 entry: "settled in the orchestrator design"); a salt first seen in the burst needs the burst's hashes on the host.
+- Reverse: edit orchestrator/integrity.go; DESIGN.md sec 10 "Evidence".
 - Origin: Code

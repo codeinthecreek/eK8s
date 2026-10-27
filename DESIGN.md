@@ -958,12 +958,25 @@ times, and computes every per-half statistic (lag p99, `success_rate`,
 the orchestrator read one clock: the kind node is a container on the host.
 
 **Evidence.** A record whose reason is an integrity reason (section 9)
-carries the request body, the response status and the response body (at
-most `MaxBodyBytes`+1 bytes), for the first 8 such records per target per
-window or burst; later ones carry the verdict only, so a variant that
-fails every request cannot fill loadgen's memory. Section 9 requires the
-host to confirm an integrity failure before it culls; what the host
-checks per reason is settled with the orchestrator design.
+carries the request path and body, the response status and the response
+body (at most `MaxBodyBytes`+1 bytes), for the first 8 such records
+per target per window or burst; later ones carry the verdict only, so a
+variant that fails every request cannot fill loadgen's memory. Section 9 requires the
+host to confirm an integrity failure before it culls. The host re-checks
+each claim from its evidence with the shared classifier, never taking
+loadgen's reason: a `/hash` answer against the variant's host salt
+history (every recorded hash of its Stage 5 burst and of its windows,
+kept across loadgen restarts) and then the fixed core's Verify; a
+`/verify` answer against the host's own ground truth for the pair in the
+request (a pair the host never made confirms nothing); a negative's 2xx
+only when the request bytes break the HTTP contract on the endpoint they
+were sent to, read as leniently as the gen-0 wrapper reads them (unknown
+members ignored), so an honest wrapper is never culled for a request it
+may accept. Whatever integrity reason the host finds confirms,
+and so does any failure its full verification and salt history find in
+the recorded pairs. Claims for a variant of which the host confirms none
+are a fault (loadgen and the host disagree about the same bytes), which
+halts the first run (docs/decisions.md, PR #58 host-confirmation entry).
 
 **Runs in the cluster**, as one long-lived Deployment in namespace
 `ek8s-system` serving every variant's stream and every Stage 5 burst.
@@ -1163,8 +1176,9 @@ host's reasons.
 Deployment on for each stress half and off for each baseline half, and on
 in a gap before calling gate Stage 5 (section 7). A stress half starts
 once the stress-ng pods are Running; a window, and so its baseline half,
-starts only once the stress-ng pods are gone. Details are settled with
-the orchestrator design.
+starts only once the stress-ng pods are gone. In the first run a window
+is one baseline half, so stress is on only for gate Stage 5, in a gap
+(docs/decisions.md, PR #52 S4 and the PR #58 window entry).
 
 **Gate faults.** A gate fault (a NotReady node, a refused admission, a
 cluster step that hung, loadgen misbehaving) says nothing about a
@@ -1175,9 +1189,18 @@ run on a second fault; the first run halts at the first one
 **Excluded windows.** The orchestrator marks a window excluded from
 scoring for a loadgen restart during it (section 10) or a loadgen
 exclusion trigger (lag, a skipped send, a loadgen fault, a ring gap, a
-policy canary that connects). Probe Events (readiness failures,
-restarts) are diagnostics only, never a reason to exclude: a variant's
-own readiness behaviour is part of what is scored.
+policy canary that connects, or reads error). A kindnet DaemonSet that
+is not Ready, or a canary not refused, excludes the window before it
+starts. Exclusion is from scoring only: the host verifies and judges
+every window whose records it reads in full (a loadgen restart loses
+them), so a confirmed integrity failure in an excluded window still
+culls. Probe Events (readiness
+failures, restarts) are diagnostics only, never a reason to exclude: a
+variant's own readiness behaviour is part of what is scored. For the
+same reason a variant's pod that vanishes or resets its CPU counter in a
+window is no exclusion: that variant scores at the CPU ceiling, with no
+CPU credit; every variant's counters failing at once is a fault
+(docs/decisions.md, PR #58 window entry).
 
 **Readiness probe.** `/readyz` every 2s, `timeoutSeconds` 2,
 `failureThreshold` 3. Under a 1-CPU limit with hashes in flight a 1s

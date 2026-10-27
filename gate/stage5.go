@@ -91,7 +91,8 @@ var openControl = func(ctx context.Context, kubeCtx string) (*client.Client, fun
 // (docs/decisions.md, the PR #52 S10 answer).
 //
 // Stage5 leaves what it made: on a pass the namespace, its pod and the
-// loadgen target are the variant's from now on (DESIGN.md sec 11). On a
+// loadgen target are the variant's from now on (DESIGN.md sec 11), and
+// r.BurstHashes holds the burst's recorded hashes. On a
 // candidate failure it has already DELETEd the loadgen target, after
 // reading the records; deleting the namespace is the caller's.
 func Stage5(ctx context.Context, cfg Stage5Config, r *Report) error {
@@ -177,6 +178,11 @@ func Stage5(ctx context.Context, cfg Stage5Config, r *Report) error {
 	}
 	if !ok {
 		return dropTarget(ctx, cl, cfg.ID, res.Through)
+	}
+	for _, rec := range res.Records {
+		if rec.Pair != nil {
+			r.BurstHashes = append(r.BurstHashes, rec.Pair.Hash)
+		}
 	}
 	return nil
 }

@@ -57,6 +57,7 @@ type e2eRecord struct {
 	Fault    string   `json:"fault"`
 	Pair     *e2ePair `json:"pair"`
 	Evidence *struct {
+		Path        string `json:"path"`
 		RequestBody []byte `json:"request_body"`
 		Status      int    `json:"status"`
 		Body        []byte `json:"body"`
@@ -433,9 +434,9 @@ func TestE2ESaltReused(t *testing.T) {
 			continue
 		}
 		evidence++
-		if r.Reason != "salt_reused" || r.Evidence.Status != http.StatusOK || !strings.Contains(string(r.Evidence.Body), replayed) {
-			t.Errorf("record %d: reason %s, evidence status %d body %q; want salt_reused, 200 and the replayed hash",
-				r.Seq, r.Reason, r.Evidence.Status, r.Evidence.Body)
+		if r.Reason != "salt_reused" || r.Evidence.Path != "/hash" || r.Evidence.Status != http.StatusOK || !strings.Contains(string(r.Evidence.Body), replayed) {
+			t.Errorf("record %d: reason %s, evidence path %q status %d body %q; want salt_reused, /hash, 200 and the replayed hash",
+				r.Seq, r.Reason, r.Evidence.Path, r.Evidence.Status, r.Evidence.Body)
 		}
 	}
 	if hashes < 10 {

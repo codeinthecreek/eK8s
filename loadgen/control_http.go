@@ -91,7 +91,7 @@ func toWireRecord(r Record) wire.Record {
 		w.Pair = &wire.Pair{Password: r.Pair.Password, Hash: r.Pair.Hash}
 	}
 	if r.Evidence != nil {
-		w.Evidence = &wire.Evidence{RequestBody: r.Evidence.RequestBody, Status: r.Evidence.Status, Body: r.Evidence.Body}
+		w.Evidence = &wire.Evidence{Path: r.Evidence.Path, RequestBody: r.Evidence.RequestBody, Status: r.Evidence.Status, Body: r.Evidence.Body}
 	}
 	return w
 }

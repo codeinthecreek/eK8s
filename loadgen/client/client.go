@@ -39,7 +39,7 @@ import (
 // at classifier.MaxBodyBytes+1 (4 KiB + 1), and the request body it
 // sent, which it keeps inside cmd/service's 4 KiB body limit
 // (maxTooLongLen, loadgen/negative.go). recordRest covers the rest of a
-// record: names, numbers, times, ids, a /hash pair (a password of at
+// record: names, numbers, times, ids, the evidence path, a /hash pair (a password of at
 // most 1024 bytes and a 97-byte hash at the fixed parameters) and a
 // fault's text. pageSlack covers the page's own fields. loadgen's
 // TestClientRecordsCap checks that a maximal page fits.
@@ -105,6 +105,15 @@ func (c *Client) Expect(bootID string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.want, c.expecting = bootID, true
+}
+
+// ExpectAny undoes Expect: any boot_id is accepted again until the next
+// Expect. The orchestrator calls it after a loadgen restart, to read the
+// new boot_id from GET /config before it expects that one.
+func (c *Client) ExpectAny() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.want, c.expecting = "", false
 }
 
 // expected returns an error matching ErrBootChanged if Expect was

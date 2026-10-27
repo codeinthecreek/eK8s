@@ -134,7 +134,7 @@ func (s *Sender) sendRecord(t Target, req Request, rec Record, evidence *atomic.
 	}
 	rec.Verdict, rec.Pair = v, pair
 	if classifier.Integrity(v.Reason) && evidence.Add(1) <= maxEvidence {
-		rec.Evidence = &Evidence{RequestBody: req.Body, Status: resp.Status, Body: resp.Body}
+		rec.Evidence = &Evidence{Path: req.Path, RequestBody: req.Body, Status: resp.Status, Body: resp.Body}
 	}
 	t.Ring.Add(rec)
 }

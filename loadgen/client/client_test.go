@@ -358,7 +358,8 @@ func TestFakeResponses(t *testing.T) {
 
 // TestExpect checks Expect against fake servers: a boot_id other than
 // the expected one is ErrBootChanged on success and error statuses
-// alike, and on an error status it also carries the APIError.
+// alike, and on an error status it also carries the APIError; after
+// ExpectAny any boot_id is accepted again.
 func TestExpect(t *testing.T) {
 	const json = "application/json"
 	ok := fakeResponse{200, headers(json, "B"), `{"boot_id":"B","result":"refused"}`}
@@ -376,6 +377,11 @@ func TestExpect(t *testing.T) {
 	c.Expect("")
 	if _, err := c.Canary(t.Context()); !errors.Is(err, client.ErrBootChanged) {
 		t.Errorf("Canary after Expect(\"\"): %v, want ErrBootChanged", err)
+	}
+
+	c.ExpectAny()
+	if _, err := c.Canary(t.Context()); err != nil {
+		t.Errorf("Canary after ExpectAny: %v", err)
 	}
 
 	c = fake(t, notFound)

@@ -261,7 +261,7 @@ func TestRecordGolden(t *testing.T) {
 		IntendedWall: wall, IntendedMono: 1500 * time.Millisecond, ActualMono: 1501 * time.Millisecond, Latency: 250 * time.Millisecond,
 		Verdict:  Verdict{classifier.Failed, classifier.ReasonMalformedBody},
 		Pair:     &HashPair{Password: "PW", Hash: "$argon2id$v=19$m=19456,t=2,p=1$c2FsdA$a2V5"},
-		Evidence: &Evidence{RequestBody: []byte(`{"password":"PW"}`), Status: 200, Body: []byte("x\x00")},
+		Evidence: &Evidence{Path: HashPath, RequestBody: []byte(`{"password":"PW"}`), Status: 200, Body: []byte("x\x00")},
 	})
 	ring.Add(Record{
 		Target: "4", RunID: "w1", Index: 8, Kind: KindNegative, Class: InvalidJSON,
@@ -282,7 +282,7 @@ func TestRecordGolden(t *testing.T) {
 		`{"seq":0,"target":"4","run_id":"w1","index":7,"kind":"hash","intended_wall":"2026-10-18T02:04:05.123456789Z",` +
 		`"intended_mono_ns":1500000000,"actual_mono_ns":1501000000,"latency_ns":250000000,"bucket":"failed","reason":"malformed_body",` +
 		`"skipped":false,"fault":"","pair":{"password":"PW","hash":"$argon2id$v=19$m=19456,t=2,p=1$c2FsdA$a2V5"},` +
-		`"evidence":{"request_body":"eyJwYXNzd29yZCI6IlBXIn0=","status":200,"body":"eAA="}},` +
+		`"evidence":{"path":"/hash","request_body":"eyJwYXNzd29yZCI6IlBXIn0=","status":200,"body":"eAA="}},` +
 		`{"seq":1,"target":"4","run_id":"w1","index":8,"kind":"negative","class":"invalid_json","intended_wall":"2026-10-18T02:04:06.123456789Z",` +
 		`"intended_mono_ns":2500000000,"actual_mono_ns":2500000000,"latency_ns":1000000,"bucket":"success",` +
 		`"skipped":false,"fault":""},` +

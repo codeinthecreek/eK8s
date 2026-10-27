@@ -10,6 +10,7 @@ import (
 // Evidence is what an integrity-reason record carries for the host to
 // confirm the failure (DESIGN.md sec 9, 10).
 type Evidence struct {
+	Path        string // the request path, HashPath or VerifyPath
 	RequestBody []byte // the request body as sent
 	Status      int    // the response status
 	Body        []byte // the response body, at most classifier.MaxBodyBytes+1 bytes
