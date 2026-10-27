@@ -666,3 +666,17 @@ max. Earlier entries are not backfilled.
 - Reason: settles DESIGN.md sec 10 "Evidence" (PR #41 entry: "settled in the orchestrator design"); a salt first seen in the burst needs the burst's hashes on the host.
 - Reverse: edit orchestrator/integrity.go; DESIGN.md sec 10 "Evidence".
 - Origin: Code
+
+## 2026-10-27 · PR #59 (inferred) · Orchestrator loop: windows only after a promotion, until scored; a loadgen restart halts
+- Decision: orchestrator.Loop gates and scores generation 0 alone, then per generation: tournament (k = 2, distinct, ties to the first drawn) over passed, undisqualified, scored genomes; driver.Mutate while Session.Batches makes live + 1 batches, the gate only after; StressOn, Stage 5, Adopt; then probation windows (fresh batches each) until one is scored or the newcomer is culled; integrity culls every window, scored or not; the lowest score culled back to 3, a tie culling the newer. Recorded fitness is the latest scored window's. No candidate (a driver error or no edit): recorded, no gate, no window, batches cancelled. Halts: S10 loadgen restart (Session.Recover unused in the first run, superseding the STATUS Next wording), gate fault, 3 excluded windows, no parent; stops: N generations, a num_turns or token ceiling (all four token kinds).
+- Rejected: Recover after a restart (owner's S10 says halt); a window after every generation (5 min with nothing to cull); culling on an excluded window's scores, or leaving 4 live past it; the mean over windows as fitness (mixes conditions further; revisit with the archive design); halting on a driver error (a model's bad session is an outcome, not a fault).
+- Reason: DESIGN.md sec 11 steps 1-9 with PR #52 S4, S8-S10; the gap order of sec 11.
+- Reverse: edit orchestrator/loop.go; DESIGN.md sec 11 and sec 13 "First run" paragraphs.
+- Origin: Code
+
+## 2026-10-27 · PR #59 (inferred) · Lineage: a mutation reason for attempts with no candidate, and summary.json; cmd/orchestrator start-up guards
+- Decision: lineage.Attempt gains `mutation` (`no-change`, `session-failed`), set only with a zero gate result, discarded, no fitness, flags, genome or reason; driver's prompt names those outcomes. Run.WriteSummary writes summary.json once (reason token, generations, total usage, time). cmd/orchestrator reads CLAUDE_CODE_OAUTH_TOKEN and unsets it before any child runs, and refuses to start with a variant namespace or a loadgen target left from an earlier run; a halted run leaves its variants for inspection.
+- Rejected: recording a driver failure as a gate failure at some stage (a lie in the table); no record for it (DESIGN.md sec 11 step 8 records every attempt); the run summary as an attempts.jsonl line (it is not an attempt); the token as a flag (visible in ps).
+- Reason: DESIGN.md sec 13 summary record and sec 14 schema; schema additions only, older records still read.
+- Reverse: drop Attempt.Mutation and lineage/summary.go; edit cmd/orchestrator/main.go.
+- Origin: Code

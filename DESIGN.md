@@ -1250,6 +1250,17 @@ probation is the binding case for the section 2 budget).
 9. Repeat from 1, using the (possibly unchanged) best as a candidate
    parent alongside the rest of the archive.
 
+**First run** (orchestrator.Loop; docs/decisions.md, PR #52 and the PR
+#59 loop entry): generation 0, the hand-written wrapper, goes through
+steps 3-7 first, alone. A mutation call that gives no edited files, or
+edits none, is recorded with that reason and discarded with no gate run
+and no window. A window runs only after a promotion, and repeats, with
+fresh pairs, until one is scored or the newcomer is culled; each
+window's integrity culls apply whether or not it is scored. A tie for
+the lowest score culls the newer variant. A variant's recorded fitness
+is that of its latest scored window. A loadgen restart halts the run
+rather than re-PUTting targets (S10), as does a gate fault.
+
 ### Probation, not evict-then-promote
 
 Evicting an incumbent *before* the newcomer's window would compare
@@ -1490,6 +1501,14 @@ Anthropic documentation if an authoritative number is needed.
 The two mechanisms are complementary: the usage ceiling is a hard backstop
 independent of whether the stagnation logic is itself working correctly.
 
+**First run** (PR #52 S9): no stagnation counter; the run stops after a
+set number of generations or once the mutation calls' `num_turns`, or
+their tokens of every kind, reach a ceiling. It also halts after 3
+excluded windows in a row, on a loadgen restart, when no genome is
+eligible as a parent, and on a fault. The summary record is
+`summary.json` in the run directory, written once when the run stops,
+with the reason and the total usage of every mutation call.
+
 ## 14. Lineage / data model
 
 - **SQLite** -- structured, unbounded, one row per generation attempt:
@@ -1504,7 +1523,9 @@ independent of whether the stagnation logic is itself working correctly.
   the run directory, one record per attempt with the same fields, and
   the genome archive is a directory of wrapper files plus a sha256, not
   git commits (docs/decisions.md, PR #52 S2, S3 and the PR #55 entry);
-  SQLite and git archives come after the first run.
+  SQLite and git archives come after the first run. An attempt whose
+  mutation call made no candidate carries a `mutation` reason
+  (`no-change` or `session-failed`) and no gate result.
 - **JSONL** -- raw `claude -p --output-format stream-json` transcripts per
   generation, archived but rarely queried directly.
 - **Eligible parent pool** (section 11) is a *view* over the SQLite table
