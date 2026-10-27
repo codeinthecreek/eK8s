@@ -167,6 +167,11 @@ func (l *Loop) Run(ctx context.Context) (string, error) {
 }
 
 func (l *Loop) run(ctx context.Context) (string, error) {
+	// Stress is on only for Stage 5 (DESIGN.md sec 11); a halted run
+	// may have left it on.
+	if err := l.c.Cluster.StressOff(ctx); err != nil {
+		return "", err
+	}
 	// Generation 0: the gate first, then its pairs, never overlapping.
 	passed, rep, err := l.gateCandidate(ctx, "0", l.c.Gen0)
 	if err != nil {
@@ -250,7 +255,10 @@ func (l *Loop) generation(ctx context.Context, id, parent string) (string, error
 			}
 		}
 	}
-	if merr != nil && ctx.Err() != nil {
+	// A call that never started a session failed in the harness (a
+	// changed claude binary, scratch I/O, a refused parent or prompt):
+	// it would fail every generation, so it halts the run.
+	if merr != nil && (ctx.Err() != nil || mut == nil) {
 		return "", merr
 	}
 	if noCandidate {
@@ -303,6 +311,9 @@ func (l *Loop) gateCandidate(ctx context.Context, id string, files map[string][]
 	if rep, err = l.c.Gate.Local(ctx, dir); err != nil {
 		return false, rep, fmt.Errorf("orchestrator: gate fault, generation %s: %w", id, err)
 	}
+	if len(rep.Results) == 0 {
+		return false, rep, fmt.Errorf("orchestrator: gate fault, generation %s: an empty report", id)
+	}
 	if !rep.Passed() {
 		l.logGateFailure(id, rep)
 		return false, rep, nil
@@ -313,6 +324,14 @@ func (l *Loop) gateCandidate(ctx context.Context, id string, files map[string][]
 	l.logf("generation %s: gate stage 5", id)
 	if err := l.c.Gate.Stage5(ctx, id, rep.Image, &rep); err != nil {
 		return false, rep, fmt.Errorf("orchestrator: gate fault, generation %s: %w", id, err)
+	}
+	// Off again at once, so neither the next host pairs nor the next
+	// gate run shares the host with stress-ng.
+	if err := l.c.Cluster.StressOff(ctx); err != nil {
+		return false, rep, err
+	}
+	if len(rep.Results) == 0 {
+		return false, rep, fmt.Errorf("orchestrator: gate fault, generation %s: an empty report", id)
 	}
 	if !rep.Passed() {
 		l.logGateFailure(id, rep)
@@ -385,6 +404,10 @@ func (l *Loop) probation(ctx context.Context, newcomer string, batches []Batch) 
 			return StopRestart, nil
 		}
 		if err := l.judge(ctx, res); err != nil {
+			if l.c.Windows.Restarted() { // a cull's DELETE met a new boot_id
+				l.logf("%v", err)
+				return StopRestart, nil
+			}
 			return "", err
 		}
 		if l.streak.Add(res) {

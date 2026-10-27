@@ -1,7 +1,7 @@
 // Command orchestrator runs one evolutionary run (DESIGN.md sec 11,
 // orchestrator.Loop) on the kind cluster: generation 0, then up to
 // -generations mutation attempts, each gated and, on a pass, observed
-// for one probation window with the live variants. It writes the run
+// with the live variants in probation windows until one is scored. It writes the run
 // to a new lineage directory, -run.
 //
 // Before a run, from the repo root: `go mod download` (the gate's go

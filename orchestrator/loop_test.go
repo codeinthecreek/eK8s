@@ -52,6 +52,7 @@ type fakeWindows struct {
 	window    func(n int, live []string) WindowResult
 	windows   int
 	restarted bool
+	dropErr   error // Drop fails with it and sets restarted
 	batchErr  error
 	batchCtx  []error // each Batches call's context error at its end
 }
@@ -107,6 +108,10 @@ func (w *fakeWindows) Adopt(id string, burst []string) error {
 
 func (w *fakeWindows) Drop(_ context.Context, id string) error {
 	w.ev.add("drop %s", id)
+	if w.dropErr != nil {
+		w.restarted = true
+		return w.dropErr
+	}
 	return nil
 }
 
@@ -126,7 +131,7 @@ func (g fakeGate) Local(_ context.Context, dir string) (gate.Report, error) {
 	case strings.Contains(string(b), "fault"):
 		return gate.Report{}, errors.New("no docker daemon")
 	case strings.Contains(string(b), "fail-local"):
-		return gate.Report{Results: []gate.Result{{Stage: 1, Check: "build", Pass: true}, {Stage: 2, Check: "contract", Detail: "secret pool password"}}}, nil
+		return gate.Report{Results: []gate.Result{{Stage: 1, Check: "build", Pass: true}, {Stage: 2, Check: "contract", Detail: "secret pool password\n" + strings.Repeat("x", 2000)}}}, nil
 	}
 	return gate.Report{Results: []gate.Result{{Stage: 4, Check: "race-report", Pass: true}}, Image: "ek8s-wrapper:x"}, nil
 }
@@ -148,18 +153,44 @@ var failStage5 = map[string]bool{}
 
 // fakeMutator answers call n (from 1) with mut(n).
 type fakeMutator struct {
-	ev    *events
-	calls int
-	mut   func(n int, parent map[string][]byte) (*driver.Mutation, error)
+	ev      *events
+	calls   int
+	overlap bool // fail a call unless a Batches call is running
+	mut     func(n int, parent map[string][]byte) (*driver.Mutation, error)
 }
 
 func (m *fakeMutator) Mutate(ctx context.Context, parent map[string][]byte, prompt string) (*driver.Mutation, error) {
 	m.calls++
 	m.ev.add("mutate %s", parent["server.go"])
+	if m.overlap {
+		// The gap's pairs are made while the mutation runs: a Batches
+		// call must have started and not yet ended.
+		deadline := time.Now().Add(time.Second)
+		for {
+			ev := m.ev.all()
+			if start := lastPrefix(ev, "batches "); start >= 0 && !slices.Contains(ev[start:], "batches done") {
+				break
+			}
+			if time.Now().After(deadline) {
+				return nil, errors.New("no batches running alongside the mutation")
+			}
+			time.Sleep(time.Millisecond)
+		}
+	}
 	if !strings.Contains(prompt, driver.NonNegotiable) {
 		return nil, errors.New("prompt without the non-negotiable line")
 	}
 	return m.mut(m.calls, parent)
+}
+
+// lastPrefix returns the index of the last event starting with p, or -1.
+func lastPrefix(ev []string, p string) int {
+	for i := len(ev) - 1; i >= 0; i-- {
+		if strings.HasPrefix(ev[i], p) && ev[i] != "batches done" {
+			return i
+		}
+	}
+	return -1
 }
 
 // edit returns a successful mutation that sets server.go to body.
@@ -266,6 +297,7 @@ func TestLoopRun(t *testing.T) {
 	// gen 3 ties gen 0 at the bottom of the window with four live: the
 	// newer, 3, goes. Then 4 is the lowest of 0, 1, 2, 4.
 	fx.win.score = map[string]float64{"0": 0.5, "1": 0.7, "2": 0.6, "3": 0.5, "4": 0.4}
+	fx.mut.overlap = true
 	reason, err := fx.start(t)
 	if err != nil || reason != StopGenerations {
 		t.Fatalf("Run = %q, %v", reason, err)
@@ -318,7 +350,7 @@ func TestLoopRun(t *testing.T) {
 	// done before the gate; stress on before Stage 5.
 	g1 := fx.ev.index("mutate gen0")
 	rest := ev[g1:]
-	order := []string{"batches done", "local gen1", "stress on", "stage5 1 ek8s-wrapper:x", "adopt 1 2", "window 0,1"}
+	order := []string{"batches done", "local gen1", "stress on", "stage5 1 ek8s-wrapper:x", "stress off", "adopt 1 2", "window 0,1"}
 	at := -1
 	for _, want := range order {
 		i := slices.Index(rest, want)
@@ -329,6 +361,9 @@ func TestLoopRun(t *testing.T) {
 	}
 	if !slices.Contains(rest[:slices.Index(rest, "local gen1")], "batches 2") {
 		t.Errorf("generation 1 made no batches for live + 1 before its gate: %q", rest)
+	}
+	if ev[0] != "stress off" {
+		t.Errorf("the run did not start with stress off: %q", ev)
 	}
 }
 
@@ -365,6 +400,9 @@ func TestLoopNoCandidate(t *testing.T) {
 			t.Errorf("a gate ran after a mutation: %q", fx.ev.all())
 		}
 	}
+	if len(fx.win.batchCtx) != 3 {
+		t.Fatalf("%d Batches calls, want 3", len(fx.win.batchCtx))
+	}
 	for i, err := range fx.win.batchCtx[1:] {
 		if !errors.Is(err, context.Canceled) {
 			t.Errorf("generation %d's pairs were not cancelled: %v", i+1, err)
@@ -387,6 +425,8 @@ func TestLoopGateFailures(t *testing.T) {
 	})
 	failStage5["2"] = true
 	fx.win.score["0"] = 0.5
+	var log strings.Builder
+	fx.cfg.Log = &log
 	reason, err := fx.start(t)
 	if err != nil || reason != StopGenerations {
 		t.Fatalf("Run = %q, %v", reason, err)
@@ -407,6 +447,13 @@ func TestLoopGateFailures(t *testing.T) {
 	}
 	if fx.win.windows != 1 {
 		t.Errorf("%d windows, want 1", fx.win.windows)
+	}
+	// The Detail goes to the log only, quoted and cut.
+	if !strings.Contains(log.String(), `check contract: "secret pool password\n`+strings.Repeat("x", maxDetailLog-len("secret pool password\n"))+`"`+"\n") {
+		t.Errorf("log lacks the quoted, cut Detail:\n%s", log.String())
+	}
+	if !slices.Contains(ev, "stress off") || ev[len(ev)-1] == "stress on" {
+		t.Errorf("stress left on after Stage 5: %q", ev)
 	}
 	b, _ := os.ReadFile(filepath.Join(fx.run.Dir(), "attempts.jsonl"))
 	if strings.Contains(string(b), "secret") || strings.Contains(string(b), "candidate text") {
@@ -473,6 +520,49 @@ func TestLoopProbation(t *testing.T) {
 			t.Errorf("live %q, events %q", fx.loop.live, fx.ev.all())
 		}
 	})
+	t.Run("integrity cull restores the cap", func(t *testing.T) {
+		fx := newLoopFixture(t, 3, func(n int, parent map[string][]byte) (*driver.Mutation, error) {
+			return edit(parent, fmt.Sprintf("gen%d", n), 1), nil
+		})
+		// 3 scores lowest, but 1, an incumbent, is disqualified in the
+		// scored window with four live: no further cull (sec 11 step 7).
+		fx.win.score = map[string]float64{"0": 0.5, "1": 0.9, "2": 0.6, "3": 0.1}
+		fx.win.window = func(n int, live []string) WindowResult {
+			if len(live) == 4 {
+				res := scoredWindow(n, live, fx.win.score)
+				res.Variants["1"] = VariantResult{Disqualified: classifier.ReasonWrongMatch}
+				return res
+			}
+			return WindowResult{}
+		}
+		reason, err := fx.start(t)
+		if err != nil || reason != StopGenerations {
+			t.Fatalf("Run = %q, %v", reason, err)
+		}
+		if !slices.Equal(fx.loop.live, []string{"0", "2", "3"}) {
+			t.Errorf("live = %q, want 0 2 3", fx.loop.live)
+		}
+		as := fx.attempts(t)
+		if a := as["1"]; a.Disqualified != "wrong_match" || a.CurrentlyLive {
+			t.Errorf("attempt 1 = %+v", a)
+		}
+		if a := as["3"]; !a.CurrentlyLive || a.Fitness == nil || a.Fitness.Score != 0.1 {
+			t.Errorf("attempt 3 = %+v", a)
+		}
+	})
+	t.Run("restart met by a cull", func(t *testing.T) {
+		fx := newLoopFixture(t, 1, nil)
+		fx.win.dropErr = errors.New("loadgen's boot_id changed")
+		fx.win.window = func(n int, live []string) WindowResult {
+			res := scoredWindow(n, live, nil)
+			res.Variants["0"] = VariantResult{Disqualified: classifier.ReasonSaltReused}
+			return res
+		}
+		reason, err := fx.start(t)
+		if err != nil || reason != StopRestart {
+			t.Fatalf("Run = %q, %v", reason, err)
+		}
+	})
 	t.Run("no parent", func(t *testing.T) {
 		fx := newLoopFixture(t, 3, nil)
 		fx.win.window = func(n int, live []string) WindowResult {
@@ -525,9 +615,9 @@ func TestLoopStops(t *testing.T) {
 	})
 	t.Run("token ceiling", func(t *testing.T) {
 		fx := newLoopFixture(t, 10, func(n int, parent map[string][]byte) (*driver.Mutation, error) {
-			return &driver.Mutation{Files: parent, Usage: lineage.Usage{NumTurns: 1, CacheReadTokens: 400, OutputTokens: 100}}, nil
+			return &driver.Mutation{Files: parent, Usage: lineage.Usage{NumTurns: 1, InputTokens: 1, OutputTokens: 10, CacheReadTokens: 100, CacheCreationTokens: 1000}}, nil
 		})
-		fx.cfg.TokenCeiling = 1500
+		fx.cfg.TokenCeiling = 3333 // reached on the third call only if every kind counts
 		fx.win.score["0"] = 0.5
 		reason, err := fx.start(t)
 		if err != nil || reason != StopUsageCeiling || fx.mut.calls != 3 {
@@ -548,6 +638,19 @@ func TestLoopStops(t *testing.T) {
 		}
 		if _, ok := fx.attempts(t)["1"]; ok {
 			t.Error("a gate fault was recorded as the candidate's outcome")
+		}
+	})
+	t.Run("driver fault", func(t *testing.T) {
+		fx := newLoopFixture(t, 3, func(n int, parent map[string][]byte) (*driver.Mutation, error) {
+			return nil, errors.New("driver: claude binary changed since the driver started")
+		})
+		fx.win.score["0"] = 0.5
+		reason, err := fx.start(t)
+		if err == nil || reason != StopFault || fx.mut.calls != 1 {
+			t.Fatalf("Run = %q, %v after %d calls", reason, err, fx.mut.calls)
+		}
+		if _, ok := fx.attempts(t)["1"]; ok {
+			t.Error("a harness fault was recorded as the session's outcome")
 		}
 	})
 	t.Run("generation 0 fails", func(t *testing.T) {
