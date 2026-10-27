@@ -141,6 +141,30 @@ func TestMutateNoop(t *testing.T) {
 	}
 }
 
+// TestFakeDryRun: the fake's dry-run mode, which a real BuildPrompt prompt
+// starts (deploy/orchestrator-smoke.sh): a lineage with no earlier attempt
+// gets a comment, one earlier attempt a broken function, two a comment.
+func TestFakeDryRun(t *testing.T) {
+	d := newDriver(t)
+	parent := gen0(t)
+	attempt := "\n- Generation 1 (from 0): passed the gate and scored 0.500. Note: \"x\"\n"
+	for _, c := range []struct {
+		earlier int
+		broken  bool
+	}{{0, false}, {1, true}, {2, false}} {
+		prompt := "You are the mutation operator.\nRecent attempts in this lineage:" + strings.Repeat(attempt, c.earlier)
+		m, err := d.Mutate(context.Background(), parent, prompt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := string(m.Files["tunables.go"])
+		if !slices.Equal(m.Changed, []string{"tunables.go"}) || strings.Contains(got, "dryRunBreak") != c.broken ||
+			!strings.HasSuffix(got, fmt.Sprintf("// after %d earlier attempts\n", c.earlier)) {
+			t.Errorf("%d earlier: changed %q, tunables.go ends %q", c.earlier, m.Changed, got[len(got)-80:])
+		}
+	}
+}
+
 // TestSandboxEnvAndArgv: the session sees exactly the allowlisted
 // environment, exactly claudeArgs and the sandbox's work directory.
 func TestSandboxEnvAndArgv(t *testing.T) {

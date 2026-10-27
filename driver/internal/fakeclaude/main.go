@@ -1,8 +1,9 @@
 // Command fakeclaude stands in for the claude binary in the driver's
 // tests: it runs in the same sandbox and prints stream-json events as
 // claude -p does. The first word of the prompt (the argument after "--")
-// picks what it does; see the cases in main. It is a test fixture, never
-// shipped.
+// picks what it does; see the cases in main. A real prompt from
+// driver.BuildPrompt starts with "You": that is the dry run's mode
+// (deploy/orchestrator-smoke.sh). It is a test fixture, never shipped.
 package main
 
 import (
@@ -60,6 +61,8 @@ func main() {
 		f.WriteString("\n// fake edit\n")
 		f.Close()
 		result("success", false, "  Shortened acceptWait.\n", model(args))
+	case "You":
+		dryRun(prompt, model(args))
 	case "noop":
 		result("success", false, "Changed nothing.", model(args))
 	case "report":
@@ -111,6 +114,28 @@ func main() {
 	default:
 		fail(fmt.Errorf("unknown mode %q", mode))
 	}
+}
+
+// dryRun answers a real BuildPrompt prompt for the end-to-end dry run:
+// the first attempt of a lineage appends a comment to tunables.go, which
+// the gate passes; an attempt that sees exactly one earlier attempt in
+// its prompt breaks the build, which Stage 1 fails; any other appends a
+// comment again. So two mutations give one pass and one failure, whatever
+// the tournament picks as parent: an attempt's prompt lists the attempts
+// of its parent's lineage, and the first is in every later one.
+func dryRun(prompt, model string) {
+	earlier := strings.Count(prompt, "\n- Generation ")
+	edit, note := "\n// dry run edit\n", "Added a comment."
+	if earlier == 1 {
+		edit, note = "\nfunc dryRunBreak( {\n", "Added a broken function."
+	}
+	f, err := os.OpenFile("tunables.go", os.O_WRONLY|os.O_APPEND, 0)
+	if err != nil {
+		fail(err)
+	}
+	fmt.Fprintf(f, "%s// after %d earlier attempts\n", edit, earlier)
+	f.Close()
+	result("success", false, note, model)
 }
 
 func emit(v any) {
