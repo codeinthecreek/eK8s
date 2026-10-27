@@ -12,10 +12,12 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/codeinthecreek/eK8s/fitness"
 	"github.com/codeinthecreek/eK8s/gate"
 	"github.com/codeinthecreek/eK8s/lineage"
 )
@@ -138,6 +140,33 @@ func TestMutateNoop(t *testing.T) {
 	m, err := d.Mutate(context.Background(), gen0(t), "noop")
 	if err != nil || len(m.Changed) != 0 {
 		t.Fatalf("err %v, changed %q", err, m.Changed)
+	}
+}
+
+// TestFakeDryRun: the fake's dry-run mode, which a real BuildPrompt prompt
+// starts (deploy/orchestrator-smoke.sh): a lineage with no earlier attempt
+// gets a comment, one earlier attempt a broken function, two a comment.
+func TestFakeDryRun(t *testing.T) {
+	d := newDriver(t)
+	parent := gen0(t)
+	half := &lineage.Half{SuccessRate: 0.9, P95LatencyMS: 500, CPUPerSuccess: 0.1}
+	scored := &lineage.Fitness{Score: 0.5, Baseline: half}
+	all := []lineage.Attempt{{GenerationID: "0", Gate: lineage.Gate{Passed: true}, Fitness: scored}}
+	for earlier := 0; earlier <= 2; earlier++ {
+		prompt, err := BuildPrompt(all, "0", fitness.DefaultParams())
+		if err != nil {
+			t.Fatal(err)
+		}
+		m, err := d.Mutate(context.Background(), parent, prompt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := string(m.Files["tunables.go"])
+		if !slices.Equal(m.Changed, []string{"tunables.go"}) || strings.Contains(got, "dryRunBreak") != (earlier == 1) ||
+			!strings.HasSuffix(got, fmt.Sprintf("// after %d earlier attempts\n", earlier)) {
+			t.Errorf("%d earlier: changed %q, tunables.go ends %q", earlier, m.Changed, got[len(got)-80:])
+		}
+		all = append(all, lineage.Attempt{GenerationID: strconv.Itoa(earlier + 1), ParentID: "0", Mutation: lineage.MutationNoChange})
 	}
 }
 

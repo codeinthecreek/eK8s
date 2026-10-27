@@ -8,7 +8,10 @@ name: deploy smoke
 # (loadgen itself: readiness, memory limits, the policy canary, its one
 # listener, every control endpoint through the API server's proxy, the
 # largest upload), then deploy/stage5-smoke.sh (gate Stage 5 end to end:
-# gen 0 deployed, a real burst, host verification). It proves the mechanics (pinned
+# gen 0 deployed, a real burst, host verification), then
+# deploy/orchestrator-smoke.sh (the end-to-end dry run: the orchestrator for
+# 2 generations with a fake claude under bwrap; the records and the
+# cluster checked). It proves the mechanics (pinned
 # images, kustomizations, metrics-server, stress-ng on and off, the
 # variant bundle, ek8s-system), not the full-size numbers: those need the workstation
 # (docs/STATUS.md, Parked). workflow_dispatch only works once this file is
@@ -29,6 +32,11 @@ on:
       - 'internal/hostpairs/**'
       - 'loadgen/client/**'
       - 'loadgen/wire/**'
+      # orchestrator-smoke.sh runs the orchestrator, driver and fake claude.
+      - 'orchestrator/**'
+      - 'driver/**'
+      - 'lineage/**'
+      - 'fitness/**'
       - '.github/workflows/deploy.yml'
   workflow_dispatch:
 
@@ -38,7 +46,7 @@ permissions:
 jobs:
   smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 50
     env:
       KIND_VERSION: v0.33.0
       KIND_SHA256: aee6151561422756b764a4ae28e7f44cda5af5a9eead3cc9985112b1de8d8e0d
@@ -81,6 +89,14 @@ jobs:
       - run: deploy/variant-smoke.sh
       - run: deploy/loadgen-smoke.sh
       - run: deploy/stage5-smoke.sh
+      # Gate Stage 1 boots the candidate under bubblewrap, and the driver
+      # runs the fake claude under it; both as in ci.yml (see the comments
+      # there). gcc and libc.a for Stage 4's -race build are on the runner.
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends bubblewrap
+      - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: End-to-end dry run
+        timeout-minutes: 20
+        run: deploy/orchestrator-smoke.sh
       - name: Dump cluster state
         if: failure()
         run: |
@@ -88,7 +104,7 @@ jobs:
           k get pods -A -o wide || true
           k describe node || true
           # Every pod in the namespaces this PR deploys into, with events.
-          for ns in ek8s-stress kube-system ek8s-system ek8s-v999999 ek8s-v999998; do
+          for ns in ek8s-stress kube-system ek8s-system ek8s-v999999 ek8s-v999998 ek8s-v0 ek8s-v1 ek8s-v2 ek8s-v3; do
             echo "=== pods in $ns"
             k -n "$ns" describe pods || true
           done
@@ -97,7 +113,7 @@ jobs:
           k get pods -A --no-headers \
             -o jsonpath='{range .items[*]}{.metadata.namespace}{" "}{.metadata.name}{" "}{.status.containerStatuses[*].ready}{"\n"}{end}' 2>/dev/null |
             while read -r ns name ready; do
-              case "$ns" in ek8s-stress|kube-system|ek8s-system|ek8s-v999999|ek8s-v999998) continue ;; esac
+              case "$ns" in ek8s-stress|kube-system|ek8s-system|ek8s-v999999|ek8s-v999998|ek8s-v0|ek8s-v1|ek8s-v2|ek8s-v3) continue ;; esac
               if [ -z "$ready" ] || [[ " $ready " == *" false "* ]]; then
                 echo "--- $ns/$name (ready: ${ready:-none})"
                 k -n "$ns" describe pod "$name" || true

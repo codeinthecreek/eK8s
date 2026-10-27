@@ -359,7 +359,10 @@ func TestLoopRun(t *testing.T) {
 		}
 		at = i
 	}
-	if !slices.Contains(rest[:slices.Index(rest, "local gen1")], "batches 2") {
+	// The batches goroutine may log before or after "mutate gen0", so the
+	// span is the gap since generation 0's window, not since the mutation.
+	gap := ev[slices.Index(ev, "window 0"):]
+	if !slices.Contains(gap[:slices.Index(gap, "local gen1")], "batches 2") {
 		t.Errorf("generation 1 made no batches for live + 1 before its gate: %q", rest)
 	}
 	if ev[0] != "stress off" {
