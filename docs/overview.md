@@ -36,7 +36,8 @@ call:
 ```
 
 Hashing uses Argon2id, a deliberately slow, memory-hungry algorithm.
-Each hash takes about 100 ms of CPU and 19 MiB of memory. That cost
+Each hash takes tens of milliseconds to about 100 ms of CPU (43 ms
+measured on the owner's workstation) and 19 MiB of memory. That cost
 makes the service easy to overload, and *how it copes with overload*
 is what evolves.
 
@@ -152,8 +153,9 @@ The right amount of concurrency is a balancing act:
                                               so too many -> OOMKill
 ```
 
-A worked example, with **illustrative numbers** (real pod limits are
-not set yet):
+A worked example, with **illustrative numbers** (the pod limits are
+the real ones, 1 CPU and 256 MiB; 100 ms per hash is a round figure,
+since run 1 measured 43 ms):
 
 - A pod is limited to 1 CPU and 256 MiB.
 - At about 100 ms of CPU per hash, it can finish at most about 10
@@ -168,8 +170,9 @@ not set yet):
 
 The sweet spot also *moves*. When the noisy-neighbour pod (stress-ng)
 steals CPU, a limit tuned for quiet conditions suddenly admits too
-much. A good wrapper adapts. That is exactly what the contention half
-of the scoring rewards.
+much. A good wrapper adapts. That is what the contention half of the
+scoring is meant to reward (run 1 scored normal conditions only, see
+section 7).
 
 ### Generation 0: the starting genome
 
@@ -269,7 +272,9 @@ Likely room for evolution to improve on:
 ## 5. The evolution loop
 
 There is one mutation at a time. The live population is 3 variants,
-briefly 4 while a newcomer is on probation.
+briefly 4 while a newcomer is on probation. In the first run, generation
+0 goes through the build, gate and observe steps alone first, and each
+observation window is the normal-load half only (section 7).
 
 ```
         +-------------------------------------------+
@@ -295,7 +300,8 @@ briefly 4 while a newcomer is on probation.
         |                                           |
         v                                           |
   [6] Observe                                       |
-      normal load, then load + noisy neighbour      |
+      normal load (later: then load + noisy         |
+      neighbour)                                    |
         |                                           |
         v                                           |
   [7] Score all 4; cull the lowest ---------------->+
@@ -309,7 +315,9 @@ the AI is asked for a *structurally* different approach instead of a
 small tweak.
 
 The run stops when progress stalls for good, or when an AI-usage
-ceiling is reached.
+ceiling is reached. The first run was simpler: it stopped after a set
+number of generations (10), or earlier on the usage ceiling, three
+excluded windows in a row, a load generator restart or a fault.
 
 ## 6. The gate: five checks, zero tolerance
 
@@ -355,14 +363,16 @@ when a Service has no ready pods, and that must not be mistaken for
 deliberate shedding. Hence the Retry-After requirement.
 
 **Fitness.** Each variant is measured in two halves, a normal half and
-a contention half. Three numbers are taken in each:
+a contention half. The first run measured only the normal half, so a
+variant's score was its normal-half score; the rule below applies once
+the contention half returns. Three numbers are taken in each:
 
 - success rate
 - p95 latency (the slow tail, not the average)
 - CPU used per successful request
 
-In the contention half, a graceful 503 earns partial credit, so
-shedding load well is better than falling over. The final score is
+In every half, a graceful 503 earns partial credit, so shedding load
+well is better than falling over. The final score is
 the *worse* of the two halves. A variant that shines normally but
 collapses under pressure is scored by the collapse.
 
@@ -473,8 +483,8 @@ wrong, the judge must already know the true answer. Before each
 window the host generates fresh pairs, using the real hashing core:
 
 - a *match* pair: a fresh password and a hash of it
-- a *mismatch* pair: a fresh password and a random, well-formed hash
-  that cannot belong to it
+- a *mismatch* pair: a fresh password and a real hash of a different
+  fresh password
 
 The load generator is handed the pairs and sends each one exactly once,
 to one variant. Nothing repeats and nothing is shared between variants,
@@ -485,8 +495,8 @@ in live traffic. If the load generator restarts, it gets a new batch.
 A small share of live traffic (and at least 5% of the Stage 5 burst) is
 deliberately invalid: a malformed hash, or a well-formed one with the
 wrong settings. The only acceptable answers are a 400 or a polite
-"busy"; any success is a failure. Live traffic also sends three kinds
-of bad `/hash` requests: an empty password, an oversize password and
+"busy"; any success is a failure. Live traffic also sends three more
+kinds of bad request: an empty password, an oversize password and
 invalid JSON. Each must get a 400.
 
 ## 9. Why so much anti-cheating, if the core is locked away?
@@ -556,7 +566,8 @@ explicitly asks for structurally different ideas.
 then win in exactly the contention half, which is where fitness is
 decided (the worse of the two halves). This is why Stage 5 fully
 checks every response under contention, and why the live contention
-half is judged as strictly as the normal half. A variant could also
+half is to be judged as strictly as the normal half (the first run
+had no live contention half; Stage 5 was its contention check). A variant could also
 cheat only when it can tell it is *not* being tested; invalid hashes
 in live traffic close that gap (see "Loopholes" below).
 
@@ -572,10 +583,10 @@ bypass.
 |-------|-------------------------|-----------------|
 | Always answer "match" on /verify | no Argon2, instant | the judge checks answers against pairs it built itself, including deliberate mismatches |
 | Turn a core error into "match" (fail open) | looks robust | gate Stage 2 sends bad and wrong-strength hashes; the answer must be 400; the same invalid hashes are sent live and in Stage 5 (see "Loopholes") |
-| Return a made-up hash string | no Argon2 | format and strength checks on every response; full verification on the host after each window (every hash for a variant's first K windows, a sample after) and for every Stage 5 hash |
+| Return a made-up hash string | no Argon2 | format and strength checks on every response; full verification on the host after each window (today every hash, every window; sampling after a variant's first K windows is planned, not built) and for every Stage 5 hash |
 | Re-send earlier hashes | no Argon2 | salt reuse is tracked while the load generator serves the variant; deliberately repeated passwords catch a password -> hash cache |
 | Bring its own, weaker Argon2 | faster | Stage 1 library allowlist; Stage 3 exact strength check |
-| Cheat only when overloaded | passes quiet tests | Stage 5 and the contention half use the same strict judge |
+| Cheat only when overloaded | passes quiet tests | Stage 5 (under stress-ng) and, once it returns, the contention half use the same strict judge |
 | Pull all its pods out of rotation | avoids load | its own dedicated traffic fails, and that is scored |
 | Answer "busy" (503) to everything | never slow | only partial credit, and its success rate collapses |
 
@@ -586,17 +597,20 @@ windows, and the gaps between them carry no load. Builds, gate runs and
 Stage 5 happen in the gaps, and so does full verification, after a
 window and before scoring. During a window only the cheap checks run on
 every response: format, strength and salt reuse. A variant's first K
-scored windows are verified in full; after that, a sample. A cheat
-deliberately held back past those windows could slip through. That
-limit is accepted, and a sampled catch still disqualifies. A variant
-that fails an integrity check is culled at the end of the window,
-before it is scored.
+scored windows are to be verified in full; after that, a sample. That
+sampling is planned, not built: today the host verifies every recorded
+hash in every window (run 1 did), so no cheat can slip through by
+waiting. Once sampling lands, a cheat deliberately held back past those
+windows could; that limit is accepted, and a sampled catch will still
+disqualify. A variant that fails an integrity check is culled at the
+end of the window, before it is scored.
 
-### Loopholes: decided, not yet built
+### Loopholes: what is built and what is pending
 
-The four loopholes tracked earlier now have a decided fix in
-[DESIGN.md](../DESIGN.md); none is built until the load generator and
-scoring are:
+The four loopholes tracked earlier each have a fix in
+[DESIGN.md](../DESIGN.md). Checked against the code, the core of each
+is built; the parts still pending are named below and in
+[AFTER-FIRST-RUN.md](AFTER-FIRST-RUN.md):
 
 - **Reusing undelivered work:** a hash computed for a request that
   timed out could be handed to a later request. Any integrity failure
@@ -605,11 +619,25 @@ scoring are:
   the variant is culled at the end of the window, before scoring, and
   never becomes a parent. It counts
   even when the answer arrives past the time ceiling: a slow cheat is
-  still a cheat.
+  still a cheat. *Built:* the host verifies every recorded hash each
+  window and keeps every salt it has seen, then culls before scoring
+  (`orchestrator/window.go:175`, `integrity.go:36-50` and `82-100`,
+  `loop.go:441`); every Stage 5 burst hash is verified too
+  (`gate/stage5.go:184`). *Pending:* sampled verification after a
+  variant's first K = 3 windows (no code; today it is all hashes, every
+  window), and dropping loadgen's per-variant salt copy, which grows
+  for the variant's whole life (`loadgen/check.go:53-61`; it is freed
+  only when the target is deleted, `loadgen/control.go:139`).
 - **Memorizing verify answers:** fixed by fresh pairs, each sent once.
+  *Built:* the host generates them (`internal/hostpairs/hostpairs.go:41`),
+  and a stream never reuses one (`loadgen/stream.go:67-71`). *Pending:*
+  nothing known.
 - **Replaying pool hashes:** fixed by keeping the pool out of live
   traffic; a hash replayed as a `/hash` answer fails full verification,
-  since it does not match the password sent.
+  since it does not match the password sent. *Built:* a test forbids
+  loadgen from linking the pool or the core (`loadgen/deps_test.go:23-24`),
+  and the host verifies the hashes (`orchestrator/window.go:175`).
+  *Pending:* nothing known.
 - **Behaving differently outside the gate:** a candidate can find
   small clues that it is running inside the gate (for example, no
   resource limits, or the sandbox's process list). It could return a
@@ -617,7 +645,12 @@ scoring are:
   "match" once live. Fixed by sending invalid hashes in live traffic and
   in Stage 5, so such a candidate fails there as well. A candidate that
   detects the gate in other ways is an accepted limit: the live checks
-  are what protect the scores.
+  are what protect the scores. *Built:* all five negative kinds ride in
+  sustained traffic (`loadgen/stream.go:73-75`) and in the burst
+  (`loadgen/stream.go:100-105`); a 2xx to one is `negative_accepted`
+  (`internal/classifier/classifier.go:239`), which the host re-checks
+  before culling (`orchestrator/integrity.go:178`). *Pending:* nothing
+  known beyond the accepted limit.
 
 ## 10. Cluster layout
 
@@ -648,6 +681,9 @@ scoring are:
 - Each variant gets its own fixed-rate traffic stream. There is no
   shared load balancer splitting traffic, so variants never compete
   for requests, only for the node's resources.
+- stress-ng is switched on by the orchestrator, not left running. In the
+  first run that was for gate Stage 5 only, in a gap; windows ran
+  without it.
 - Traffic flows only during observation windows; the gaps between
   windows carry no load, and builds, gate runs and Stage 5 happen in
   them. A variant starts every window from idle, so cold start is
@@ -702,38 +738,27 @@ to 9 exist.
 For the current state, always check [STATUS.md](STATUS.md). Every
 change updates it; this page is not updated that often.
 
-In broad terms, as of 2026-10-15:
+As of run 1 (2026-10-28):
 
-- **Built:** the *thing being evolved* and the *rulebook for judging
-  it*. That is the generation-0 service, the locked hashing core, the
-  shared judge (classifier) and the gate's known-answer test pool, plus gate
-  Stages 1-4 (section 6), all tested in CI. The cluster setup is
-  written too: the kind config, metrics-server, the stress-ng noisy
-  neighbour and the per-variant manifests (namespace, limits, network
-  policy, Deployment, Service, autoscaler) and the load generator's
-  namespace (its control Service and network policy, no load generator
-  yet), with a small-scale smoke test in CI; the full-size run waits for
-  the workstation.
-  The judge also knows the load generator's deliberately invalid
-  requests, which a variant must refuse, and which failures count as
-  cheating.
-- **Being built:** the load generator. Its first part is written:
-  building what it sends (the traffic mix, fresh passwords with about 1%
-  deliberately repeated, and all five kinds of deliberately invalid
-  request, each checked against the hashing core in tests), with a test
-  that it never links the hashing core or any Argon2 code. Its answer
-  checks are written too: each response gets its verdict from the shared
-  classifier, and each accepted hash is kept, with its password, for the
-  host to verify.
-- **Designed, not built:** the rest of the load generator (open-loop
-  sending, schedule-lag checks, its control API, one long-lived
-  deployment; host-generated pairs sent once).
-- **Next:** the rest of the load generator, then gate Stage 5, which
-  needs it. Also planned: a design for running gate Stages 2-4 in a pod,
-  and a classifier cleanup.
-- **Not built yet:** gate Stage 5, most of the load generator, AI driver,
-  orchestrator and lineage records. No
-  generation has evolved yet.
+- **The walking skeleton is complete.** Every part of the loop is built
+  and tested in CI: the service and its locked core, the shared judge,
+  the five-stage gate (Stage 5 included), the load generator, fitness
+  scoring, the sandboxed AI driver, the orchestrator and the lineage
+  records. CI also runs the whole loop end to end on a small kind
+  cluster, with a fake AI in place of Claude.
+- **Run 1 ran end to end** on the owner's workstation: 10 generations,
+  exit 0. All 10 mutations passed the gate, 38 windows were scored, 8
+  variants were culled and none was excluded. It used 43 AI turns and
+  took 1 h 22 min.
+- **What it did not show.** Windows were normal-load only, and the rate
+  `r` = 11 was provisional, so every variant answered every request and
+  the scores came down to small latency differences. That is a result
+  about the setup, not about evolution.
+- **What comes next** is listed in
+  [AFTER-FIRST-RUN.md](AFTER-FIRST-RUN.md): measuring the capacity
+  figure C0 and running with the contention half, calibrating the
+  scoring bounds to the host, and the cull rule's margin. The owner
+  decides the order.
 
 The reasons behind individual implementation choices are logged in
 [decisions.md](decisions.md).
