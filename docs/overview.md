@@ -583,7 +583,7 @@ bypass.
 |-------|-------------------------|-----------------|
 | Always answer "match" on /verify | no Argon2, instant | the judge checks answers against pairs it built itself, including deliberate mismatches |
 | Turn a core error into "match" (fail open) | looks robust | gate Stage 2 sends bad and wrong-strength hashes; the answer must be 400; the same invalid hashes are sent live and in Stage 5 (see "Loopholes") |
-| Return a made-up hash string | no Argon2 | format and strength checks on every response; full verification on the host after each window (every hash for a variant's first K windows, a sample after) and for every Stage 5 hash |
+| Return a made-up hash string | no Argon2 | format and strength checks on every response; full verification on the host after each window (today every hash, every window; sampling after a variant's first K windows is planned, not built) and for every Stage 5 hash |
 | Re-send earlier hashes | no Argon2 | salt reuse is tracked while the load generator serves the variant; deliberately repeated passwords catch a password -> hash cache |
 | Bring its own, weaker Argon2 | faster | Stage 1 library allowlist; Stage 3 exact strength check |
 | Cheat only when overloaded | passes quiet tests | Stage 5 (under stress-ng) and, once it returns, the contention half use the same strict judge |
@@ -597,16 +597,20 @@ windows, and the gaps between them carry no load. Builds, gate runs and
 Stage 5 happen in the gaps, and so does full verification, after a
 window and before scoring. During a window only the cheap checks run on
 every response: format, strength and salt reuse. A variant's first K
-scored windows are verified in full; after that, a sample. A cheat
-deliberately held back past those windows could slip through. That
-limit is accepted, and a sampled catch still disqualifies. A variant
-that fails an integrity check is culled at the end of the window,
-before it is scored.
+scored windows are to be verified in full; after that, a sample. That
+sampling is planned, not built: today the host verifies every recorded
+hash in every window (run 1 did), so no cheat can slip through by
+waiting. Once sampling lands, a cheat deliberately held back past those
+windows could; that limit is accepted, and a sampled catch will still
+disqualify. A variant that fails an integrity check is culled at the
+end of the window, before it is scored.
 
-### Loopholes and how they are closed
+### Loopholes: what is built and what is pending
 
 The four loopholes tracked earlier each have a fix in
-[DESIGN.md](../DESIGN.md), built since the first run's code landed:
+[DESIGN.md](../DESIGN.md). Checked against the code, the core of each
+is built; the parts still pending are named below and in
+[AFTER-FIRST-RUN.md](AFTER-FIRST-RUN.md):
 
 - **Reusing undelivered work:** a hash computed for a request that
   timed out could be handed to a later request. Any integrity failure
@@ -615,11 +619,25 @@ The four loopholes tracked earlier each have a fix in
   the variant is culled at the end of the window, before scoring, and
   never becomes a parent. It counts
   even when the answer arrives past the time ceiling: a slow cheat is
-  still a cheat.
+  still a cheat. *Built:* the host verifies every recorded hash each
+  window and keeps every salt it has seen, then culls before scoring
+  (`orchestrator/window.go:175`, `integrity.go:36-50` and `82-100`,
+  `loop.go:441`); every Stage 5 burst hash is verified too
+  (`gate/stage5.go:184`). *Pending:* sampled verification after a
+  variant's first K = 3 windows (no code; today it is all hashes, every
+  window), and dropping loadgen's per-variant salt copy, which grows
+  for the variant's whole life (`loadgen/check.go:53-61`; it is freed
+  only when the target is deleted, `loadgen/control.go:139`).
 - **Memorizing verify answers:** fixed by fresh pairs, each sent once.
+  *Built:* the host generates them (`internal/hostpairs/hostpairs.go:41`),
+  and a stream never reuses one (`loadgen/stream.go:67-71`). *Pending:*
+  nothing known.
 - **Replaying pool hashes:** fixed by keeping the pool out of live
   traffic; a hash replayed as a `/hash` answer fails full verification,
-  since it does not match the password sent.
+  since it does not match the password sent. *Built:* a test forbids
+  loadgen from linking the pool or the core (`loadgen/deps_test.go:23-24`),
+  and the host verifies the hashes (`orchestrator/window.go:175`).
+  *Pending:* nothing known.
 - **Behaving differently outside the gate:** a candidate can find
   small clues that it is running inside the gate (for example, no
   resource limits, or the sandbox's process list). It could return a
@@ -627,7 +645,12 @@ The four loopholes tracked earlier each have a fix in
   "match" once live. Fixed by sending invalid hashes in live traffic and
   in Stage 5, so such a candidate fails there as well. A candidate that
   detects the gate in other ways is an accepted limit: the live checks
-  are what protect the scores.
+  are what protect the scores. *Built:* all five negative kinds ride in
+  sustained traffic (`loadgen/stream.go:73-75`) and in the burst
+  (`loadgen/stream.go:100-105`); a 2xx to one is `negative_accepted`
+  (`internal/classifier/classifier.go:239`), which the host re-checks
+  before culling (`orchestrator/integrity.go:178`). *Pending:* nothing
+  known beyond the accepted limit.
 
 ## 10. Cluster layout
 

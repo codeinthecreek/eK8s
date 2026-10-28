@@ -4,7 +4,7 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 *(inferred)* are guesses, not read from the repo; correct them.
 
 ## Now
-- Overview refresh in review: docs/overview.md and README.md brought in line with DESIGN.md and run 1 (section 12 rewritten as of 2026-10-28); the "overview.md: stale since" lines are gone. Run 1 recorded (PR 9 done): see the PR 9 line under Next. Next: the items in docs/AFTER-FIRST-RUN.md dated 2026-10-28 (measure C0, fitness calibration, cull rule, tie order, deploy/README.md Arch note); the owner decides the order and which run 2 needs.
+- Overview refresh in review: docs/overview.md and README.md brought in line with DESIGN.md and run 1 (section 12 rewritten as of 2026-10-28); the "overview.md: stale since" lines are gone. Loophole status in overview section 9 checked against the code (sampling after K and dropping loadgen's salt copy are pending). Run 1 recorded (PR 9 done): see the PR 9 line under Next. Next: the items in docs/AFTER-FIRST-RUN.md dated 2026-10-28 (measure C0, fitness calibration, cull rule, tie order, deploy/README.md Arch note); the owner decides the order and which run 2 needs.
 
 ## Next
 - Run 1 follow-ups: docs/AFTER-FIRST-RUN.md, items added 2026-10-28 (C0 measurement with stress windows, fitness calibration, cull margin, tie order check, deploy/README.md Arch note). Nothing there blocks a second run except as the owner decides.
