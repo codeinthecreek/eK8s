@@ -16,7 +16,7 @@ patches:
     - op: replace
       path: /spec/template/spec/containers/0/resources
       value:
-        requests: {cpu: 250m, memory: 512Mi}
+        requests: {cpu: 500m, memory: 512Mi}
         limits: {cpu: 500m, memory: 512Mi}
 - target:
     kind: ConfigMap

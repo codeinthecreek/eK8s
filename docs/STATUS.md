@@ -4,7 +4,7 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 *(inferred)* are guesses, not read from the repo; correct them.
 
 ## Now
-- claude/ci-stress-request: CI overlay stress-ng CPU request 500m to 250m (limit stays) and orchestrator-smoke.sh prints the node's Allocated resources at start and on failure, after the dry run failed generation 1 Stage 5 Unschedulable (Insufficient cpu) on #61's CI. Next: PR 9, the owner's first real run (workstation steps under Parked first).
+- claude/ci-stress-request: CI kind node reserves 0 CPU (was 100m; EK8S_RESERVED_CPU_MILLIS 0 in deploy.yml and deploy/README.md) so generation 1 fits beside generation 0 at 2 replicas (the dry run was 10m short: 1660m of 1900m requested); orchestrator-smoke.sh prints the node's Allocated resources at start and on failure. Next: PR 9, the owner's first real run (workstation steps under Parked first).
 
 ## Next
 - First run (walking skeleton): about 10 generations on the workstation, end to end: driver mutates the wrapper (DESIGN.md sec 12, sandboxed), gate Stages 1-5, orchestrator with loadgen windows, fitness (sec 9), lineage records; see the skeleton PR list below (owner answers: docs/decisions.md, PR #52).
