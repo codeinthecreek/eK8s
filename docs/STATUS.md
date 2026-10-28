@@ -4,7 +4,7 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 *(inferred)* are guesses, not read from the repo; correct them.
 
 ## Now
-- Overview refresh in review: docs/overview.md and README.md brought in line with DESIGN.md and run 1 (section 12 rewritten as of 2026-10-28); the "overview.md: stale since" lines are gone. Loophole status in overview section 9 checked against the code (sampling after K and dropping loadgen's salt copy are pending). Run 1 recorded (PR 9 done): see the PR 9 line under Next. Next: the items in docs/AFTER-FIRST-RUN.md dated 2026-10-28 (measure C0, fitness calibration, cull rule, tie order, deploy/README.md Arch note); the owner decides the order and which run 2 needs.
+- C0 measurement tool: DESIGN sec 10 wording and its decisions.md entry first, then the tool. Branch ccr-d8c28647-r3qwzi, no PR yet.
 
 ## Next
 - Run 1 follow-ups: docs/AFTER-FIRST-RUN.md, items added 2026-10-28 (C0 measurement with stress windows, fitness calibration, cull margin, tie order check, deploy/README.md Arch note). Nothing there blocks a second run except as the owner decides.
@@ -18,8 +18,8 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 - Driver, resolved 2026-10-28: TestLiveMutation passed (11 turns) on the workstation.
 
 ## Recent
+- #64 overview refresh: docs/overview.md and README.md brought in line with DESIGN.md and run 1 (section 12 rewritten); section 9 states what is built and what is pending; the "overview.md: stale since" lines are gone
 - #63 run 1 recorded (skeleton PR 9): results, findings and follow-ups in docs/decisions.md (2026-10-28), docs/STATUS.md and docs/AFTER-FIRST-RUN.md; run 1 CPU fit and host notes
 - #62 CI kind node reserves 10m CPU (was 100m) so generation 1 fits beside generation 0 at 2 replicas; orchestrator-smoke.sh prints the node's allocated resources
 - #61 gate GOVERSION suffix: the gate accepts a GOEXPERIMENT suffix after a dash or a space (Arch's go1.27.3-X:nodwarf5); releaseOf in gate/assemble.go, TestReleaseOfGoVersion
 - #60 end-to-end dry run (skeleton PR 8): deploy/orchestrator-smoke.sh (orchestrator, 2 generations, 30 s loadgen windows, fakeclaude dry-run mode under real bwrap; attempts.jsonl, archive, transcripts, summary.json and the cluster checked) and its deploy.yml step; one decisions.md entry (2026-10-27)
-- #59 orchestrator part 2 (skeleton PR 7): orchestrator.Loop (generation 0 scored, tournament k = 2, mutation alongside windows, gate Stages 1-5, probation, integrity culls, every attempt recorded; halts on 3 excluded windows, loadgen restart, no parent or a fault), GateRunner, Session.Batches, Kube.VariantNamespaces; orchestrator/cmd/orchestrator; lineage Attempt.Mutation and summary.json; DESIGN.md sec 11, 13, 14 first-run notes; two decisions.md entries (2026-10-27)
