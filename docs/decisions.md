@@ -694,3 +694,10 @@ max. Earlier entries are not backfilled.
 - Rejected: changing the floors or the cull rule in this PR (the owner decides host-calibrated floors).
 - Reverse: n/a (a record, no change).
 - Origin: Code
+
+## 2026-10-28 · C0 tool (PR not yet opened) · C0 counts shed and failed together, negatives out, scored windows only; maxRate not raised (DESIGN.md sec 10)
+- Decision: C0's "sheds at most 1%" counts graceful_shed and failed together, negatives excluded, and needs a scored window; a pass at maxRate (19) gives C0 >= 19, and maxRate is not raised for C0.
+- Rejected: graceful_shed alone (a step of timeouts would pass); raising maxRate for a single target (the PR #45 memory sum is unmeasured).
+- Reason: an excluded window's offered rate was not r, and fitness scores failed below shed, so a C0 that ignores failures overstates capacity.
+- Reverse: DESIGN.md sec 10 edit.
+- Origin: chat

@@ -893,9 +893,7 @@ Same request-mix logic and classifier in both; only duration and target
 rate differ. Loadgen sends nothing outside a window or a Stage 5 burst
 (section 11).
 
-**The rate `r`** is `0.5 x C0`. C0 is the highest rate at which generation
-0 on a single pod (HPA `minReplicas` = `maxReplicas` = 1, no stress)
-sheds at most 1% with p95 at most `HangTimeout`/4. It is measured once,
+**The rate `r`** is `0.5 x C0`. C0 is the highest rate at which generation 0 on a single pod (HPA `minReplicas` = `maxReplicas` = 1, no stress) has at most 1% of its scored requests (contract negatives excluded) end as `graceful_shed` or `failed`, with p95 latency of its successes at most `HangTimeout`/4, in a window that was scored (not excluded). Rates are stepped at 1 req/s; while loadgen's maxRate caps r, a pass at maxRate is recorded as C0 >= maxRate. It is measured once,
 and frozen for the run; a new `r` means a new run, and one run is one
 comparability epoch (section 9). Until C0 is measured, a provisional `r` comes from a
 workstation Argon2 benchmark; the CI smoke run uses `r` = 2.
