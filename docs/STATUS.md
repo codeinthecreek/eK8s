@@ -4,7 +4,7 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 *(inferred)* are guesses, not read from the repo; correct them.
 
 ## Now
-- C0 measurement tool: DESIGN sec 10 wording and its decisions.md entry first, then the tool. Branch ccr-d8c28647-r3qwzi, no PR yet.
+- C0 measurement tool (PR #65 inferred): DESIGN sec 10 wording and decisions.md entries done; orchestrator/cmd/c0 built, search and pass rule unit-tested, never run against a cluster. Next: owner merges, then runs it on the workstation (deploy/README.md, C0) and records C0 and r. Branch ccr-d8c28647-r3qwzi, no PR yet.
 
 ## Next
 - overview.md: stale since #65 (inferred) (DESIGN.md sec 10: C0 pass rule counts sheds and failures, scored windows only, C0 >= maxRate when capped)

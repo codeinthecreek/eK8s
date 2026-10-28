@@ -256,6 +256,75 @@ existing `app=loadgen` pod, and deletes its Deployment on exit
 (describing the pod and printing loadgen's log first on failure). CI runs
 it after variant-smoke.sh.
 
+## C0
+
+`orchestrator/cmd/c0` measures C0 as DESIGN.md sec 10 defines it: the
+highest rate at which generation 0, on one pod (HPA `minReplicas` =
+`maxReplicas` = 1) with no stress, has at most 1% of its scored requests
+end as `graceful_shed` or `failed`, with the successes' p95 at most
+`HangTimeout`/4, in a window that was scored. Gen 0 has 2 wrapper slots
+per pod: under the 1000m limit Go sets GOMAXPROCS to 2 (a cgroup limit is
+rounded up, with a minimum of 2; docs/decisions-archive.md, PR #26
+variant-resources entry), and the slots are min(GOMAXPROCS, memory limit /
+2 / 20 MiB). The tool creates a variant bundle (id 900001 by default),
+patches its HPA to 1/1, and for each step redeploys loadgen at the step's
+rate (`loadgen-up.sh`), runs one 5-minute window through
+`orchestrator.Session` and applies the pass rule. It walks `-ladder`
+(default 6,9,12,15,18,19) up to the first fail, bisects integer rates
+between the last pass and that fail, then runs `-confirm` (default 2) more
+windows at the last pass. r = 0.5 x C0; if every ladder rate passes the
+result is C0 >= the top rate (loadgen's maxRate is 19, so the default
+ladder ends there). A step whose window was excluded, or whose pod, HPA or
+restart checks failed, is not measured: it reruns once, and a second
+invalid step halts. A disqualification of gen 0 halts at once. The JSON
+result (`-out`, a new file) is rewritten after every step.
+
+**Making `-image`.** The tool does not build it. Build it as the gate
+does, from the files of `internal/wrapper` that `cmd/orchestrator` reads
+as generation 0 (every non-test `.go` file; today these four), then
+kind-load it. The gate needs the host tools of "Host setup" and a
+`go mod download` first; it prints `image ek8s-wrapper:<12 hex>` on a
+pass and leaves the image in the local docker daemon:
+
+```
+cand=$(mktemp -d)
+cp internal/wrapper/doc.go internal/wrapper/hasher.go internal/wrapper/server.go internal/wrapper/tunables.go "$cand"
+go run ./gate/cmd/gate -candidate "$cand"
+kind load docker-image ek8s-wrapper:<12 hex> --name ek8s
+```
+
+This is the image `orchestrator.Loop` deploys for generation 0 *(inferred,
+not compared here)*: the Loop writes the same files to a directory, runs
+the same `gate.Run` on it and loads the image the report names; the tag is
+the first 12 hex of the sha256 of the built binary (`go build -trimpath`),
+so the same files and the same Go toolchain give the same tag. A
+different toolchain gives another tag for the same source.
+
+**Running it.** From the repo root, with the cluster up and loadgen's
+prerequisites met (`up.sh`), stress-ng at 0 replicas and no variant
+namespace (the tool refuses otherwise, and refuses a ladder rate over
+loadgen's maxRate):
+
+```
+deploy/up.sh
+kubectl --context kind-ek8s -n ek8s-stress get deploy stress-ng -o jsonpath='{.spec.replicas}'
+kubectl --context kind-ek8s get namespaces -l ek8s.io/role=variant
+go run ./orchestrator/cmd/c0 -image ek8s-wrapper:<12 hex> -out c0.json
+```
+
+The second command must print `0` and the third no namespace. Optional
+flags: `-id`, `-ladder`, `-confirm`, `-keep` (keep the namespace and the
+loadgen target), `-repo`, `-workers`. It prints one line
+per step to stderr and `C0 13, r = 6.5` (or `C0 >= 19, r = 9.5`) to stdout.
+Exit status: 0 for a C0 or a lower bound, 1 when the search halted without
+one (ladder too high, a step invalid twice, a confirm window failed: C0
+unresolved, everything recorded), 2 on a fault, a disqualification, an
+interrupt or a refused start. On exit the namespace and the loadgen
+target are deleted unless `-keep`; loadgen stays deployed at the last
+step's rate. The pod, restart and HPA checks compare the state just before the window with the state just after it; a restart between steps is not seen. A run takes about an hour: at most 9 windows of 5 minutes
+for the default ladder without reruns, plus a loadgen redeploy each
+*(inferred)*.
+
 ## stress-ng
 
 Deployment `stress-ng` in namespace `ek8s-stress`, 0 replicas (off) by

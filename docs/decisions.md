@@ -701,3 +701,10 @@ max. Earlier entries are not backfilled.
 - Reason: an excluded window's offered rate was not r, and fitness scores failed below shed, so a C0 that ignores failures overstates capacity.
 - Reverse: DESIGN.md sec 10 edit.
 - Origin: chat
+
+## 2026-10-28 · PR #65 (inferred) · C0 tool: HPA merge patch, loadgen redeployed per step, excluded step not measured, no exported API changed
+- Decision: orchestrator/cmd/c0 sets the HPA to 1/1 with a kubectl merge patch after creating the bundle, not a variant.Params field; each step runs deploy/loadgen-up.sh (a rollout restart if the manifest was unchanged) for a new boot_id and an empty loadgen; a step whose window is excluded or whose pod/HPA/restart checks fail is not measured (rerun once, then halt); a gen 0 disqualification halts. orchestrator, gate, fitness, loadgen/client and deploy/variant are used as exported, unchanged; maxRate is checked through deploy/loadgen's Params.Validate (loadgen's own Config.Validate).
+- Rejected: a Params field for the HPA bounds (only this tool wants a single-pod bundle, and the golden files and Stage 5 would carry it); one loadgen across steps (its salt sets and target would carry over); treating an excluded window as a fail (its offered rate was not r); exporting maxRate.
+- Reason: the brief ruled out refactoring the reused packages; a fresh loadgen per step keeps each window independent, as in the run.
+- Reverse: add the HPA bounds to variant.Params and drop the patch; keep one loadgen and Drop the target per step.
+- Origin: Code
