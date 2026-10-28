@@ -1,8 +1,9 @@
 # CI-size variant of cluster.yaml, for .github/workflows/deploy.yml: the
 # private repo's ubuntu-latest runner has 2 CPU / 8 GB, too small for the
 # full 1 CPU / 2Gi reservation plus the control plane and stress-ng. Same
-# kind version, node image and name; only the reservation differs (100m,
-# kept non-zero so smoke.sh still checks that the patch is applied).
+# kind version, node image and name; only the reservation differs (CPU 10m,
+# the least that keeps smoke.sh's exact reservation check meaningful, so the
+# dry run's variants fit).
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 name: ek8s
@@ -15,5 +16,5 @@ nodes:
   - |
     kind: KubeletConfiguration
     kubeReserved:
-      cpu: "100m"
+      cpu: "10m"
       memory: "256Mi"

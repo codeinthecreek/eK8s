@@ -41,6 +41,11 @@ gens=${ORCH_GENERATIONS:-2}
 k() { kubectl --context "$ctx" "$@"; }
 die() { echo "orchestrator-smoke.sh: FAIL: $*" >&2; exit 1; }
 ok() { echo "orchestrator-smoke.sh: ok: $*"; }
+# The node's request budget, to see the margin the variants have.
+allocated() {
+	echo "orchestrator-smoke.sh: node Allocated resources ($1):"
+	k describe node 2>&1 | sed -n '/^Allocated resources:/,/^Events:/p' || true
+}
 
 for tool in go docker kind kubectl jq bwrap nsenter gcc; do
 	command -v "$tool" >/dev/null || die "$tool not on PATH"
@@ -62,6 +67,7 @@ cleanup() {
 	if [ "$status" -ne 0 ]; then
 		# The run directory goes with $work: show it first.
 		cat "$work/run/attempts.jsonl" "$work/run/summary.json" 2>&1 | cut -c1-600 || true
+		allocated "on failure"
 		k get pods -A -o wide 2>&1 | tail -n 40 || true
 		k -n "$sys" logs deploy/loadgen --tail=40 2>&1 || true
 	fi
@@ -73,6 +79,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
+allocated "at start"
 deploy/loadgen-up.sh "$rate"
 # CI size, as stage5-smoke.sh: loadgen's and stress-ng's CPU requests
 # shrink (limits stay), else the node cannot hold them with the variants.
@@ -102,6 +109,7 @@ status=${PIPESTATUS[0]}
 set -e
 [ "$status" -eq 0 ] || die "the orchestrator exited $status"
 ok "the orchestrator exited 0"
+allocated "after the run"
 
 run="$work/run"
 [ "$(jq -r .reason "$run/summary.json")" = generations ] ||
