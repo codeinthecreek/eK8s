@@ -13,9 +13,12 @@ hashes.
 Everything runs on one Linux workstation. There is no cloud, GPU or
 container registry.
 
-**Status:** early. For what is built and what is next, see
-[docs/overview.md](docs/overview.md) (plain language) and
-[docs/STATUS.md](docs/STATUS.md) (current work).
+**Status:** the walking skeleton is complete. The first evolutionary run
+(10 generations, on the author's workstation) finished on 2026-10-28.
+For where the project stands and what is next, see
+[docs/overview.md](docs/overview.md) (plain language),
+[docs/STATUS.md](docs/STATUS.md) (current work) and
+[docs/AFTER-FIRST-RUN.md](docs/AFTER-FIRST-RUN.md) (follow-ups).
 
 ## The loop
 
@@ -35,6 +38,7 @@ container registry.
 | [DESIGN.md](DESIGN.md) | The settled architecture. Authoritative. |
 | [docs/decisions.md](docs/decisions.md) | Why each implementation choice was made. |
 | [docs/STATUS.md](docs/STATUS.md) | Where the work is right now. |
+| [docs/AFTER-FIRST-RUN.md](docs/AFTER-FIRST-RUN.md) | Items deferred until after the first run, and its findings. |
 | [CLAUDE.md](CLAUDE.md) | Working agreement and non-negotiables for Claude Code sessions. |
 
 ## Repo layout
@@ -44,13 +48,16 @@ cmd/service/          fixed entrypoint: routes, health, shutdown
 internal/hashcore/    fixed Argon2id core; never visible to mutation
 internal/classifier/  shared success/shed/failed judge + time ceiling
   testvectors/        known password/hash pairs (gate only)
+internal/hostpairs/   host-side /verify pairs and full verification
 internal/wrapper/     the evolvable layer: concurrency, backpressure
 gate/                 five-stage correctness gate
+fitness/              per-window scoring from loadgen's records
 loadgen/              open-loop load generator
 deploy/               kind config, manifests, stress-ng
 driver/               sandboxed claude -p mutation driver
 orchestrator/         population, selection, scoring loop
-lineage/              SQLite records + raw transcripts
+lineage/              run directory: genome archive, JSONL attempt
+                      records, raw transcripts (SQLite later)
 docs/                 overview, decisions, status, handoff formats,
                       workflow/ (project-independent method)
 ```
