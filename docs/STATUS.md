@@ -4,7 +4,7 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 *(inferred)* are guesses, not read from the repo; correct them.
 
 ## Now
-- claude/gate-goversion-suffix: gate accepts a GOVERSION with a GOEXPERIMENT suffix after "-" or a space (Arch's "go1.27.3-X:nodwarf5"). Next: PR 9, the owner's first real run (workstation steps under Parked first).
+- claude/ci-stress-request: CI overlay stress-ng CPU request 500m to 250m (limit stays) and orchestrator-smoke.sh prints the node's Allocated resources at start and on failure, after the dry run failed generation 1 Stage 5 Unschedulable (Insufficient cpu) on #61's CI. Next: PR 9, the owner's first real run (workstation steps under Parked first).
 
 ## Next
 - First run (walking skeleton): about 10 generations on the workstation, end to end: driver mutates the wrapper (DESIGN.md sec 12, sandboxed), gate Stages 1-5, orchestrator with loadgen windows, fitness (sec 9), lineage records; see the skeleton PR list below (owner answers: docs/decisions.md, PR #52).
@@ -19,8 +19,8 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 - Pending workstation (driver, before PR 9): (1) a dedicated token from `claude setup-token`; (2) `EK8S_DRIVER_LIVE=1 CLAUDE_CODE_OAUTH_TOKEN=<it> go test -count=1 -v -run TestLiveMutation ./driver/` once (one Sonnet call): checks that the real CLI passes the init check, edits under acceptEdits, reaches the API (TLS, DNS) from the sandbox and names claude-sonnet-5-5 in modelUsage; (3) with the same bwrap AppArmor setup as the gate (Parked item 1 (3)).
 
 ## Recent
+- #61 gate GOVERSION suffix: the gate accepts a GOEXPERIMENT suffix after a dash or a space (Arch's go1.27.3-X:nodwarf5); releaseOf in gate/assemble.go, TestReleaseOfGoVersion
 - #60 end-to-end dry run (skeleton PR 8): deploy/orchestrator-smoke.sh (orchestrator, 2 generations, 30 s loadgen windows, fakeclaude dry-run mode under real bwrap; attempts.jsonl, archive, transcripts, summary.json and the cluster checked) and its deploy.yml step; one decisions.md entry (2026-10-27)
 - #59 orchestrator part 2 (skeleton PR 7): orchestrator.Loop (generation 0 scored, tournament k = 2, mutation alongside windows, gate Stages 1-5, probation, integrity culls, every attempt recorded; halts on 3 excluded windows, loadgen restart, no parent or a fault), GateRunner, Session.Batches, Kube.VariantNamespaces; orchestrator/cmd/orchestrator; lineage Attempt.Mutation and summary.json; DESIGN.md sec 11, 13, 14 first-run notes; two decisions.md entries (2026-10-27)
 - #58 orchestrator part 1 (skeleton PR 6): orchestrator.Session (config shape check, boot_id, Recover, Drop), RunWindow (host batches, stress off, kindnet and canary first, kubelet CPU around the run, records checked, run-wide exclusions, host full verification and per-reason confirmation of integrity claims, baseline scores), Kube, Streak; gate.Report.BurstHashes; loadgen evidence carries the request path; DESIGN.md sec 10-11 settled; two decisions.md entries (2026-10-27)
 - #57 driver (skeleton PR 5): driver/ (bwrap-sandboxed claude -p with an allowlisted env, the token through --args, a process-group kill, an init-event check, copy-in and copy-back; BuildPrompt from lineage records; a fake claude for tests); DESIGN.md sec 12 aligned; three decisions.md entries; owner said yes to its four questions (2026-10-26)
-- #56 fitness (skeleton PR 4): fitness/ (per-window Score from loadgen's records, kubelet pod CPU counters, served-share weighting, Combine); smoke checks the kubelet CPU series; DESIGN.md sec 9 CPU source and baseline-only first run; one decisions.md entry (2026-10-26)
