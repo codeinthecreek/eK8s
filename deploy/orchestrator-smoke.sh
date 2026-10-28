@@ -109,6 +109,7 @@ status=${PIPESTATUS[0]}
 set -e
 [ "$status" -eq 0 ] || die "the orchestrator exited $status"
 ok "the orchestrator exited 0"
+allocated "after the run"
 
 run="$work/run"
 [ "$(jq -r .reason "$run/summary.json")" = generations ] ||

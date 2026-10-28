@@ -135,7 +135,7 @@ configuration.
 |----------|--------|---------------------|---------|
 | `EK8S_KIND_CONFIG` | up.sh | `kind/cluster.yaml` | `kind/cluster-ci.yaml` |
 | `EK8S_STRESS_KUSTOMIZE` | up.sh | `stress` | `stress-ci` |
-| `EK8S_RESERVED_CPU_MILLIS` | smoke.sh | `1000` | `0` |
+| `EK8S_RESERVED_CPU_MILLIS` | smoke.sh | `1000` | `10` |
 | `EK8S_STRESS_MIN_CPU_MILLIS` | smoke.sh | `1000` | `250` |
 
 Paths are relative to deploy/. The reserved value must equal the kind

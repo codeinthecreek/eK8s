@@ -55,7 +55,7 @@ jobs:
       # CI size (deploy/README.md): 2-CPU runner.
       EK8S_KIND_CONFIG: kind/cluster-ci.yaml
       EK8S_STRESS_KUSTOMIZE: stress-ci
-      EK8S_RESERVED_CPU_MILLIS: '0'
+      EK8S_RESERVED_CPU_MILLIS: '10'
       EK8S_STRESS_MIN_CPU_MILLIS: '250'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
