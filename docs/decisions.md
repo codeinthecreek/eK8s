@@ -681,7 +681,7 @@ max. Earlier entries are not backfilled.
 - Reverse: drop Attempt.Mutation and lineage/summary.go; edit cmd/orchestrator/main.go.
 - Origin: Code
 
-## 2026-10-27 · PR #60 (inferred) · End-to-end dry run: fakeclaude dry-run mode, 30 s windows, 2 generations
+## 2026-10-27 · PR #60 · End-to-end dry run: fakeclaude dry-run mode, 30 s windows, 2 generations
 - Decision: deploy/orchestrator-smoke.sh runs the real orchestrator with fakeclaude as -claude; the fake treats a real BuildPrompt prompt (first word "You") as dry-run mode: comment edit, or a broken build when the prompt lists exactly one earlier attempt. Loadgen's `-window` is patched to 30 s in the smoke, not changed in the renderer; 2 generations (ORCH_GENERATIONS overrides), checks by jq on attempts.jsonl and kubectl.
 - Rejected: a renderer `-window` flag (a production knob only CI uses); a state file for the fake (the sandbox is fresh per call); 3 generations by default (three live variants at CI size risk Unschedulable pods).
 - Reason: exercises Kube, the loop's waits, gate Stages 1-5 and lineage once per CI run without quota (no cull: the cap is 3, which does not fit the CI node); the prompt already carries what the fake needs.
