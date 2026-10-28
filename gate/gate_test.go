@@ -419,6 +419,27 @@ func TestParseGoVersion(t *testing.T) {
 	}
 }
 
+func TestReleaseOfGoVersion(t *testing.T) {
+	for _, tc := range []struct {
+		name, in string
+		ok       bool
+		want     goVersion
+	}{
+		{"plain release", "go1.27.3", true, goVersion{1, 27, 3}},
+		{"dash suffix", "go1.27.3-X:nodwarf5", true, goVersion{1, 27, 3}},
+		{"space suffix", "go1.25.4 X:nodwarf5", true, goVersion{1, 25, 4}},
+		{"devel refused", "devel go1.27-abc123 Mon Jan 1 00:00:00 2026", false, goVersion{}},
+		{"devel dash refused", "devel-abc123", false, goVersion{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := parseGoVersion(releaseOf(tc.in))
+			if ok != tc.ok || got != tc.want {
+				t.Errorf("%q: %v %v, want %v %v", tc.in, got, ok, tc.want, tc.ok)
+			}
+		})
+	}
+}
+
 func TestMinGoVersion(t *testing.T) {
 	got, err := minGoVersion(filepath.Join(repoRoot(t), "go.mod"))
 	if err != nil || compareGoVersions(got, goVersion{1, 26, 0}) <= 0 {
