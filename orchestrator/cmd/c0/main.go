@@ -63,9 +63,6 @@ import (
 // cmd/orchestrator's.
 const controlTimeout = 30 * time.Second
 
-// windowS is loadgen's window length in seconds: deploy/loadgen's W.
-const windowS = 300
-
 // Bounds on the waits that are not the window.
 const (
 	podBound  = 3 * time.Minute // a pod Ready, the HPA settled
@@ -202,6 +199,9 @@ func haltText(v Verdict) string {
 	case InvalidTwice:
 		return fmt.Sprintf("rate %d was invalid twice (last pass %d, first fail %d)", v.Rate, v.Pass, v.Fail)
 	case Unresolved:
+		if v.Fail == 0 {
+			return fmt.Sprintf("C0 unresolved: a confirm window at the top rate, %d, failed (last pass below it %d)", v.Rate, v.Pass)
+		}
 		return fmt.Sprintf("C0 unresolved: a confirm window at %d failed (first fail %d)", v.Rate, v.Fail)
 	}
 	return string(v.Kind)
@@ -468,7 +468,7 @@ func (r *runner) measure(ctx context.Context, rate int, sr *StepRecord) (Obs, er
 	cl := r.proxy.Client()
 	sess, err := orchestrator.NewSession(ctx, orchestrator.SessionConfig{
 		Client: cl, Cluster: r.kube, Core: r.core,
-		Want:   orchestrator.Shape{Rate: float64(rate), WindowS: windowS, BurstRate: 4 * float64(rate)},
+		Want:   orchestrator.Shape{Rate: float64(rate), WindowS: lgdeploy.W.Seconds(), BurstRate: 4 * float64(rate)},
 		Params: fitness.DefaultParams(), Workers: r.c.workers,
 	})
 	if err != nil {

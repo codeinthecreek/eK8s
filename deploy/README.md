@@ -272,9 +272,10 @@ rate (`loadgen-up.sh`), runs one 5-minute window through
 `orchestrator.Session` and applies the pass rule. It walks `-ladder`
 (default 6,9,12,15,18,19) up to the first fail, bisects integer rates
 between the last pass and that fail, then runs `-confirm` (default 2) more
-windows at the last pass. r = 0.5 x C0; if every ladder rate passes the
+windows at the last pass. r = 0.5 x C0; if every ladder rate passes, it
+runs `-confirm` more windows at the top rate, and if they pass too the
 result is C0 >= the top rate (loadgen's maxRate is 19, so the default
-ladder ends there). A step whose window was excluded, or whose pod, HPA or
+ladder ends there); a failed one leaves C0 unresolved. A step whose window was excluded, or whose pod, HPA or
 restart checks failed, is not measured: it reruns once, and a second
 invalid step halts. A disqualification of gen 0 halts at once. The JSON
 result (`-out`, a new file) is rewritten after every step.
@@ -321,7 +322,7 @@ one (ladder too high, a step invalid twice, a confirm window failed: C0
 unresolved, everything recorded), 2 on a fault, a disqualification, an
 interrupt or a refused start. On exit the namespace and the loadgen
 target are deleted unless `-keep`; loadgen stays deployed at the last
-step's rate. The pod, restart and HPA checks compare the state just before the window with the state just after it; a restart between steps is not seen. A run takes about an hour: at most 9 windows of 5 minutes
+stepped rate, so run 2 starts with `deploy/loadgen-up.sh <r>`. The pod, restart and HPA checks compare the state just before the window with the state just after it; a restart between steps is not seen. A run takes about an hour: at most 9 windows of 5 minutes
 for the default ladder without reruns, plus a loadgen redeploy each
 *(inferred)*.
 

@@ -23,14 +23,16 @@ type Kind string
 const (
 	// Resolved: C0 = Verdict.C0, and the confirm windows at it all passed.
 	Resolved Kind = "resolved"
-	// AtLeast: every ladder rate passed, so C0 >= Verdict.C0 (the top
-	// rate, normally loadgen's maxRate).
+	// AtLeast: every ladder rate passed, and so did the confirm windows
+	// at the top rate, so C0 >= Verdict.C0 (the top rate, normally
+	// loadgen's maxRate).
 	AtLeast Kind = "at-least"
 	// LadderTooHigh: the first ladder rate failed.
 	LadderTooHigh Kind = "ladder-too-high"
 	// InvalidTwice: a window was invalid on its rerun too.
 	InvalidTwice Kind = "invalid-twice"
-	// Unresolved: a confirm window at Verdict.Pass failed.
+	// Unresolved: a confirm window failed, at Verdict.Pass after a bisection
+	// or at the top ladder rate when every ladder rate passed.
 	Unresolved Kind = "unresolved"
 )
 
@@ -52,7 +54,10 @@ func (v Verdict) Halted() bool { return v.Kind != Resolved && v.Kind != AtLeast 
 
 // Search walks ladder upward (strictly increasing, positive) until the
 // first rate that fails. If that is the first, it halts (LadderTooHigh);
-// if none fails, C0 >= the top rate (AtLeast). Otherwise it bisects the
+// if none fails, it runs confirm windows at the top rate, all of which
+// must pass (AtLeast: C0 >= the top rate; else Unresolved with Rate the
+// top rate and Pass the last ladder rate below it, 0 for a one-rate
+// ladder). Otherwise it bisects the
 // integer rates between the last pass L and the first fail F until
 // F = L + 1, then runs confirm more windows at L, all of which must pass
 // (else Unresolved; it does not keep searching). Rates are assumed
@@ -60,8 +65,8 @@ func (v Verdict) Halted() bool { return v.Kind != Resolved && v.Kind != AtLeast 
 // taken at its word, and the confirm windows are what catch it.
 //
 // A window that is invalid is rerun once; a second invalid halts
-// (InvalidTwice). A Step error is returned with the Verdict so far
-// (Kind empty).
+// (InvalidTwice). A Step error returns an empty Verdict: the steps so far
+// survive only in the record file.
 func Search(ladder []int, confirm int, step Step) (Verdict, error) {
 	if len(ladder) == 0 {
 		return Verdict{}, errors.New("c0: empty ladder")
@@ -111,7 +116,24 @@ func Search(ladder []int, confirm int, step Step) (Verdict, error) {
 		break
 	}
 	if !failed {
-		return Verdict{Kind: AtLeast, C0: lo, Pass: lo}, nil
+		top := ladder[len(ladder)-1]
+		below := 0
+		if len(ladder) > 1 {
+			below = ladder[len(ladder)-2]
+		}
+		for range confirm {
+			pass, ok, err := measure(top)
+			if err != nil {
+				return Verdict{}, err
+			}
+			if !ok {
+				return Verdict{Kind: InvalidTwice, Rate: top, Pass: below}, nil
+			}
+			if !pass {
+				return Verdict{Kind: Unresolved, Rate: top, Pass: below}, nil
+			}
+		}
+		return Verdict{Kind: AtLeast, C0: top, Pass: top}, nil
 	}
 
 	for hi-lo > 1 {

@@ -66,7 +66,13 @@ func TestSearch(t *testing.T) {
 			name: "all pass is C0 at least the top rate", ladder: defaultLadder, confirm: 2,
 			s:     script{pass: below(100)},
 			want:  Verdict{Kind: AtLeast, C0: 19, Pass: 19},
-			rates: defaultLadder,
+			rates: []int{6, 9, 12, 15, 18, 19, 19, 19},
+		},
+		{
+			name: "a top-rate confirm window that fails leaves C0 unresolved", ladder: defaultLadder, confirm: 2,
+			s:     script{pass: below(100), byCall: map[call]bool{{19, 3}: false}},
+			want:  Verdict{Kind: Unresolved, Rate: 19, Pass: 18},
+			rates: []int{6, 9, 12, 15, 18, 19, 19, 19},
 		},
 		{
 			name: "first rate fails halts", ladder: defaultLadder, confirm: 2,
@@ -136,7 +142,13 @@ func TestSearch(t *testing.T) {
 			name: "a one-rate ladder that passes", ladder: []int{19}, confirm: 2,
 			s:     script{pass: below(19)},
 			want:  Verdict{Kind: AtLeast, C0: 19, Pass: 19},
-			rates: []int{19},
+			rates: []int{19, 19, 19},
+		},
+		{
+			name: "a one-rate ladder whose confirm window fails", ladder: []int{19}, confirm: 2,
+			s:     script{pass: below(100), byCall: map[call]bool{{19, 2}: false}},
+			want:  Verdict{Kind: Unresolved, Rate: 19},
+			rates: []int{19, 19},
 		},
 	}
 	for _, tt := range tests {
@@ -204,6 +216,27 @@ func TestSearchInvalidTwiceInConfirm(t *testing.T) {
 		t.Fatal(err)
 	}
 	if want := (Verdict{Kind: InvalidTwice, Rate: 13, Pass: 13, Fail: 14}); got != want {
+		t.Errorf("verdict %+v, want %+v", got, want)
+	}
+}
+
+// TestSearchInvalidTwiceInTopConfirm: the ladder's own window at the top
+// rate is valid; the confirm window there is invalid on both tries.
+func TestSearchInvalidTwiceInTopConfirm(t *testing.T) {
+	n := 0
+	got, err := Search(defaultLadder, 1, func(r, attempt int) (Obs, error) {
+		if r == 19 {
+			n++
+			if n >= 2 {
+				return Obs{}, nil
+			}
+		}
+		return Obs{Valid: true, Pass: true}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := (Verdict{Kind: InvalidTwice, Rate: 19, Pass: 18}); got != want {
 		t.Errorf("verdict %+v, want %+v", got, want)
 	}
 }
