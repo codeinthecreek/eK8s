@@ -18,8 +18,8 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 - Driver, resolved 2026-10-28: TestLiveMutation passed (11 turns) on the workstation.
 
 ## Recent
+- #63 run 1 recorded (skeleton PR 9): results, findings and follow-ups in docs/decisions.md (2026-10-28), docs/STATUS.md and docs/AFTER-FIRST-RUN.md; run 1 CPU fit and host notes
 - #62 CI kind node reserves 10m CPU (was 100m) so generation 1 fits beside generation 0 at 2 replicas; orchestrator-smoke.sh prints the node's allocated resources
 - #61 gate GOVERSION suffix: the gate accepts a GOEXPERIMENT suffix after a dash or a space (Arch's go1.27.3-X:nodwarf5); releaseOf in gate/assemble.go, TestReleaseOfGoVersion
 - #60 end-to-end dry run (skeleton PR 8): deploy/orchestrator-smoke.sh (orchestrator, 2 generations, 30 s loadgen windows, fakeclaude dry-run mode under real bwrap; attempts.jsonl, archive, transcripts, summary.json and the cluster checked) and its deploy.yml step; one decisions.md entry (2026-10-27)
 - #59 orchestrator part 2 (skeleton PR 7): orchestrator.Loop (generation 0 scored, tournament k = 2, mutation alongside windows, gate Stages 1-5, probation, integrity culls, every attempt recorded; halts on 3 excluded windows, loadgen restart, no parent or a fault), GateRunner, Session.Batches, Kube.VariantNamespaces; orchestrator/cmd/orchestrator; lineage Attempt.Mutation and summary.json; DESIGN.md sec 11, 13, 14 first-run notes; two decisions.md entries (2026-10-27)
-- #58 orchestrator part 1 (skeleton PR 6): orchestrator.Session (config shape check, boot_id, Recover, Drop), RunWindow (host batches, stress off, kindnet and canary first, kubelet CPU around the run, records checked, run-wide exclusions, host full verification and per-reason confirmation of integrity claims, baseline scores), Kube, Streak; gate.Report.BurstHashes; loadgen evidence carries the request path; DESIGN.md sec 10-11 settled; two decisions.md entries (2026-10-27)
