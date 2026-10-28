@@ -210,9 +210,7 @@ func resolveToolchain(ctx context.Context, repoRoot string) (toolchain, error) {
 	if v.GOROOT == "" || v.GOMODCACHE == "" || v.GOCACHE == "" {
 		return toolchain{}, fmt.Errorf("go env: empty GOROOT, GOMODCACHE or GOCACHE: %s", out)
 	}
-	// GOVERSION may carry experiments after a space: "go1.26.9 X:foo".
-	release, _, _ := strings.Cut(v.GOVERSION, " ")
-	got, ok := parseGoVersion(release)
+	got, ok := parseGoVersion(releaseOf(v.GOVERSION))
 	if !ok {
 		return toolchain{}, fmt.Errorf("go env: unparseable GOVERSION %q", v.GOVERSION)
 	}
@@ -225,6 +223,18 @@ func resolveToolchain(ctx context.Context, repoRoot string) (toolchain, error) {
 		buildCache: v.GOCACHE,
 		path:       os.Getenv("PATH"),
 	}, nil
+}
+
+// releaseOf cuts the suffix GOVERSION may carry after the release: a
+// GOEXPERIMENT after a space ("go1.25.4 X:foo") or after a dash
+// ("go1.27.3-X:foo", as distro builds print it). A string that does not
+// start with a release ("devel ...") is returned unchanged for
+// parseGoVersion to refuse.
+func releaseOf(s string) string {
+	if i := strings.IndexAny(s, " -"); i >= 0 {
+		return s[:i]
+	}
+	return s
 }
 
 // env is the complete environment for a go command on a build tree,
