@@ -687,3 +687,10 @@ max. Earlier entries are not backfilled.
 - Reason: exercises Kube, the loop's waits, gate Stages 1-5 and lineage once per CI run without quota (no cull: the cap is 3, which does not fit the CI node); the prompt already carries what the fake needs.
 - Reverse: delete the script, its deploy.yml step and fakeclaude's dryRun.
 - Origin: Code
+
+## 2026-10-28 · PR 9 (first real run, docs PR) · Run 1 recorded: r = 11 provisional, baseline-only windows; findings
+- Decision: none new; records run 1 (owner's Arch workstation, exit 0, reason generations, 10 of 10 mutations passed the gate, 38 window scores, 8 culls, 0 exclusions, 43 turns, 1 h 22 min). r = 11 was provisional: the argon2 CLI on the host measured 43 ms per hash at t=2, m=19456 KiB, p=1, so 23 hashes/s per core, r = 0.5 x that, rounded down. Windows were baseline-only (no stress), so success_rate was 1 for every variant and C0 was never measured.
+- Findings: the CPU floor 0.05 s is above this host's cpu_per_success (0.0424), so the CPU term clamped to 1 for every variant; with latency scored from 50 ms to HangTimeout, 1 ms of p95 moves a score about 0.00015, so run 1's culls ranked p95 jitter; the cull rule has no minimum margin; "a tie culls the newer" holds only if l.live is ordered oldest-first (orchestrator/loop.go:468-480), unverified. Follow-ups: docs/AFTER-FIRST-RUN.md, 2026-10-28.
+- Rejected: changing the floors or the cull rule in this PR (the owner decides host-calibrated floors).
+- Reverse: n/a (a record, no change).
+- Origin: Code
