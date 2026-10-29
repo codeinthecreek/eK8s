@@ -20,6 +20,8 @@ loadgen-up.sh <r>     build loadgen's image, load it and apply its Deployment
 smoke.sh              infra smoke test (run after up.sh)
 variant-smoke.sh      variant bundle smoke test (run after up.sh)
 loadgen-smoke.sh      loadgen smoke test (run after up.sh; deploys loadgen)
+watch.sh <run> [log]  read-only tmux panes for watching a run (pods, top, HPAs,
+                      events, node docker stats, attempts.jsonl, the log)
 ```
 
 ## Cluster
@@ -283,6 +285,20 @@ during a run, by hand or by a power daemon, is not caught. It records the state 
 `host_clock` and the override as `allow_unpinned` in run.json, and takes
 `-allow-unpinned`. The CI smoke (orchestrator-smoke.sh) passes it, since a CI
 runner cannot pin its clocks, and checks that run.json records both.
+
+## Watching a run
+
+`deploy/watch.sh RUN_DIR [LOG]` opens one tmux session, `ek8s-watch`, with
+a tiled pane each for `kubectl get pods -A -o wide` (every 5 s), `kubectl
+top pods -A` and `kubectl get hpa -A` (every 10 s), `kubectl get events -A
+--watch`, `docker stats` of the kind node container, and `tail -F` of
+`RUN_DIR/attempts.jsonl` and of LOG, a file the orchestrator's output is
+saved to (`... 2>&1 | tee run.log`). `-context` (default `kind-ek8s`) and
+`-cluster` (default `ek8s`) select the cluster. Every pane only reads; change
+nothing by hand during a run, since the orchestrator owns stress-ng, the
+variant namespaces and loadgen. It needs tmux, watch, kubectl and docker,
+installs nothing, and refuses if the session exists (`tmux attach -t
+ek8s-watch` to rejoin, `tmux kill-session -t ek8s-watch` to end it).
 
 ## C0
 
