@@ -724,7 +724,7 @@ max. Earlier entries are not backfilled.
 - Reverse: drop the preflight check; keep recording the state.
 - Origin: chat
 
-## 2026-10-29 · PR #66 (inferred) · The orchestrator checks the host clocks once at start and records them in run.json
+## 2026-10-29 · PR #66 · The orchestrator checks the host clocks once at start and records them in run.json
 - Decision: the orchestrator calls hostclock.Preflight (moved from c0) once at start, before any cluster action, and records host_clock and allow_unpinned in run.json; lineage.Create marshals run.json before creating anything, so an unrecordable value leaves no run directory.
 - Rejected: a check before every window (adds a halt path, and a reboot ends the run anyway); summary.json only (lost when a run halts or crashes); EPP in the refusal rule (recorded only); a typed host_clock field (it would add internal/hostclock to the driver's dependencies, TestDeps).
 - Reverse: drop the Preflight call and the run.json fields.
