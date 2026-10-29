@@ -70,7 +70,7 @@ func (w WindowResult) Scored() bool { return len(w.Excluded) == 0 }
 // reason names and scores only, never a record's text: records carry
 // candidate-controlled bytes (docs/STATUS.md, Parked).
 type VariantResult struct {
-	Records int // both halves'
+	Records int // every half's that ran
 	// Disqualified is the host-confirmed integrity reason (DESIGN.md sec
 	// 9), ReasonNone for none; DisqualifiedHalf is the half it was found
 	// in (the baseline's first) and DisqualifiedIndex its record's index
@@ -122,8 +122,9 @@ func (v VariantResult) Fitness() (score float64, ok bool) {
 //
 // A half that fails the first look or the canary is excluded without
 // starting. A loadgen restart is an exclusion, and Recover must run
-// before the next window. An error is a fault; on one the run may be
-// left in loadgen, cancelled and drained where it could be.
+// before the next window; one in the stress half still leaves the
+// baseline half judged. An error is a fault; on one the run may be left
+// in loadgen, cancelled and drained where it could be.
 func (s *Session) RunWindow(ctx context.Context, live []string, batches []Batch) (WindowResult, error) {
 	return s.window(ctx, live, batches, HalvesPerWindow)
 }
@@ -175,8 +176,18 @@ func (s *Session) window(ctx context.Context, live []string, batches []Batch, ha
 	if halves == HalvesPerWindow && len(base.excluded) == 0 {
 		res.StressRunID = newRunID()
 		st, err := s.runHalf(ctx, HalfStress, res.StressRunID, live, of(1))
+		if errors.Is(err, client.ErrBootChanged) {
+			// The baseline half's records were read in full before the
+			// restart: the host still judges them (DESIGN.md sec 11).
+			s.restarted = true
+			res.Excluded = []string{ExcludedRestart}
+			if err := s.judge(ctx, &res, live, []*half{base}); err != nil {
+				return WindowResult{}, err
+			}
+			return res, nil
+		}
 		if err != nil {
-			return restart(err)
+			return WindowResult{}, err
 		}
 		res.StressExcluded = st.excluded
 		ran = append(ran, st)
@@ -248,9 +259,8 @@ func (s *Session) runHalf(ctx context.Context, name, runID string, live []string
 	}
 	var stressOff func() error
 	if name == HalfStress {
-		if err := s.c.Cluster.StressOn(ctx); err != nil {
-			return nil, err
-		}
+		// On from the scale call: a StressOn that scaled up and then
+		// failed its wait still leaves pods to stop.
 		on := true
 		defer func() {
 			if !on {
@@ -262,8 +272,14 @@ func (s *Session) runHalf(ctx context.Context, name, runID string, live []string
 			}
 		}()
 		stressOff = func() error {
+			if err := s.c.Cluster.StressOff(ctx); err != nil {
+				return err // the defer tries again, detached
+			}
 			on = false
-			return s.c.Cluster.StressOff(ctx)
+			return nil
+		}
+		if err := s.c.Cluster.StressOn(ctx); err != nil {
+			return nil, err
 		}
 	} else if err := s.c.Cluster.StressOff(ctx); err != nil {
 		return nil, err

@@ -166,6 +166,7 @@ type fakeCluster struct {
 	gone      map[string]bool // ids whose pod is gone from the second sample on
 	stressOff int
 	stressOn  int
+	onErr     error         // StressOn fails with it, after scaling up
 	onStress  func(on bool) // called on each StressOn and StressOff, if set
 	reads     func() int
 	ops       []string
@@ -193,7 +194,7 @@ func (c *fakeCluster) stress(on bool) {
 }
 
 func (c *fakeCluster) StressOff(context.Context) error { c.stress(false); return nil }
-func (c *fakeCluster) StressOn(context.Context) error  { c.stress(true); return nil }
+func (c *fakeCluster) StressOn(context.Context) error  { c.stress(true); return c.onErr }
 func (c *fakeCluster) KindnetReady(context.Context) (bool, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -589,6 +590,44 @@ func TestWindowStressExcluded(t *testing.T) {
 	if got := fx.cluster.ops[len(fx.cluster.ops)-1]; fx.cluster.stressOn != 1 || !strings.HasPrefix(got, "stress off") {
 		t.Errorf("stress on %d times, last cluster call %q; want once, then off", fx.cluster.stressOn, got)
 	}
+}
+
+// TestWindowStressFaults checks a loadgen restart and a fault inside the
+// stress half: after a restart the baseline half's records are still
+// judged, and either way stress-ng is off again.
+func TestWindowStressFaults(t *testing.T) {
+	core := hashcore.New()
+	t.Run("restart", func(t *testing.T) {
+		fx := newFixture(t, map[string]http.Handler{"1": gen0(core), "2": noShed(fakeHasher{core})}, "1", "2")
+		fx.cluster.onStress = func(on bool) {
+			if on {
+				fx.restartLoadgen()
+			}
+		}
+		res := fx.window()
+		if strings.Join(res.Excluded, ",") != ExcludedRestart || !fx.s.Restarted() {
+			t.Fatalf("excluded %v, restarted %v; want loadgen-restart", res.Excluded, fx.s.Restarted())
+		}
+		if v := res.Variants["2"]; v.Disqualified != classifier.ReasonVerifyMismatch || v.DisqualifiedHalf != HalfBaseline {
+			t.Errorf("cheat: %+v, want verify_mismatch in the baseline half", v)
+		}
+		if v := res.Variants["1"]; v.Records != 20 || v.Baseline != nil {
+			t.Errorf("honest variant: %+v; want 20 records, no score", v)
+		}
+		if got := fx.cluster.ops[len(fx.cluster.ops)-1]; !strings.HasPrefix(got, "stress off") {
+			t.Errorf("last cluster call %q, want stress off", got)
+		}
+	})
+	t.Run("stress on fails", func(t *testing.T) {
+		fx := newFixture(t, map[string]http.Handler{"1": gen0(core)}, "1")
+		fx.cluster.onErr = errors.New("stress-ng not Running within its bound")
+		if _, err := fx.s.RunWindow(t.Context(), fx.live, fx.batches()); !errors.Is(err, fx.cluster.onErr) {
+			t.Errorf("RunWindow = %v, want the StressOn error", err)
+		}
+		if got := fx.cluster.ops[len(fx.cluster.ops)-1]; fx.cluster.stressOn != 1 || !strings.HasPrefix(got, "stress off") {
+			t.Errorf("stress on %d times, last cluster call %q; want once, then off", fx.cluster.stressOn, got)
+		}
+	})
 }
 
 // TestRunBaseline checks C0's window: the baseline half alone, stress-ng

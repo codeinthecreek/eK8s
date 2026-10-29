@@ -39,3 +39,4 @@ autonomous").
 - Cull rule: no minimum margin; consider a significance margin so a cull is not decided by noise. (added 2026-10-28, run 1)
 - Verify the cull tie rule: "a tie culls the newer" holds only if l.live is ordered oldest-first (orchestrator/loop.go:468-480). (added 2026-10-28, run 1)
 - deploy/README.md host notes: Arch (the AppArmor steps are Ubuntu-only; no userns step was needed; distro GOVERSION suffixes handled since #61) and the still-unchecked Ubuntu profile options (bwrap-userns-restrict packaging in 25.04+ vs 24.04's apparmor-profiles, and whether its unpriv_bwrap child profile breaks the nsenter relay). (added 2026-10-28, run 1)
+- CPU used between a window's baseline run and its stress run (the StressOn wait, kindnet, canary) is charged to neither half, so a variant could push deferred work (GC, cleanup) into that gap; the same kind of gap as between windows, and small (PR #68 self-review). (added 2026-10-29)

@@ -1169,9 +1169,10 @@ so cold start is scored, identically for every variant.
 A window is a baseline half, then a stress half, each a loadgen window
 run of length W with its own `/verify` batch (an upload replaces a
 pending one, so the stress half's batch is uploaded after the baseline
-run). The stress half follows once stress-ng is Running, so it starts
-with the replicas the baseline half left (HPA scale-down stabilisation),
-the same for every variant; only the baseline half starts cold. Each
+run). The stress half follows once stress-ng is Running, so each
+variant starts it with whatever replicas its own HPA left after the
+baseline half (HPA scale-down stabilisation), under one rule for every
+variant; only the baseline half starts cold. Each
 half has its own kindnet first look, policy canary and kubelet CPU
 samples, taken around its run. Stress-ng goes off again as soon as the
 stress run ends, before its records are read, so the host's
