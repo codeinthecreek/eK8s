@@ -277,6 +277,13 @@ result's `host_clock`, and refuses to start unless every governor is
 0); a host with no readable governor counts as unpinned. `-allow-unpinned`
 overrides the refusal and is recorded as `allow_unpinned`.
 
+`orchestrator/cmd/orchestrator` does the same check (`hostclock.Preflight`),
+once at start and before any cluster action, so a change to the clocks
+during a run, by hand or by a power daemon, is not caught. It records the state as
+`host_clock` and the override as `allow_unpinned` in run.json, and takes
+`-allow-unpinned`. The CI smoke (orchestrator-smoke.sh) passes it, since a CI
+runner cannot pin its clocks, and checks that run.json records both.
+
 ## C0
 
 `orchestrator/cmd/c0` measures C0 as DESIGN.md sec 10 defines it: the
