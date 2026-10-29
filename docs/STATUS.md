@@ -4,7 +4,7 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 *(inferred)* are guesses, not read from the repo; correct them.
 
 ## Now
-- R2-SH (PR #68 inferred): the stress half restored: each window is a baseline run then a stress run, fitness = min (owner answers Q1-Q4 A; docs/decisions.md, 2026-10-29); deploy/watch.sh (read-only tmux panes for a run); CLAUDE.md Guard bullet
+- R2-SH (PR #68): the stress half restored: each window is a baseline run then a stress run, fitness = min (owner answers Q1-Q4 A; docs/decisions.md, 2026-10-29); deploy/watch.sh (read-only tmux panes for a run); CLAUDE.md Guard bullet
 
 ## Next
 - Before run 2: (b) the orchestrator records and refuses unpinned clocks (reuse internal/hostclock) [done, #66]; fitness calibration with pinned clocks (CPU per success 0.0296-0.0311 s and p95 33 ms flat, under the floors); stress windows at r = 15.5 [stress half built, #68; a window now takes about 10 min of load, so a generation about 13 min (inferred)]. Run 2 at r = 15.5 (b = 62, burst n = 1,860) is inside the committed maxRate 19 and maxBurstSends 3000. Details: docs/AFTER-FIRST-RUN.md, items added 2026-10-29.
