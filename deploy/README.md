@@ -270,7 +270,8 @@ echo 1 | sudo tee /sys/devices/system/cpu/intel_pstate/no_turbo
 ```
 
 On a host with `cpufreq/boost` instead, `echo 0 | sudo tee /sys/devices/system/cpu/cpufreq/boost`.
-c0 reads these (and the scaling driver) under `-sysfs`, records them in the
+c0 reads these (and the scaling driver and energy performance
+preference, which it records but does not enforce) under `-sysfs`, records them in the
 result's `host_clock`, and refuses to start unless every governor is
 `performance` and turbo is off where readable (`no_turbo` = 1 or `boost` =
 0); a host with no readable governor counts as unpinned. `-allow-unpinned`

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"slices"
@@ -154,5 +155,20 @@ func TestRecordSave(t *testing.T) {
 	}
 	if strings.Contains(string(b), `"scaling_driver"`) {
 		t.Errorf("an absent driver is recorded:\n%s", b)
+	}
+}
+
+// TestRunRefusesUnpinnedFirst: run reads the clocks before it touches the
+// cluster, so an unpinned host fails here with no kubectl.
+func TestRunRefusesUnpinnedFirst(t *testing.T) {
+	dir := t.TempDir()
+	c := config{image: "ek8s-wrapper:0123456789ab", id: "900001", out: filepath.Join(dir, "c0.json"), repo: ".",
+		kubeCtx: "kind-ek8s", ladder: []int{6}, confirm: 2, sysfs: fakeSysfs(t, "powersave", "1", 1)}
+	_, err := run(context.Background(), c)
+	if err == nil || !strings.Contains(err.Error(), "host clocks are not pinned") {
+		t.Errorf("run = %v, want the unpinned refusal", err)
+	}
+	if _, serr := os.Stat(c.out); serr == nil {
+		t.Errorf("a result file was written before the clock check")
 	}
 }

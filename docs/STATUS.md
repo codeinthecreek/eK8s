@@ -4,7 +4,7 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 *(inferred)* are guesses, not read from the repo; correct them.
 
 ## Now
-- C0 measured (2026-10-29, owner's workstation, pinned clocks, uncommitted single-target patch maxRate 40 / maxBurstSends 4800, reverted): C0 = 31, r = 15.5, b = 62 for run 2 (docs/decisions.md, 2026-10-29). c0 now records the host clocks and refuses unpinned ones (internal/hostclock; PR #66 inferred, branch ccr-d8c28647-r3qwzi, no PR yet). The committed limits stay maxRate 19 and maxBurstSends 3000.
+- C0 measured (2026-10-29, owner's workstation, pinned clocks, uncommitted single-target patch maxRate 40 / maxBurstSends 4800, reverted): C0 = 31, r = 15.5, b = 62 for run 2 (docs/decisions.md, 2026-10-29). c0 now records the host clocks and refuses unpinned ones (internal/hostclock; PR #65 inferred, branch ccr-d8c28647-r3qwzi, no PR yet). The committed limits stay maxRate 19 and maxBurstSends 3000.
 
 ## Next
 - Before run 2: (b) the orchestrator records and refuses unpinned clocks (reuse internal/hostclock); fitness calibration with pinned clocks (CPU per success 0.0296-0.0311 s and p95 33 ms flat, under the floors); stress windows at r = 15.5. Run 2 at r = 15.5 (b = 62, burst n = 1,860) is inside the committed maxRate 19 and maxBurstSends 3000. Details: docs/AFTER-FIRST-RUN.md, items added 2026-10-29.
