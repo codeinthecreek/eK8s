@@ -56,6 +56,7 @@ import (
 	"github.com/codeinthecreek/eK8s/gate"
 	"github.com/codeinthecreek/eK8s/internal/classifier"
 	"github.com/codeinthecreek/eK8s/internal/hashcore"
+	"github.com/codeinthecreek/eK8s/internal/hostclock"
 	"github.com/codeinthecreek/eK8s/orchestrator"
 )
 
@@ -80,6 +81,10 @@ type config struct {
 	ladder                        []int
 	confirm, workers              int
 	keep                          bool
+	// sysfs is the sysfs root the host clocks are read under;
+	// allowUnpinned measures on a host whose clocks are not pinned.
+	sysfs         string
+	allowUnpinned bool
 }
 
 func main() {
@@ -93,6 +98,8 @@ func main() {
 	flag.StringVar(&c.repo, "repo", ".", "repo checkout (deploy/loadgen-up.sh runs from it)")
 	flag.StringVar(&c.kubeCtx, "kube-context", "kind-ek8s", "the kubectl context")
 	flag.IntVar(&c.workers, "workers", 0, "host Argon2 goroutines (0: GOMAXPROCS)")
+	flag.StringVar(&c.sysfs, "sysfs", hostclock.DefaultRoot, "the sysfs root the host clocks are read under")
+	flag.BoolVar(&c.allowUnpinned, "allow-unpinned", false, "measure although the host clocks are not pinned (governor performance, turbo off); recorded in the result")
 	flag.Parse()
 	if flag.NArg() > 0 || c.image == "" || c.out == "" {
 		flag.Usage()
@@ -214,6 +221,7 @@ type runner struct {
 	kube   *orchestrator.Kube
 	proxy  *gate.ControlProxy
 	core   *hashcore.Core
+	clock  hostclock.State // read at start, before the preflight
 	rec    *Record
 	ns     string
 	label  string
@@ -253,6 +261,9 @@ func run(ctx context.Context, c config) (Verdict, error) {
 	b := make([]byte, 8)
 	rand.Read(b) // never returns an error (Go 1.24+)
 	r.label = "ek8s-" + hex.EncodeToString(b)
+	if r.clock, err = clockPreflight(c.sysfs, c.allowUnpinned); err != nil {
+		return Verdict{}, err
+	}
 	if err := r.preflight(ctx); err != nil {
 		return Verdict{}, err
 	}
@@ -299,6 +310,22 @@ func (r *runner) finish(v Verdict, err error) (Verdict, error) {
 		err = serr
 	}
 	return v, err
+}
+
+// clockPreflight reads the host clocks under sysfs and refuses unless
+// they are pinned (hostclock.State.Unpinned), or allow is set. Unpinned
+// clocks moved gen 0's CPU per success 2x (docs/decisions.md, 2026-10-29).
+// It returns the state either way, for the record.
+func clockPreflight(sysfs string, allow bool) (hostclock.State, error) {
+	st, err := hostclock.Read(sysfs)
+	if err != nil {
+		return st, fmt.Errorf("preflight: host clocks: %w", err)
+	}
+	if why := st.Unpinned(); len(why) > 0 && !allow {
+		return st, fmt.Errorf("preflight: host clocks are not pinned: %s (set them as deploy/README.md, Host clocks, or pass -allow-unpinned)",
+			strings.Join(why, "; "))
+	}
+	return st, nil
 }
 
 // preflight refuses to start on a cluster the measurement would not be
@@ -349,7 +376,7 @@ func (r *runner) newRecord(ctx context.Context) (*Record, error) {
 	}
 	return &Record{
 		Head: head, Dirty: dirty != "", Image: r.c.image, ID: r.c.id, Label: r.label, NProc: runtime.NumCPU(), NodeCPU: cpu,
-		Ladder: r.c.ladder, Confirm: r.c.confirm, Started: time.Now().UTC(),
+		Ladder: r.c.ladder, Confirm: r.c.confirm, HostClock: r.clock, AllowUnpinned: r.c.allowUnpinned, Started: time.Now().UTC(),
 	}, nil
 }
 

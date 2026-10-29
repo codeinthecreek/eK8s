@@ -1,7 +1,10 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -80,5 +83,76 @@ func TestVerdictResult(t *testing.T) {
 		if got.C0 != tt.c0 || got.R != tt.r || tt.v.Halted() != tt.halt {
 			t.Errorf("%s: result %+v, halted %v; want c0 %q r %q halted %v", tt.v.Kind, got, tt.v.Halted(), tt.c0, tt.r, tt.halt)
 		}
+	}
+}
+
+// fakeSysfs writes the governors of cpu0..cpu(n-1) and no_turbo under a
+// temporary sysfs root.
+func fakeSysfs(t *testing.T, governor, noTurbo string, n int) string {
+	t.Helper()
+	root := t.TempDir()
+	write := func(rel, text string) {
+		p := filepath.Join(root, "devices", "system", "cpu", rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(text+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := range n {
+		write("cpu"+strconv.Itoa(i)+"/cpufreq/scaling_governor", governor)
+	}
+	write("intel_pstate/no_turbo", noTurbo)
+	return root
+}
+
+func TestClockPreflight(t *testing.T) {
+	st, err := clockPreflight(fakeSysfs(t, "performance", "1", 2), false)
+	if err != nil || len(st.Governors) != 2 {
+		t.Fatalf("pinned: %+v, %v; want accepted with 2 governors", st, err)
+	}
+	for name, root := range map[string]string{
+		"powersave":  fakeSysfs(t, "powersave", "1", 2),
+		"turbo on":   fakeSysfs(t, "performance", "0", 2),
+		"no cpufreq": t.TempDir(),
+	} {
+		_, err := clockPreflight(root, false)
+		if err == nil || !strings.Contains(err.Error(), "-allow-unpinned") {
+			t.Errorf("%s: %v, want a refusal naming -allow-unpinned", name, err)
+		}
+		st, err := clockPreflight(root, true)
+		if err != nil {
+			t.Errorf("%s with allow: %v, want accepted", name, err)
+		}
+		if name == "powersave" && st.Governors["cpu0"] != "powersave" {
+			t.Errorf("allow returns the state read: %+v", st)
+		}
+	}
+}
+
+// TestRecordSave: the header carries the host clocks and the override,
+// and the encoder leaves < > & unescaped.
+func TestRecordSave(t *testing.T) {
+	st, err := clockPreflight(fakeSysfs(t, "powersave", "0", 1), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := &Record{HostClock: st, AllowUnpinned: true, Halt: "a<b && c>d"}
+	path := filepath.Join(t.TempDir(), "c0.json")
+	if err := rec.save(path); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"allow_unpinned": true`, `"cpu0": "powersave"`, `"intel_pstate_no_turbo": "0"`, `"halt": "a<b && c>d"`} {
+		if !strings.Contains(string(b), want) {
+			t.Errorf("record lacks %s:\n%s", want, b)
+		}
+	}
+	if strings.Contains(string(b), `"scaling_driver"`) {
+		t.Errorf("an absent driver is recorded:\n%s", b)
 	}
 }

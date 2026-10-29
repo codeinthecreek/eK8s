@@ -1,10 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/codeinthecreek/eK8s/internal/hostclock"
 )
 
 // Record is the JSON result file. It is rewritten after every step, so a
@@ -19,6 +22,11 @@ type Record struct {
 	NodeCPU string `json:"node_allocatable_cpu"`
 	Ladder  []int  `json:"ladder"`
 	Confirm int    `json:"confirm"`
+
+	// HostClock is the cpufreq state read at start; AllowUnpinned is set
+	// when -allow-unpinned let the run measure on unpinned clocks.
+	HostClock     hostclock.State `json:"host_clock"`
+	AllowUnpinned bool            `json:"allow_unpinned"`
 
 	Started time.Time  `json:"started"`
 	Ended   *time.Time `json:"ended,omitempty"`
@@ -88,15 +96,20 @@ type StepRecord struct {
 // save writes the record to path atomically: a temporary file in the
 // same directory, then a rename.
 func (r *Record) save(path string) error {
-	b, err := json.MarshalIndent(r, "", "  ")
-	if err != nil {
+	// An encoder, not json.MarshalIndent, so < > & in a halt text stay
+	// readable instead of becoming \u003c.
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(r); err != nil {
 		return err
 	}
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".c0-*.json")
 	if err != nil {
 		return err
 	}
-	_, werr := tmp.Write(append(b, '\n'))
+	_, werr := tmp.Write(buf.Bytes())
 	cerr := tmp.Close()
 	if werr != nil || cerr != nil {
 		os.Remove(tmp.Name())

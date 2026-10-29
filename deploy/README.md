@@ -256,6 +256,26 @@ existing `app=loadgen` pod, and deletes its Deployment on exit
 (describing the pod and printing loadgen's log first on failure). CI runs
 it after variant-smoke.sh.
 
+### Host clocks
+
+Pin the CPU clocks before `orchestrator/cmd/c0`, fitness calibration and
+every run: unpinned clocks moved gen 0's CPU per success 2x and its p95 from
+27 to 67 ms (docs/decisions.md, 2026-10-29). On an intel_pstate host, as
+root (they last until reboot or until a power daemon resets them):
+
+```
+echo performance | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor
+echo performance | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/energy_performance_preference
+echo 1 | sudo tee /sys/devices/system/cpu/intel_pstate/no_turbo
+```
+
+On a host with `cpufreq/boost` instead, `echo 0 | sudo tee /sys/devices/system/cpu/cpufreq/boost`.
+c0 reads these (and the scaling driver) under `-sysfs`, records them in the
+result's `host_clock`, and refuses to start unless every governor is
+`performance` and turbo is off where readable (`no_turbo` = 1 or `boost` =
+0); a host with no readable governor counts as unpinned. `-allow-unpinned`
+overrides the refusal and is recorded as `allow_unpinned`.
+
 ## C0
 
 `orchestrator/cmd/c0` measures C0 as DESIGN.md sec 10 defines it: the
@@ -303,7 +323,7 @@ different toolchain gives another tag for the same source.
 
 **Running it.** From the repo root, with the cluster up and loadgen's
 prerequisites met (`up.sh`), stress-ng at 0 replicas and no variant
-namespace (the tool refuses otherwise, and refuses a ladder rate over
+namespace (the tool refuses otherwise, and refuses unpinned host clocks, see Host clocks, and a ladder rate over
 loadgen's maxRate):
 
 ```
@@ -315,7 +335,7 @@ go run ./orchestrator/cmd/c0 -image ek8s-wrapper:<12 hex> -out c0.json
 
 The second command must print `0` and the third no namespace. Optional
 flags: `-id`, `-ladder`, `-confirm`, `-keep` (keep the namespace and the
-loadgen target), `-repo`, `-workers`. It prints one line
+loadgen target), `-repo`, `-workers`, `-sysfs`, `-allow-unpinned`. It prints one line
 per step to stderr and `C0 13, r = 6.5` (or `C0 >= 19, r = 9.5`) to stdout.
 Exit status: 0 for a C0 or a lower bound, 1 when the search halted without
 one (ladder too high, a step invalid twice, a confirm window failed: C0
