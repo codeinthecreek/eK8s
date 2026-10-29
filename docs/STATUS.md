@@ -4,7 +4,7 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 *(inferred)* are guesses, not read from the repo; correct them.
 
 ## Now
-- C0 measured (2026-10-29, owner's workstation, pinned clocks, uncommitted single-target patch maxRate 40 / maxBurstSends 4800, reverted): C0 = 31, r = 15.5, b = 62 for run 2 (docs/decisions.md, 2026-10-29). c0 now records the host clocks and refuses unpinned ones (internal/hostclock; PR #65 inferred, branch ccr-d8c28647-r3qwzi, no PR yet). The committed limits stay maxRate 19 and maxBurstSends 3000.
+- (nothing in flight)
 
 ## Next
 - Before run 2: (b) the orchestrator records and refuses unpinned clocks (reuse internal/hostclock); fitness calibration with pinned clocks (CPU per success 0.0296-0.0311 s and p95 33 ms flat, under the floors); stress windows at r = 15.5. Run 2 at r = 15.5 (b = 62, burst n = 1,860) is inside the committed maxRate 19 and maxBurstSends 3000. Details: docs/AFTER-FIRST-RUN.md, items added 2026-10-29.
@@ -20,8 +20,8 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 - Driver, resolved 2026-10-28: TestLiveMutation passed (11 turns) on the workstation.
 
 ## Recent
+- #65 C0 measured: C0 = 31, r = 15.5, b = 62 for run 2 (pinned clocks; single-target patch maxRate 40 / maxBurstSends 4800, reverted; docs/decisions.md, 2026-10-29); c0 records the host clocks and refuses unpinned ones (internal/hostclock); the committed limits stay maxRate 19 and maxBurstSends 3000
 - #64 overview refresh: docs/overview.md and README.md brought in line with DESIGN.md and run 1 (section 12 rewritten); section 9 states what is built and what is pending; the "overview.md: stale since" lines are gone
 - #63 run 1 recorded (skeleton PR 9): results, findings and follow-ups in docs/decisions.md (2026-10-28), docs/STATUS.md and docs/AFTER-FIRST-RUN.md; run 1 CPU fit and host notes
 - #62 CI kind node reserves 10m CPU (was 100m) so generation 1 fits beside generation 0 at 2 replicas; orchestrator-smoke.sh prints the node's allocated resources
 - #61 gate GOVERSION suffix: the gate accepts a GOEXPERIMENT suffix after a dash or a space (Arch's go1.27.3-X:nodwarf5); releaseOf in gate/assemble.go, TestReleaseOfGoVersion
-- #60 end-to-end dry run (skeleton PR 8): deploy/orchestrator-smoke.sh (orchestrator, 2 generations, 30 s loadgen windows, fakeclaude dry-run mode under real bwrap; attempts.jsonl, archive, transcripts, summary.json and the cluster checked) and its deploy.yml step; one decisions.md entry (2026-10-27)
