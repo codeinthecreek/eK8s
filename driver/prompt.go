@@ -78,7 +78,8 @@ func Recent(all []lineage.Attempt, parentID string, n int) ([]lineage.Attempt, e
 
 // BuildPrompt builds a normal-mode prompt (DESIGN.md sec 12) for a
 // mutation of parentID: the parent's fitness by component and half,
-// against p's bounds and weights, with the weakest component named; the
+// against p's bounds and weights, with the weakest component of the half
+// that sets the fitness named; the
 // last three attempts of its lineage, each with its outcome and a cut of
 // its rationale; the fixed core's interface file and the rules the gate
 // enforces; the hang timeout; and the NonNegotiable line. Its only
@@ -130,11 +131,25 @@ func BuildPrompt(all []lineage.Attempt, parentID string, p fitness.Params) (stri
 	w("  ceiling below. It is classifier.HangTimeout, defined outside your directory.\n\n")
 
 	w("Parent: generation %s, fitness %.3f.\n", parentID, parent.Fitness.Score)
-	weak, weakLoss, scoredHalf := "", 0.0, false
-	for _, h := range []struct {
+	halves := []struct {
 		name string
 		half *lineage.Half
-	}{{"Baseline half (no CPU contention)", parent.Fitness.Baseline}, {"Stress half (CPU contention)", parent.Fitness.Stress}} {
+	}{{"Baseline half (no CPU contention)", parent.Fitness.Baseline}, {"Stress half (CPU contention)", parent.Fitness.Stress}}
+	// The fitness is the lower half score (DESIGN.md sec 9), so only that
+	// half's shortfalls can raise it: the weakest component is its. A tie
+	// goes to the stress half.
+	bind, scored := -1, 0
+	for i, h := range halves {
+		if h.half == nil || h.half.Excluded {
+			continue
+		}
+		scored++
+		if bind < 0 || h.half.Score <= halves[bind].half.Score {
+			bind = i
+		}
+	}
+	weak, weakLoss, scoredHalf := "", 0.0, false
+	for i, h := range halves {
 		if h.half == nil {
 			continue
 		}
@@ -145,13 +160,23 @@ func BuildPrompt(all []lineage.Attempt, parentID string, p fitness.Params) (stri
 		scoredHalf = true
 		p95 := time.Duration(h.half.P95LatencyMS * float64(time.Millisecond))
 		s, l, c := p.Normalize(h.half.SuccessRate, p95, h.half.CPUPerSuccess)
-		w("%s:\n", h.name)
+		switch {
+		case scored < 2:
+			w("%s:\n", h.name)
+		case i == bind:
+			w("%s: score %.3f, the lower half: it sets the fitness.\n", h.name, h.half.Score)
+		default:
+			w("%s: score %.3f.\n", h.name, h.half.Score)
+		}
 		w("- success_rate %.3f: normalized %.3f, weight %.2f. (successes + %.1f x graceful 503 sheds) / requests.\n",
 			h.half.SuccessRate, s, p.WeightSuccess, p.ShedCredit)
 		w("- p95_latency %v: normalized %.3f, weight %.2f. %v scores 1, %v scores 0.\n",
 			p95.Round(time.Millisecond), l, p.WeightLatency, p.LatencyFloor, p.LatencyCeiling)
 		w("- cpu_per_success %.3f CPU-seconds: normalized %.3f, weight %.2f. %v scores 1, %v scores 0.\n",
 			h.half.CPUPerSuccess, c, p.WeightCPU, p.CPUFloor, p.CPUCeiling)
+		if i != bind {
+			continue
+		}
 		for _, comp := range []struct {
 			name string
 			loss float64
@@ -168,7 +193,7 @@ func BuildPrompt(all []lineage.Attempt, parentID string, p fitness.Params) (stri
 	if weak == "" {
 		w("No component loses score: look for a change that keeps every one.\n\n")
 	} else {
-		w("Weakest component (largest weighted shortfall): %s.\n\n", weak)
+		w("Weakest component (largest weighted shortfall in the half that sets the fitness): %s.\n\n", weak)
 	}
 
 	w("Recent attempts in this lineage, oldest first. Each note is the account an earlier run of\n")

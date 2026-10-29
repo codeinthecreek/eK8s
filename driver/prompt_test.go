@@ -116,7 +116,7 @@ func TestBuildPrompt(t *testing.T) {
 		"- success_rate 0.990: normalized 0.990, weight 0.40.",
 		"- p95_latency 300ms: normalized 0.872, weight 0.30. 50ms scores 1, 2s scores 0.",
 		"- cpu_per_success 0.400 CPU-seconds: normalized 0.222, weight 0.30.",
-		"Weakest component (largest weighted shortfall): cpu_per_success.",
+		"Weakest component (largest weighted shortfall in the half that sets the fitness): cpu_per_success.",
 		`- Generation 1 (from 0): failed the gate at stage 1 (build and boot), check imports. Note: "Tried a quoted note."`,
 		`- Generation 2 (from 0): passed the gate and scored 0.700 (its parent 0.600); archived. Note: "Raised capacity."`,
 	} {
@@ -150,7 +150,7 @@ func TestBuildPrompt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"- None yet.", "Weakest component (largest weighted shortfall): p95_latency."} {
+	for _, want := range []string{"- None yet.", "Weakest component (largest weighted shortfall in the half that sets the fitness): p95_latency."} {
 		if !strings.Contains(g, want) {
 			t.Errorf("gen-0 prompt lacks %q", want)
 		}
@@ -172,6 +172,39 @@ func TestBuildPromptHalves(t *testing.T) {
 		if !strings.Contains(p, want) {
 			t.Errorf("prompt lacks %q:\n%s", want, p)
 		}
+	}
+}
+
+// TestBuildPromptBindingHalf: with both halves scored, the weakest
+// component is the lower half's, even when the other half's shortfall is
+// larger, and a tie goes to the stress half.
+func TestBuildPromptBindingHalf(t *testing.T) {
+	a := gen0Attempt()
+	// Baseline: CPU far off its floor; stress: latency off, CPU at the
+	// floor, and the lower score.
+	a.Fitness.Baseline = &lineage.Half{SuccessRate: 1, P95LatencyMS: 50, CPUPerSuccess: 0.5, Score: 0.7}
+	a.Fitness.Stress = &lineage.Half{SuccessRate: 1, P95LatencyMS: 1000, CPUPerSuccess: 0.05, Score: 0.6}
+	a.Fitness.Score = 0.6
+	p, err := BuildPrompt([]lineage.Attempt{a}, "0", testParams())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"Baseline half (no CPU contention): score 0.700.",
+		"Stress half (CPU contention): score 0.600, the lower half: it sets the fitness.",
+		"in the half that sets the fitness): p95_latency.",
+	} {
+		if !strings.Contains(p, want) {
+			t.Errorf("prompt lacks %q:\n%s", want, p)
+		}
+	}
+	a.Fitness.Baseline.Score, a.Fitness.Stress.Score = 0.6, 0.6
+	if p, err = BuildPrompt([]lineage.Attempt{a}, "0", testParams()); err != nil || !strings.Contains(p, "Stress half (CPU contention): score 0.600, the lower half") {
+		t.Errorf("a tie: %v\n%s", err, p)
+	}
+	a.Fitness.Baseline.Score, a.Fitness.Stress.Score = 0.5, 0.6
+	if p, err = BuildPrompt([]lineage.Attempt{a}, "0", testParams()); err != nil || !strings.Contains(p, "in the half that sets the fitness): cpu_per_success.") {
+		t.Errorf("baseline lower: %v\n%s", err, p)
 	}
 }
 
