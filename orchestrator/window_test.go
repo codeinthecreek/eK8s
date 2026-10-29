@@ -153,33 +153,59 @@ func serveVariants(t *testing.T, variants map[string]http.Handler) string {
 }
 
 // fakeCluster is a Cluster with no cluster: each PodCPU call reads one
-// CPU-second more per pod than the last, and gone drops pods.
+// CPU-second more per pod than the last, and gone drops pods. ops logs
+// the stress, kindnet and CPU calls in order, each stress call with the
+// count reads gives at the time (records reads, in the fixture).
 type fakeCluster struct {
 	mu        sync.Mutex
 	pods      []string // variant ids with one pod each
 	notReady  bool
+	notReadyN int // with notReady unset: the n-th KindnetReady call (from 1) reads not Ready
+	kindnetN  int
 	cpuCalls  int
 	gone      map[string]bool // ids whose pod is gone from the second sample on
 	stressOff int
+	stressOn  int
+	onStress  func(on bool) // called on each StressOn and StressOff, if set
+	reads     func() int
+	ops       []string
 	deleted   []string
 }
 
-func (c *fakeCluster) StressOff(context.Context) error {
+func (c *fakeCluster) stress(on bool) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.stressOff++
-	return nil
+	name := "stress off"
+	if on {
+		c.stressOn++
+		name = "stress on"
+	} else {
+		c.stressOff++
+	}
+	if c.reads != nil {
+		name += fmt.Sprintf("@%d", c.reads())
+	}
+	c.ops = append(c.ops, name)
+	hook := c.onStress
+	c.mu.Unlock()
+	if hook != nil {
+		hook(on)
+	}
 }
-func (c *fakeCluster) StressOn(context.Context) error { return nil }
+
+func (c *fakeCluster) StressOff(context.Context) error { c.stress(false); return nil }
+func (c *fakeCluster) StressOn(context.Context) error  { c.stress(true); return nil }
 func (c *fakeCluster) KindnetReady(context.Context) (bool, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return !c.notReady, nil
+	c.kindnetN++
+	c.ops = append(c.ops, "kindnet")
+	return !c.notReady && c.kindnetN != c.notReadyN, nil
 }
 func (c *fakeCluster) PodCPU(context.Context) (fitness.Sample, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.cpuCalls++
+	c.ops = append(c.ops, "cpu")
 	s := make(fitness.Sample)
 	for _, id := range c.pods {
 		if c.cpuCalls > 1 && c.gone[id] {
@@ -271,6 +297,7 @@ func newFixture(t *testing.T, variants map[string]http.Handler, live ...string) 
 	t.Cleanup(srv.Close)
 	fx.srvURL, fx.rec = srv.URL, &recorder{rt: srv.Client().Transport}
 	fx.cl = client.New(srv.URL, &http.Client{Transport: fx.rec})
+	fx.cluster.reads = func() int { return len(fx.rec.sent("GET /targets/")) }
 	for _, id := range live {
 		if _, _, err := fx.cl.PutTarget(t.Context(), id); err != nil {
 			t.Fatal(err)
@@ -329,10 +356,25 @@ func (fx *fixture) window() WindowResult {
 	return res
 }
 
-// batches makes one batch per live variant plus a spare.
+// baseline runs RunBaseline, the baseline half alone: half the hashes
+// of a window, for tests of what both halves share.
+func (fx *fixture) baseline() WindowResult {
+	fx.t.Helper()
+	bs, err := GenerateBatches(fx.t.Context(), hashcore.New(), len(fx.live), fx.s.Config().WindowPairs, 0)
+	if err != nil {
+		fx.t.Fatal(err)
+	}
+	res, err := fx.s.RunBaseline(fx.t.Context(), fx.live, bs)
+	if err != nil {
+		fx.t.Fatalf("RunBaseline: %v", err)
+	}
+	return res
+}
+
+// batches makes one batch per half per live variant.
 func (fx *fixture) batches() []Batch {
 	fx.t.Helper()
-	bs, err := GenerateBatches(fx.t.Context(), hashcore.New(), len(fx.live)+1, fx.s.Config().WindowPairs, 0)
+	bs, err := GenerateBatches(fx.t.Context(), hashcore.New(), HalvesPerWindow*len(fx.live), fx.s.Config().WindowPairs, 0)
 	if err != nil {
 		fx.t.Fatal(err)
 	}
@@ -346,21 +388,37 @@ func TestWindowScored(t *testing.T) {
 	if !res.Scored() || len(res.Variants) != 2 {
 		t.Fatalf("window excluded %v, %d variants; want scored, 2", res.Excluded, len(res.Variants))
 	}
+	if res.StressRunID == "" || res.StressRunID == res.RunID {
+		t.Errorf("run ids %q, %q; want a stress run of its own", res.RunID, res.StressRunID)
+	}
 	for id, v := range res.Variants {
-		if v.Records != 20 || v.Disqualified != "" || v.Score == nil || v.CPUUnmeasured != "" {
-			t.Errorf("variant %s: %+v; want 20 records, scored, CPU measured", id, v)
+		if v.Records != 40 || v.Disqualified != "" || v.Baseline == nil || v.Stress == nil ||
+			v.Baseline.CPUUnmeasured != "" || v.Stress.CPUUnmeasured != "" {
+			t.Errorf("variant %s: %+v; want 40 records, both halves scored, CPU measured", id, v)
 			continue
 		}
-		// The fake cluster gives each pod one CPU-second per window.
-		if got, want := v.Score.CPUPerSuccess, 1/float64(v.Score.Successes); v.Score.Successes > 0 && got != want {
-			t.Errorf("variant %s: cpu per success %v, want %v", id, got, want)
+		for _, h := range []*HalfScore{v.Baseline, v.Stress} {
+			if h.Requests+h.Negatives != 20 {
+				t.Errorf("variant %s: a half of %d records, want 20", id, h.Requests+h.Negatives)
+			}
+			// The fake cluster gives each pod one CPU-second per half.
+			if got, want := h.CPUPerSuccess, 1/float64(h.Successes); h.Successes > 0 && got != want {
+				t.Errorf("variant %s: cpu per success %v, want %v", id, got, want)
+			}
+		}
+		if f, ok := v.Fitness(); !ok || f != min(v.Baseline.Score, v.Stress.Score) {
+			t.Errorf("variant %s: fitness %v, %v; want the lower half score", id, f, ok)
 		}
 	}
-	if fx.cluster.stressOff != 1 || fx.cluster.cpuCalls != 2 {
-		t.Errorf("stress off %d times, %d CPU samples; want 1, 2", fx.cluster.stressOff, fx.cluster.cpuCalls)
+	// Baseline with stress off, then stress on for the stress half's run
+	// only: off again after its last CPU sample, before any of its
+	// records is read.
+	want := []string{"stress off@0", "kindnet", "cpu", "cpu", "stress on@4", "kindnet", "cpu", "cpu", "stress off@4"}
+	if got := fx.cluster.ops; strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("cluster calls %q, want %q", got, want)
 	}
 	// A second window reads only its own records.
-	if res2 := fx.window(); !res2.Scored() || res2.Variants["1"].Records != 20 {
+	if res2 := fx.window(); !res2.Scored() || res2.Variants["1"].Records != 40 {
 		t.Errorf("second window: %+v", res2)
 	}
 	// The DELETE handshake: every record was read, so loadgen lets go,
@@ -391,7 +449,8 @@ func TestWindowScored(t *testing.T) {
 }
 
 // TestWindowIntegrity checks each cheat is disqualified on the host,
-// with the honest variant scored beside it.
+// with the honest variant scored beside it, in a baseline half (the
+// stress half is judged the same way: TestWindowStressIntegrity).
 func TestWindowIntegrity(t *testing.T) {
 	core := hashcore.New()
 	burst := mustHash(t, core, "a burst password")
@@ -416,19 +475,77 @@ func TestWindowIntegrity(t *testing.T) {
 			if err := fx.s.Adopt("9", tc.seed); err != nil {
 				t.Fatal(err)
 			}
-			res := fx.window()
+			res := fx.baseline()
 			if !res.Scored() {
 				t.Fatalf("window excluded: %v", res.Excluded)
 			}
-			if v := res.Variants["9"]; v.Disqualified != tc.want || v.Score != nil {
-				t.Errorf("cheat: disqualified %q at %d, score %v; want %q, no score", v.Disqualified, v.DisqualifiedIndex, v.Score, tc.want)
+			if v := res.Variants["9"]; v.Disqualified != tc.want || v.DisqualifiedHalf != HalfBaseline || v.Baseline != nil {
+				t.Errorf("cheat: disqualified %q in %q at %d, scores %v %v; want %q in the baseline half, no score",
+					v.Disqualified, v.DisqualifiedHalf, v.DisqualifiedIndex, v.Baseline, v.Stress, tc.want)
 			}
-			if v := res.Variants["1"]; v.Disqualified != "" || v.Score == nil {
+			if v := res.Variants["1"]; v.Disqualified != "" || v.Baseline == nil {
 				t.Errorf("honest variant: %+v", v)
 			}
 		})
 	}
 }
+
+// stressCheat fakes its /hash answers once on is set (by the stress
+// half's StressOn): honest in the baseline half, a cheat under stress.
+type stressCheat struct {
+	*hashcore.Core
+	on *atomic.Bool
+}
+
+func (h stressCheat) Hash(pw string) (string, error) {
+	if h.on.Load() {
+		return fakeHasher{h.Core}.Hash(pw)
+	}
+	return h.Core.Hash(pw)
+}
+
+// TestWindowStressIntegrity checks a cheat that fakes results only under
+// stress is caught in the stress half, and that a stress salt repeating
+// a baseline one is caught across the halves.
+func TestWindowStressIntegrity(t *testing.T) {
+	core := hashcore.New()
+	var on atomic.Bool
+	reuse := &reuseHasher{Core: core}
+	cross := stressReuse{reuse, &on}
+	fx := newFixture(t, map[string]http.Handler{"1": gen0(core), "8": noShed(stressCheat{core, &on}), "9": noShed(cross)}, "1", "8", "9")
+	fx.cluster.onStress = func(v bool) { on.Store(v) }
+	res := fx.window()
+	if !res.Scored() {
+		t.Fatalf("window excluded: %v", res.Excluded)
+	}
+	for id, want := range map[string]classifier.Reason{"8": classifier.ReasonVerifyMismatch, "9": classifier.ReasonSaltReused} {
+		if v := res.Variants[id]; v.Disqualified != want || v.DisqualifiedHalf != HalfStress || v.Baseline != nil || v.Stress != nil {
+			t.Errorf("cheat %s: disqualified %q in %q; want %q in the stress half, no score", id, v.Disqualified, v.DisqualifiedHalf, want)
+		}
+	}
+	if v := res.Variants["1"]; v.Disqualified != "" || v.Baseline == nil || v.Stress == nil {
+		t.Errorf("honest variant: %+v", v)
+	}
+}
+
+// stressReuse hashes honestly in the baseline half and, under stress,
+// answers every /hash with the first hash it gave in the baseline half:
+// salt_reused only across the halves, which the host's history spans.
+type stressReuse struct {
+	r  *reuseHasher
+	on *atomic.Bool
+}
+
+func (h stressReuse) Hash(pw string) (string, error) {
+	if h.on.Load() {
+		return h.r.first, nil
+	}
+	hash, err := h.r.Core.Hash(pw)
+	h.r.once.Do(func() { h.r.first = hash })
+	return hash, err
+}
+
+func (h stressReuse) Verify(pw, enc string) (bool, error) { return h.r.Core.Verify(pw, enc) }
 
 // TestWindowExcludedStillJudged checks that an excluded window still
 // disqualifies a cheat: exclusion is from scoring only.
@@ -443,8 +560,56 @@ func TestWindowExcludedStillJudged(t *testing.T) {
 	if v := res.Variants["2"]; v.Disqualified != classifier.ReasonVerifyMismatch {
 		t.Errorf("cheat in an excluded window: %+v, want verify_mismatch", v)
 	}
-	if v := res.Variants["1"]; v.Score != nil {
-		t.Errorf("honest variant scored in an excluded window: %+v", v)
+	if v := res.Variants["1"]; v.Baseline != nil || v.Stress != nil || v.Records != 20 {
+		t.Errorf("honest variant in an excluded window: %+v; want 20 records, no score", v)
+	}
+	// An excluded baseline half: no stress half is run.
+	if res.StressRunID != "" || fx.cluster.stressOn != 0 || len(res.StressExcluded) != 0 {
+		t.Errorf("stress half after an excluded baseline: run %q, stress on %d times, excluded %v", res.StressRunID, fx.cluster.stressOn, res.StressExcluded)
+	}
+}
+
+// TestWindowStressExcluded checks a stress half excluded before it
+// starts (its kindnet first look): the window is excluded, the baseline
+// half's records are still judged, and stress-ng is off again.
+func TestWindowStressExcluded(t *testing.T) {
+	core := hashcore.New()
+	fx := newFixture(t, map[string]http.Handler{"1": gen0(core), "2": noShed(fakeHasher{core})}, "1", "2")
+	fx.cluster.notReadyN = 2
+	res := fx.window()
+	if res.Scored() || strings.Join(res.Excluded, ",") != ExcludedKindnet || strings.Join(res.StressExcluded, ",") != ExcludedKindnet || len(res.BaselineExcluded) != 0 {
+		t.Fatalf("excluded %v (baseline %v, stress %v), want kindnet-not-ready in the stress half", res.Excluded, res.BaselineExcluded, res.StressExcluded)
+	}
+	if v := res.Variants["2"]; v.Disqualified != classifier.ReasonVerifyMismatch || v.DisqualifiedHalf != HalfBaseline {
+		t.Errorf("cheat: %+v, want verify_mismatch in the baseline half", v)
+	}
+	if v := res.Variants["1"]; v.Baseline != nil || v.Records != 20 {
+		t.Errorf("honest variant: %+v; want 20 records, no score", v)
+	}
+	if got := fx.cluster.ops[len(fx.cluster.ops)-1]; fx.cluster.stressOn != 1 || !strings.HasPrefix(got, "stress off") {
+		t.Errorf("stress on %d times, last cluster call %q; want once, then off", fx.cluster.stressOn, got)
+	}
+}
+
+// TestRunBaseline checks C0's window: the baseline half alone, stress-ng
+// never on, one batch per variant.
+func TestRunBaseline(t *testing.T) {
+	core := hashcore.New()
+	fx := newFixture(t, map[string]http.Handler{"1": gen0(core)}, "1")
+	bs, err := GenerateBatches(t.Context(), core, 1, fx.s.Config().WindowPairs, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := fx.s.RunBaseline(t.Context(), fx.live, bs)
+	if err != nil || !res.Scored() {
+		t.Fatalf("RunBaseline = %+v, %v", res, err)
+	}
+	v := res.Variants["1"]
+	if f, ok := v.Fitness(); v.Records != 20 || v.Baseline == nil || v.Stress != nil || !ok || f != v.Baseline.Score {
+		t.Errorf("variant: %+v; want 20 records, the baseline half alone as its fitness", v)
+	}
+	if fx.cluster.stressOn != 0 || res.StressRunID != "" || fx.cluster.cpuCalls != 2 {
+		t.Errorf("stress on %d times, stress run %q, %d CPU samples; want 0, none, 2", fx.cluster.stressOn, res.StressRunID, fx.cluster.cpuCalls)
 	}
 }
 
@@ -457,13 +622,16 @@ func TestWindowCPUUnmeasured(t *testing.T) {
 		t.Fatalf("a variant's own pod going excluded the window: %v", res.Excluded)
 	}
 	v := res.Variants["2"]
-	if v.CPUUnmeasured == "" || v.Score == nil || v.Score.CPUScore != 0 {
-		t.Errorf("variant 2: %+v; want CPU unmeasured, scored with no CPU credit", v)
+	for _, h := range []*HalfScore{v.Baseline, v.Stress} {
+		if h == nil || h.CPUUnmeasured == "" || h.CPUScore != 0 {
+			t.Errorf("variant 2: %+v; want CPU unmeasured in each half, scored with no CPU credit", h)
+			continue
+		}
+		if h.Successes > 0 && h.CPUPerSuccess != fitness.DefaultParams().CPUCeiling {
+			t.Errorf("variant 2: cpu per success %v, want the ceiling", h.CPUPerSuccess)
+		}
 	}
-	if v.Score != nil && v.Score.Successes > 0 && v.Score.CPUPerSuccess != fitness.DefaultParams().CPUCeiling {
-		t.Errorf("variant 2: cpu per success %v, want the ceiling", v.Score.CPUPerSuccess)
-	}
-	if v := res.Variants["1"]; v.CPUUnmeasured != "" {
+	if v := res.Variants["1"]; v.Baseline == nil || v.Stress == nil || v.Baseline.CPUUnmeasured != "" || v.Stress.CPUUnmeasured != "" {
 		t.Errorf("variant 1: %+v", v)
 	}
 }
@@ -518,7 +686,7 @@ func TestWindowRestart(t *testing.T) {
 	if err := fx.s.Recover(t.Context(), fx.live); err != nil {
 		t.Fatalf("Recover: %v", err)
 	}
-	if res := fx.window(); !res.Scored() || res.Variants["1"].Score == nil {
+	if res := fx.window(); !res.Scored() || res.Variants["1"].Stress == nil {
 		t.Errorf("window after Recover: %+v", res)
 	}
 }
@@ -587,7 +755,7 @@ func TestWindowCanaryPoll(t *testing.T) {
 			l.Close()
 		}
 	})
-	res := fx.window()
+	res := fx.baseline()
 	if !res.Scored() {
 		t.Errorf("window after the canary turned refused: excluded %v", res.Excluded)
 	}
@@ -671,7 +839,7 @@ func TestWindowRunNotDone(t *testing.T) {
 	if v := res.Variants["2"]; v.Disqualified != classifier.ReasonVerifyMismatch && v.Disqualified != classifier.ReasonWrongMatch {
 		t.Errorf("cheat in a cancelled run: %+v, want verify_mismatch or wrong_match", v)
 	}
-	if v := res.Variants["1"]; v.Records == 0 || v.Records >= 20 || v.Score != nil {
+	if v := res.Variants["1"]; v.Records == 0 || v.Records >= 20 || v.Baseline != nil {
 		t.Errorf("honest variant: %+v; want some records, not all, no score", v)
 	}
 }
@@ -682,8 +850,11 @@ func TestWindowGuards(t *testing.T) {
 	core := hashcore.New()
 	fx := newFixture(t, map[string]http.Handler{"1": gen0(core), "2": gen0(core)}, "1", "2")
 	bs := fx.batches()
-	if _, err := fx.s.RunWindow(t.Context(), fx.live, []Batch{bs[0], bs[0]}); err == nil || !strings.Contains(err.Error(), "used twice") {
-		t.Errorf("one batch for two variants: %v", err)
+	if _, err := fx.s.RunWindow(t.Context(), fx.live, bs[:3]); err == nil || !strings.Contains(err.Error(), "3 batches for 2 live variants and 2 halves") {
+		t.Errorf("a batch short: %v", err)
+	}
+	if _, err := fx.s.RunWindow(t.Context(), fx.live, []Batch{bs[0], bs[1], bs[2], bs[0]}); err == nil || !strings.Contains(err.Error(), "used twice") {
+		t.Errorf("one batch for two halves: %v", err)
 	}
 	if _, err := fx.s.RunWindow(t.Context(), fx.live, bs); err != nil {
 		t.Fatalf("RunWindow: %v", err)

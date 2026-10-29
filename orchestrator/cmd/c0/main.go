@@ -509,7 +509,7 @@ func (r *runner) measure(ctx context.Context, rate int, sr *StepRecord) (Obs, er
 	if err != nil {
 		return Obs{}, err
 	}
-	res, err := sess.RunWindow(ctx, []string{r.c.id}, batches)
+	res, err := sess.RunBaseline(ctx, []string{r.c.id}, batches)
 	if err != nil {
 		return Obs{}, err
 	}
@@ -532,12 +532,12 @@ func (r *runner) measure(ctx context.Context, rate int, sr *StepRecord) (Obs, er
 	if why != "" {
 		invalid = append(invalid, "after the window: "+why)
 	}
-	if vr.Score != nil {
-		st := vr.Score.Stats
+	if vr.Baseline != nil {
+		st := vr.Baseline.Stats
 		sr.Requests, sr.Successes, sr.Sheds, sr.Failures, sr.Negatives = st.Requests, st.Successes, st.Sheds, st.Failures, st.Negatives
 		sr.P95LatencyMS = float64(st.P95Latency) / float64(time.Millisecond)
-		sr.CPUPerSuccess, sr.CPUUnmeasured = st.CPUPerSuccess, vr.CPUUnmeasured
-		if st.Successes > 0 && vr.CPUUnmeasured == "" {
+		sr.CPUPerSuccess, sr.CPUUnmeasured = st.CPUPerSuccess, vr.Baseline.CPUUnmeasured
+		if st.Successes > 0 && vr.Baseline.CPUUnmeasured == "" {
 			sr.CPUSeconds = st.CPUPerSuccess * float64(st.Successes)
 		}
 	}
@@ -545,10 +545,10 @@ func (r *runner) measure(ctx context.Context, rate int, sr *StepRecord) (Obs, er
 		sr.WhyNot = strings.Join(invalid, "; ")
 		return Obs{}, nil
 	}
-	if vr.Score == nil {
+	if vr.Baseline == nil {
 		return Obs{}, errors.New("a scored window without a score for generation 0")
 	}
-	pass, failWhy := passRule(vr.Score.Stats)
+	pass, failWhy := passRule(vr.Baseline.Stats)
 	sr.PassWhyNot = failWhy
 	return Obs{Valid: true, Pass: pass}, nil
 }
