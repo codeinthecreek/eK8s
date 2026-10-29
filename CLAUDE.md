@@ -28,7 +28,6 @@ per-step prompts and asks the owner only on direction questions.
   effort): skeleton PRs 1-4 and 8. Top tier (Opus, high effort): skeleton
   PRs 5-7 (driver sandbox, orchestrator integrity and verification).
   The skeleton PR list is in `docs/STATUS.md` Next.
-  context limit).
 - Finding routing: a review finding (reviewer subagent, CI, a review
   comment) is fixed in the current PR, or added to `docs/STATUS.md` Next
   only if it blocks the first run, or else appended to
