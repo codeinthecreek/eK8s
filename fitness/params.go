@@ -32,14 +32,14 @@ type Params struct {
 }
 
 // DefaultParams are the starting values: shed credit 0.5; a latency
-// floor of 50 ms, near the single-hash time at the Stage 3 cost floor,
-// and the hang timeout as the ceiling; 0.05 to 0.5 CPU-seconds per
+// floor of 25 ms, near the single-hash time at the Stage 3 cost floor,
+// and the hang timeout as the ceiling; 0.025 to 0.5 CPU-seconds per
 // success; weights 0.4, 0.3 and 0.3, a slight lean toward success_rate.
 func DefaultParams() Params {
 	return Params{
 		ShedCredit:   0.5,
-		LatencyFloor: 50 * time.Millisecond, LatencyCeiling: classifier.HangTimeout,
-		CPUFloor: 0.05, CPUCeiling: 0.5,
+		LatencyFloor: 25 * time.Millisecond, LatencyCeiling: classifier.HangTimeout,
+		CPUFloor: 0.025, CPUCeiling: 0.5,
 		WeightSuccess: 0.4, WeightLatency: 0.3, WeightCPU: 0.3,
 	}
 }

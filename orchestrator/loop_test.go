@@ -80,7 +80,7 @@ func (w *fakeWindows) Batches(ctx context.Context, n int) ([]Batch, error) {
 func (w *fakeWindows) RunWindow(_ context.Context, live []string, batches []Batch) (WindowResult, error) {
 	w.windows++
 	w.ev.add("window %s", strings.Join(live, ","))
-	if len(batches) < len(live) {
+	if len(batches) < HalvesPerWindow*len(live) {
 		return WindowResult{}, fmt.Errorf("%d batches for %d live", len(batches), len(live))
 	}
 	if w.window != nil {
@@ -91,12 +91,17 @@ func (w *fakeWindows) RunWindow(_ context.Context, live []string, batches []Batc
 	return scoredWindow(w.windows, live, w.score), nil
 }
 
+// scoredWindow scores each live variant score[id] in its stress half
+// and 0.1 more in its baseline half, so its fitness, the lower, is
+// score[id].
 func scoredWindow(n int, live []string, score map[string]float64) WindowResult {
 	res := WindowResult{RunID: fmt.Sprintf("w-%d", n), Variants: make(map[string]VariantResult)}
 	for _, id := range live {
-		r := fitness.Result{Score: score[id]}
-		r.SuccessRate, r.P95Latency, r.CPUPerSuccess = 0.99, 250*time.Millisecond, 0.2
-		res.Variants[id] = VariantResult{Records: 20, Score: &r}
+		b, s := &HalfScore{}, &HalfScore{}
+		b.Score, s.Score = score[id]+0.1, score[id]
+		b.SuccessRate, b.P95Latency, b.CPUPerSuccess = 0.99, 250*time.Millisecond, 0.2
+		s.SuccessRate, s.P95Latency, s.CPUPerSuccess = 0.9, 400*time.Millisecond, 0.3
+		res.Variants[id] = VariantResult{Records: 40, Baseline: b, Stress: s}
 	}
 	return res
 }
@@ -319,7 +324,9 @@ func TestLoopRun(t *testing.T) {
 		if a.Action != want.action || a.CurrentlyLive != want.live || !a.EverLive || a.Fitness == nil || a.Fitness.Score != want.score {
 			t.Errorf("attempt %s = %+v, want %+v", id, a, want)
 		}
-		if !a.Gate.Passed || a.GenomeSHA256 == "" || a.Fitness.Baseline == nil || a.Fitness.Baseline.P95LatencyMS != 250 {
+		if !a.Gate.Passed || a.GenomeSHA256 == "" || a.Fitness.Baseline == nil || a.Fitness.Baseline.P95LatencyMS != 250 ||
+			a.Fitness.Stress == nil || a.Fitness.Stress.P95LatencyMS != 400 || a.Fitness.Stress.Score != want.score ||
+			a.Fitness.Baseline.Score != want.score+0.1 {
 			t.Errorf("attempt %s gate or fitness = %+v %+v", id, a.Gate, a.Fitness)
 		}
 		if id != "0" && (a.Usage.NumTurns != 3 || a.Rationale == "") {
@@ -342,8 +349,8 @@ func TestLoopRun(t *testing.T) {
 			t.Errorf("no event %q in %q", want, ev)
 		}
 	}
-	// Generation 0: the gate, then its one batch, then the window.
-	if !(fx.ev.index("stage5 0 ek8s-wrapper:x") < fx.ev.index("batches 1") && fx.ev.index("batches 1") < fx.ev.index("window 0")) {
+	// Generation 0: the gate, then a batch per half, then the window.
+	if !(fx.ev.index("stage5 0 ek8s-wrapper:x") < fx.ev.index("batches 2") && fx.ev.index("batches 2") < fx.ev.index("window 0")) {
 		t.Errorf("generation 0 order: %q", ev)
 	}
 	// Generation 1 onwards: pairs for live + 1 alongside the mutation,
@@ -362,7 +369,7 @@ func TestLoopRun(t *testing.T) {
 	// The batches goroutine may log before or after "mutate gen0", so the
 	// span is the gap since generation 0's window, not since the mutation.
 	gap := ev[slices.Index(ev, "window 0"):]
-	if !slices.Contains(gap[:slices.Index(gap, "local gen1")], "batches 2") {
+	if !slices.Contains(gap[:slices.Index(gap, "local gen1")], "batches 4") {
 		t.Errorf("generation 1 made no batches for live + 1 before its gate: %q", rest)
 	}
 	if ev[0] != "stress off" {
@@ -491,8 +498,8 @@ func TestLoopProbation(t *testing.T) {
 		if err != nil || reason != StopGenerations || fx.win.windows != 4 {
 			t.Fatalf("Run = %q, %v after %d windows", reason, err, fx.win.windows)
 		}
-		if n := strings.Count(strings.Join(fx.ev.all(), "|"), "batches 2"); n != 3 {
-			t.Errorf("%d batch calls for 2 live, want 3 (one per window): %q", n, fx.ev.all())
+		if n := strings.Count(strings.Join(fx.ev.all(), "|"), "batches 4"); n != 3 {
+			t.Errorf("%d batch calls for 2 live, 2 halves, want 3 (one per window): %q", n, fx.ev.all())
 		}
 		if a := fx.attempts(t)["1"]; a.Fitness == nil || a.Fitness.Score != 0.6 {
 			t.Errorf("attempt 1 = %+v", a)

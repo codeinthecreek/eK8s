@@ -59,11 +59,16 @@ type Half struct {
 	SuccessRate   float64 `json:"success_rate"`
 	P95LatencyMS  float64 `json:"p95_latency_ms"`
 	CPUPerSuccess float64 `json:"cpu_per_success"`
-	Excluded      bool    `json:"excluded"`
+	// Score is the half's score; Fitness.Score is the lower of the two
+	// (DESIGN.md sec 9). Records written before both halves were scored
+	// have none (0).
+	Score    float64 `json:"score"`
+	Excluded bool    `json:"excluded"`
 }
 
 // Fitness is a scored variant's fitness: its score and each half's
-// components. The first run scores a baseline half only, so Stress is nil.
+// components. Run 1 scored a baseline half only, so its records have no
+// Stress.
 type Fitness struct {
 	Score    float64 `json:"score"`
 	Baseline *Half   `json:"baseline,omitempty"`

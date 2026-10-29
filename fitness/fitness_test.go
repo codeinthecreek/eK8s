@@ -77,7 +77,7 @@ func TestScoreBasics(t *testing.T) {
 	if len(s.Integrity) != 0 {
 		t.Errorf("integrity %v: a negative's negative_accepted is not a scored failure", s.Integrity)
 	}
-	wantLat := float64(2*time.Second-400*time.Millisecond) / float64(2*time.Second-50*time.Millisecond)
+	wantLat := float64(2*time.Second-400*time.Millisecond) / float64(2*time.Second-25*time.Millisecond)
 	if !near(res.SuccessScore, 4.5/6) || !near(res.LatencyScore, wantLat) || res.CPUScore != 0 {
 		t.Errorf("component scores = %v, %v, %v", res.SuccessScore, res.LatencyScore, res.CPUScore)
 	}

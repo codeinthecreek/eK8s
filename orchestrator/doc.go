@@ -4,11 +4,13 @@
 // Its window mechanics are a Session over loadgen's control API and a
 // Cluster (Kube, through kubectl): GenerateBatches makes the host's
 // /verify pairs in a gap; RunWindow runs one observation window on the
-// live variants and judges it on the host, with every exclusion
-// decision, a full verification of every recorded /hash pair, a
-// re-check of every integrity claim from its evidence, and a baseline
-// score per variant; Adopt, Recover and Drop follow a variant's and
-// loadgen's lifecycle. The host runs Argon2 here, so no call may overlap
+// live variants, a baseline half with stress-ng off and then a stress
+// half with it on, each a loadgen run of its own, and judges it on the
+// host, with every exclusion decision, a full verification of every
+// recorded /hash pair, a re-check of every integrity claim from its
+// evidence, and both half scores per variant (its fitness is the lower;
+// RunBaseline runs the baseline half alone, for C0); Adopt, Recover and
+// Drop follow a variant's and loadgen's lifecycle. The host runs Argon2 here, so no call may overlap
 // a window or a gate run (internal/hostpairs).
 //
 // Loop is the generational process over them: tournament selection

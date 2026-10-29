@@ -31,14 +31,32 @@ const (
 // recordsPage is the records page size asked for: loadgen's cap.
 const recordsPage = 1000
 
-// WindowResult is one observation window's outcome. In the first run a
-// window is one baseline half (docs/decisions.md, PR #52 S4), so its
-// exclusion is the half's.
+// The halves of a window, in the order they run (DESIGN.md sec 9, sec
+// 11), as WindowResult and VariantResult name them. Each half is a
+// loadgen window run of its own, so a record's half is its run's.
+const (
+	HalfBaseline = "baseline"
+	HalfStress   = "stress"
+)
+
+// HalvesPerWindow is how many batches RunWindow takes per live variant:
+// one per half, since a run consumes its batch.
+const HalvesPerWindow = 2
+
+// WindowResult is one observation window's outcome: a baseline half,
+// then a stress half (RunWindow), or the baseline half alone
+// (RunBaseline).
 type WindowResult struct {
-	RunID string
+	// RunID is the baseline half's run_id, which names the window;
+	// StressRunID is the stress half's, "" when it did not run.
+	RunID, StressRunID string
 	// Excluded lists why the window is not scored, for every variant
-	// alike; empty when it is scored.
+	// alike: each half's reasons, sorted, each once. A window is scored
+	// only when every half it ran was, and the stress half is not run
+	// once the baseline half is excluded (docs/decisions.md, PR #68).
 	Excluded []string
+	// BaselineExcluded and StressExcluded are each half's own reasons.
+	BaselineExcluded, StressExcluded []string
 	// Variants holds every live variant's result, by id. It is empty
 	// after a loadgen restart, whose records are gone, and when the
 	// window never started.
@@ -52,44 +70,76 @@ func (w WindowResult) Scored() bool { return len(w.Excluded) == 0 }
 // reason names and scores only, never a record's text: records carry
 // candidate-controlled bytes (docs/STATUS.md, Parked).
 type VariantResult struct {
-	Records int
+	Records int // every half's that ran
 	// Disqualified is the host-confirmed integrity reason (DESIGN.md sec
-	// 9), ReasonNone for none; DisqualifiedIndex is its record's index.
-	// A disqualified variant is culled before scoring and never scored,
-	// whether or not the window is.
+	// 9), ReasonNone for none; DisqualifiedHalf is the half it was found
+	// in (the baseline's first) and DisqualifiedIndex its record's index
+	// in that half's run. A disqualified variant is culled before
+	// scoring and never scored, whether or not the window is.
 	Disqualified      classifier.Reason
+	DisqualifiedHalf  string
 	DisqualifiedIndex int
-	// Score is the variant's baseline score; nil when the window is
-	// excluded or the variant disqualified.
-	Score *fitness.Result
+	// Baseline and Stress are the variant's half scores; nil when the
+	// window is excluded or the variant disqualified, and Stress nil from
+	// RunBaseline.
+	Baseline, Stress *HalfScore
+}
+
+// HalfScore is one half's score for one variant.
+type HalfScore struct {
+	fitness.Result
 	// CPUUnmeasured says why the kubelet's counters gave no CPU figure
-	// for the variant (a pod gone or a counter reset in the window); it
-	// is then scored at the CPU ceiling, earning no CPU credit. Empty
-	// when they did.
+	// for the variant in the half (a pod gone or a counter reset); it is
+	// then scored at the CPU ceiling, earning no CPU credit. Empty when
+	// they did.
 	CPUUnmeasured string
 }
 
-// RunWindow runs one observation window on the live variants, each with
-// its own batch (batches[i] for live[i]; extra batches are unused), and
-// judges it on the host (DESIGN.md sec 10, sec 11):
+// Fitness is the variant's fitness from the window: the lower of its two
+// half scores (fitness.Combine; the baseline score alone from
+// RunBaseline). ok is false when the variant was not scored.
+func (v VariantResult) Fitness() (score float64, ok bool) {
+	if v.Baseline == nil {
+		return 0, false
+	}
+	if v.Stress == nil {
+		return fitness.Combine(v.Baseline.Score, nil), true
+	}
+	return fitness.Combine(v.Baseline.Score, &v.Stress.Score), true
+}
+
+// RunWindow runs one observation window on the live variants (DESIGN.md
+// sec 9-11): a baseline half with stress-ng off, then, unless the
+// baseline half is excluded, a stress half with stress-ng on, each a
+// loadgen window run of its own with its own batch (batches[2i] and
+// batches[2i+1] for live[i]; extra batches are unused). Each half runs
+// as runHalf describes; stress-ng is off again before any record is read
+// for the stress half. Then the host judges the window: its integrity
+// pass on every variant's records of every half that ran, whatever they
+// are (a full verification of every /hash pair and a re-check of every
+// integrity claim), and, unless excluded, each half's score for each
+// variant not disqualified.
 //
-//  1. pre-run: the targets' read cursors, every batch uploaded, stress-ng
-//     off and gone, the kindnet first look, the policy canary (polled
-//     after a new boot_id), the kubelet's CPU counters;
-//  2. the window run, polled until no target is running;
-//  3. the counters again, then every record of every target;
-//  4. the exclusion decisions (the run's states, a ring gap, a skipped
-//     or faulted send, schedule lag), the host's integrity pass on every
-//     variant's records whatever they are (a full verification of every
-//     /hash pair and a re-check of every integrity claim), and, unless
-//     excluded, a baseline score for each variant not disqualified.
-//
-// A window that fails the first look or the canary is excluded without
+// A half that fails the first look or the canary is excluded without
 // starting. A loadgen restart is an exclusion, and Recover must run
-// before the next window. An error is a fault; on one the run may be
-// left in loadgen, cancelled and drained where it could be.
+// before the next window; one in the stress half still leaves the
+// baseline half judged. An error is a fault; on one the run may be left
+// in loadgen, cancelled and drained where it could be.
 func (s *Session) RunWindow(ctx context.Context, live []string, batches []Batch) (WindowResult, error) {
-	if err := s.checkWindow(live, batches); err != nil {
+	return s.window(ctx, live, batches, HalvesPerWindow)
+}
+
+// RunBaseline runs a window of the baseline half alone, stress-ng off,
+// with batches[i] for live[i]: C0's measurement, which has no stress
+// (DESIGN.md sec 10; orchestrator/cmd/c0). It is RunWindow otherwise.
+func (s *Session) RunBaseline(ctx context.Context, live []string, batches []Batch) (WindowResult, error) {
+	return s.window(ctx, live, batches, 1)
+}
+
+// window runs a window of halves halves (1 or HalvesPerWindow), with
+// batches[halves*i+h] for live[i] in half h.
+func (s *Session) window(ctx context.Context, live []string, batches []Batch, halves int) (WindowResult, error) {
+	if err := s.checkWindow(live, batches, halves); err != nil {
 		return WindowResult{}, err
 	}
 	res := WindowResult{RunID: newRunID(), Variants: make(map[string]VariantResult)}
@@ -98,142 +148,288 @@ func (s *Session) RunWindow(ctx context.Context, live []string, batches []Batch)
 			return WindowResult{}, err
 		}
 		s.restarted = true
-		return WindowResult{RunID: res.RunID, Excluded: []string{ExcludedRestart}, Variants: map[string]VariantResult{}}, nil
+		res.Excluded, res.Variants = []string{ExcludedRestart}, map[string]VariantResult{}
+		return res, nil
 	}
-	excluded := func(why string) (WindowResult, error) {
-		return WindowResult{RunID: res.RunID, Excluded: []string{why}, Variants: map[string]VariantResult{}}, nil
+	of := func(h int) []Batch {
+		out := make([]Batch, len(live))
+		for i := range live {
+			out[i] = batches[halves*i+h]
+		}
+		return out
 	}
 
 	for i := range live {
-		s.used[batches[i].key()] = true
+		for h := range halves {
+			s.used[batches[halves*i+h].key()] = true
+		}
 	}
-	since, err := s.cursors(ctx, live)
+	if err := s.cursors(ctx, live); err != nil {
+		return restart(err)
+	}
+	base, err := s.runHalf(ctx, HalfBaseline, res.RunID, live, of(0))
 	if err != nil {
 		return restart(err)
 	}
-	for i, id := range live {
-		up, err := s.c.Client.PutPairs(ctx, id, res.RunID, batches[i].upload())
+	res.BaselineExcluded = base.excluded
+	ran := []*half{base}
+	if halves == HalvesPerWindow && len(base.excluded) == 0 {
+		res.StressRunID = newRunID()
+		st, err := s.runHalf(ctx, HalfStress, res.StressRunID, live, of(1))
+		if errors.Is(err, client.ErrBootChanged) {
+			// The baseline half's records were read in full before the
+			// restart: the host still judges them (DESIGN.md sec 11).
+			s.restarted = true
+			res.Excluded = []string{ExcludedRestart}
+			if err := s.judge(ctx, &res, live, []*half{base}); err != nil {
+				return WindowResult{}, err
+			}
+			return res, nil
+		}
 		if err != nil {
-			return restart(fmt.Errorf("orchestrator: uploading pairs for %s: %w", id, err))
+			return WindowResult{}, err
 		}
-		if up.Count != batches[i].Len() {
-			return WindowResult{}, fmt.Errorf("orchestrator: loadgen holds %d pairs for %s, uploaded %d", up.Count, id, batches[i].Len())
+		res.StressExcluded = st.excluded
+		ran = append(ran, st)
+	}
+	for _, h := range ran {
+		for _, why := range h.excluded {
+			res.Excluded = appendOnce(res.Excluded, why)
 		}
 	}
-	if err := s.c.Cluster.StressOff(ctx); err != nil {
-		return WindowResult{}, err
-	}
-	ready, err := s.c.Cluster.KindnetReady(ctx)
-	if err != nil {
-		return WindowResult{}, err
-	}
-	if !ready {
-		return excluded(ExcludedKindnet)
-	}
-	refused, err := s.canary(ctx)
-	if err != nil {
-		return restart(err)
-	}
-	if !refused {
-		return excluded(ExcludedCanary)
+	slices.Sort(res.Excluded)
+	ran = slices.DeleteFunc(ran, func(h *half) bool { return !h.started })
+	if len(ran) == 0 {
+		return res, nil
 	}
 
-	cpu0, err := s.c.Cluster.PodCPU(ctx)
-	if err != nil {
+	if err := s.judge(ctx, &res, live, ran); err != nil {
 		return WindowResult{}, err
 	}
-	states, err := s.runWindow(ctx, res.RunID, live)
-	if err != nil {
-		return restart(err)
-	}
-	cpu1, err := s.c.Cluster.PodCPU(ctx)
-	if err != nil {
-		return WindowResult{}, err
-	}
-
-	recs := make(map[string][]wire.Record, len(live))
-	var why []string
-	for _, id := range live {
-		r, gap, err := s.readRecords(ctx, id, since[id])
-		if err != nil {
-			return restart(err)
-		}
-		done := states[id] == wire.StateDone
-		if err := checkRecords(r, id, res.RunID, s.cfg.WindowSends, done && !gap); err != nil {
-			return WindowResult{}, fmt.Errorf("orchestrator: target %s: %w", id, err)
-		}
-		recs[id] = r
-		if !done {
-			why = appendOnce(why, ExcludedRunEnded)
-		}
-		if gap {
-			why = appendOnce(why, ExcludedGap)
-		}
-	}
-	why = append(why, s.loadgenExclusions(recs)...)
-
-	results, err := verifyAll(ctx, s.c.Core, recs, live, s.c.Workers)
-	if err != nil {
-		return WindowResult{}, err
-	}
-	for i, id := range live {
-		v := judgeIntegrity(s.c.Core, s.hist[id], batches[i].truth, recs[id], results[id])
-		if v.Reason == classifier.ReasonNone && v.Claims > 0 {
-			return WindowResult{}, fmt.Errorf("orchestrator: target %s: %w (%d claims, %d with evidence unconfirmed)",
-				id, errUnconfirmed, v.Claims, v.Unconfirmed)
-		}
-		res.Variants[id] = VariantResult{Records: len(recs[id]), Disqualified: v.Reason, DisqualifiedIndex: v.Index}
-	}
-	slices.Sort(why)
-	res.Excluded = why
 	if !res.Scored() {
 		return res, nil
 	}
+	for _, h := range ran {
+		if err := s.score(&res, live, h); err != nil {
+			return WindowResult{}, err
+		}
+	}
+	return res, nil
+}
+
+// half is what runHalf read of one half, for the host to judge and
+// score.
+type half struct {
+	name     string
+	batches  []Batch // batches[i] for live[i]
+	excluded []string
+	started  bool // the run started, and every record of it was read
+	recs     map[string][]wire.Record
+	cpu0     fitness.Sample
+	cpu1     fitness.Sample
+}
+
+// runHalf runs one half on live as run runID (DESIGN.md sec 10, sec 11):
+//
+//  1. every batch uploaded under runID (a run consumes its batch, and an
+//     upload replaces a pending one, so each half uploads its own);
+//  2. stress-ng off and gone (baseline) or on and Running (stress);
+//  3. the kindnet first look and the policy canary (polled after a new
+//     boot_id), either of which excludes the half without starting it;
+//  4. the kubelet's CPU counters, the run, polled until no target is
+//     running, and the counters again;
+//  5. for the stress half, stress-ng off and gone, so that the host's
+//     verification in the gap never shares the host with it;
+//  6. every record of every target from its cursor, and the half's
+//     exclusion decisions (the run's states, a ring gap, a skipped or
+//     faulted send, schedule lag).
+//
+// Once a stress half has turned stress-ng on, it turns it off again on
+// every return. An error is a fault or a loadgen restart.
+func (s *Session) runHalf(ctx context.Context, name, runID string, live []string, batches []Batch) (h *half, err error) {
+	h = &half{name: name, batches: batches, recs: make(map[string][]wire.Record, len(live))}
+	for i, id := range live {
+		up, err := s.c.Client.PutPairs(ctx, id, runID, batches[i].upload())
+		if err != nil {
+			return nil, fmt.Errorf("orchestrator: uploading %s pairs for %s: %w", name, id, err)
+		}
+		if up.Count != batches[i].Len() {
+			return nil, fmt.Errorf("orchestrator: loadgen holds %d pairs for %s, uploaded %d", up.Count, id, batches[i].Len())
+		}
+	}
+	var stressOff func() error
+	if name == HalfStress {
+		// On from the scale call: a StressOn that scaled up and then
+		// failed its wait still leaves pods to stop.
+		on := true
+		defer func() {
+			if !on {
+				return
+			}
+			// Detached: a cancelled orchestrator still stops stress-ng.
+			if oerr := s.c.Cluster.StressOff(context.WithoutCancel(ctx)); oerr != nil {
+				h, err = nil, errors.Join(err, oerr)
+			}
+		}()
+		stressOff = func() error {
+			if err := s.c.Cluster.StressOff(ctx); err != nil {
+				return err // the defer tries again, detached
+			}
+			on = false
+			return nil
+		}
+		if err := s.c.Cluster.StressOn(ctx); err != nil {
+			return nil, err
+		}
+	} else if err := s.c.Cluster.StressOff(ctx); err != nil {
+		return nil, err
+	}
+	ready, err := s.c.Cluster.KindnetReady(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !ready {
+		h.excluded = []string{ExcludedKindnet}
+		return h, nil
+	}
+	refused, err := s.canary(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !refused {
+		h.excluded = []string{ExcludedCanary}
+		return h, nil
+	}
+
+	if h.cpu0, err = s.c.Cluster.PodCPU(ctx); err != nil {
+		return nil, err
+	}
+	states, err := s.runWindow(ctx, runID, live)
+	if err != nil {
+		return nil, err
+	}
+	if h.cpu1, err = s.c.Cluster.PodCPU(ctx); err != nil {
+		return nil, err
+	}
+	if stressOff != nil {
+		if err := stressOff(); err != nil {
+			return nil, err
+		}
+	}
+
+	for _, id := range live {
+		r, gap, err := s.readRecords(ctx, id, s.next[id])
+		if err != nil {
+			return nil, err
+		}
+		done := states[id] == wire.StateDone
+		if err := checkRecords(r, id, runID, s.cfg.WindowSends, done && !gap); err != nil {
+			return nil, fmt.Errorf("orchestrator: target %s, %s half: %w", id, name, err)
+		}
+		h.recs[id] = r
+		if !done {
+			h.excluded = appendOnce(h.excluded, ExcludedRunEnded)
+		}
+		if gap {
+			h.excluded = appendOnce(h.excluded, ExcludedGap)
+		}
+	}
+	h.excluded = append(h.excluded, s.loadgenExclusions(h.recs)...)
+	slices.Sort(h.excluded)
+	h.started = true
+	return h, nil
+}
+
+// judge is the host's integrity pass on every half that ran (DESIGN.md
+// sec 8, 9): one full verification of every recorded /hash pair across
+// targets and halves, then each variant's records judged half by half,
+// baseline first, against its salt history and each half's batch truth.
+// Claims in a half of which the host confirms none are a fault, as they
+// were for a window of one run: loadgen and the host disagree about the
+// same bytes (docs/decisions.md, PR #58 host-confirmation entry).
+func (s *Session) judge(ctx context.Context, res *WindowResult, live []string, ran []*half) error {
+	key := func(h *half, id string) string { return h.name + "/" + id }
+	recs := make(map[string][]wire.Record, len(live)*len(ran))
+	var order []string
+	for _, h := range ran {
+		for _, id := range live {
+			recs[key(h, id)] = h.recs[id]
+			order = append(order, key(h, id))
+		}
+	}
+	results, err := verifyAll(ctx, s.c.Core, recs, order, s.c.Workers)
+	if err != nil {
+		return err
+	}
+	for i, id := range live {
+		vr := VariantResult{Disqualified: classifier.ReasonNone, DisqualifiedIndex: -1}
+		for _, h := range ran {
+			v := judgeIntegrity(s.c.Core, s.hist[id], h.batches[i].truth, h.recs[id], results[key(h, id)])
+			if v.Reason == classifier.ReasonNone && v.Claims > 0 {
+				return fmt.Errorf("orchestrator: target %s, %s half: %w (%d claims, %d with evidence unconfirmed)",
+					id, h.name, errUnconfirmed, v.Claims, v.Unconfirmed)
+			}
+			vr.Records += len(h.recs[id])
+			if v.Reason != classifier.ReasonNone && vr.Disqualified == classifier.ReasonNone {
+				vr.Disqualified, vr.DisqualifiedHalf, vr.DisqualifiedIndex = v.Reason, h.name, v.Index
+			}
+		}
+		res.Variants[id] = vr
+	}
+	return nil
+}
+
+// score scores half h for each live variant not disqualified. A
+// variant's pods are its own doing (a crash, a scale-down): one whose
+// counters fail scores the half at the CPU ceiling, never an exclusion
+// it could cause at will. Every variant's at once is the counters', not
+// the variants' doing (a metrics endpoint that drops pods), and a fault.
+func (s *Session) score(res *WindowResult, live []string, h *half) error {
 	scored, unmeasured := 0, 0
 	for _, id := range live {
 		vr := res.Variants[id]
 		if vr.Disqualified != classifier.ReasonNone {
 			continue
 		}
-		cpu, err := fitness.CPUSeconds(cpu0, cpu1, variant.Params{ID: id}.Namespace())
+		var hs HalfScore
+		cpu, err := fitness.CPUSeconds(h.cpu0, h.cpu1, variant.Params{ID: id}.Namespace())
 		if err != nil {
-			// A variant's pods are its own doing (a crash, a scale-down):
-			// no CPU credit, never an exclusion it could cause at will.
-			vr.CPUUnmeasured = err.Error()
-			cpu = s.c.Params.CPUCeiling * float64(successes(recs[id]))
+			hs.CPUUnmeasured = err.Error()
+			cpu = s.c.Params.CPUCeiling * float64(successes(h.recs[id]))
 		}
-		score, err := fitness.Score(s.c.Params, recs[id], cpu)
-		if err != nil {
-			return WindowResult{}, fmt.Errorf("orchestrator: scoring %s: %w", id, err)
+		if hs.Result, err = fitness.Score(s.c.Params, h.recs[id], cpu); err != nil {
+			return fmt.Errorf("orchestrator: scoring %s's %s half: %w", id, h.name, err)
 		}
-		vr.Score = &score
+		if h.name == HalfStress {
+			vr.Stress = &hs
+		} else {
+			vr.Baseline = &hs
+		}
 		res.Variants[id] = vr
 		scored++
-		if vr.CPUUnmeasured != "" {
+		if hs.CPUUnmeasured != "" {
 			unmeasured++
 		}
 	}
-	// Every variant at once is the counters', not the variants' doing
-	// (a metrics endpoint that drops pods); one variant alone cannot be
-	// told apart, and pays for it.
 	if scored > 1 && unmeasured == scored {
-		return WindowResult{}, fmt.Errorf("orchestrator: no variant's CPU counters were usable (%d variants)", scored)
+		return fmt.Errorf("orchestrator: no variant's CPU counters were usable in the %s half (%d variants)", h.name, scored)
 	}
-	return res, nil
+	return nil
 }
 
-// checkWindow checks RunWindow's arguments against the Session.
-func (s *Session) checkWindow(live []string, batches []Batch) error {
+// checkWindow checks a window's arguments against the Session: halves
+// batches per live variant.
+func (s *Session) checkWindow(live []string, batches []Batch, halves int) error {
 	switch {
 	case s.restarted:
 		return errors.New("orchestrator: loadgen restarted; Recover before the next window")
 	case len(live) == 0:
 		return errors.New("orchestrator: a window needs a live variant")
-	case len(batches) < len(live):
-		return fmt.Errorf("orchestrator: %d batches for %d live variants", len(batches), len(live))
+	case len(batches) < halves*len(live):
+		return fmt.Errorf("orchestrator: %d batches for %d live variants and %d halves", len(batches), len(live), halves)
 	}
 	seen := make(map[string]bool, len(live))
-	keys := make(map[string]bool, len(live))
+	keys := make(map[string]bool, halves*len(live))
 	for i, id := range live {
 		if seen[id] {
 			return fmt.Errorf("orchestrator: variant %s is live twice", id)
@@ -242,44 +438,44 @@ func (s *Session) checkWindow(live []string, batches []Batch) error {
 		if _, ok := s.hist[id]; !ok {
 			return fmt.Errorf("orchestrator: variant %s is not adopted", id)
 		}
-		if batches[i].Len() < s.cfg.WindowPairs {
-			return fmt.Errorf("orchestrator: batch of %d pairs, want %d", batches[i].Len(), s.cfg.WindowPairs)
+		for _, b := range batches[halves*i : halves*(i+1)] {
+			if b.Len() < s.cfg.WindowPairs {
+				return fmt.Errorf("orchestrator: batch of %d pairs, want %d", b.Len(), s.cfg.WindowPairs)
+			}
+			// A pair is sent once, to one variant (DESIGN.md sec 10): a
+			// batch used before, or twice now, would let a mutant memoize it.
+			k := b.key()
+			if s.used[k] || keys[k] {
+				return errors.New("orchestrator: a batch is used twice")
+			}
+			keys[k] = true
 		}
-		// A pair is sent once, to one variant (DESIGN.md sec 10): a batch
-		// used before, or twice now, would let a mutant memoize it.
-		k := batches[i].key()
-		if s.used[k] || keys[k] {
-			return errors.New("orchestrator: a batch is used twice")
-		}
-		keys[k] = true
 	}
 	return nil
 }
 
-// cursors reads GET /targets and returns each live target's Next, where
-// its window records will start. A live variant with no target is a
-// fault.
-func (s *Session) cursors(ctx context.Context, live []string) (map[string]uint64, error) {
+// cursors reads GET /targets and sets each live target's read cursor to
+// its Next, where its window records will start. A live variant with no
+// target is a fault.
+func (s *Session) cursors(ctx context.Context, live []string) error {
 	ts, err := s.c.Client.Targets(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("orchestrator: loadgen targets: %w", err)
+		return fmt.Errorf("orchestrator: loadgen targets: %w", err)
 	}
 	next := make(map[string]uint64, len(ts.Targets))
 	for _, t := range ts.Targets {
 		next[t.ID] = t.Next
 	}
-	since := make(map[string]uint64, len(live))
 	for _, id := range live {
 		n, ok := next[id]
 		if !ok {
-			return nil, fmt.Errorf("orchestrator: live variant %s has no loadgen target", id)
+			return fmt.Errorf("orchestrator: live variant %s has no loadgen target", id)
 		}
-		since[id] = n
 		// Records before n are the gate's (its Stage 5 burst) or an
 		// earlier window's: all read, so Drop may go through n - 1.
 		s.next[id] = n
 	}
-	return since, nil
+	return nil
 }
 
 // canary runs the policy canary once, or, after a new boot_id, polls it

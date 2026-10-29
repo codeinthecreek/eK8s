@@ -167,8 +167,8 @@ func (l *Loop) Run(ctx context.Context) (string, error) {
 }
 
 func (l *Loop) run(ctx context.Context) (string, error) {
-	// Stress is on only for Stage 5 (DESIGN.md sec 11); a halted run
-	// may have left it on.
+	// Stress is on only for Stage 5 and each window's stress half
+	// (DESIGN.md sec 11); a halted run may have left it on.
 	if err := l.c.Cluster.StressOff(ctx); err != nil {
 		return "", err
 	}
@@ -226,9 +226,9 @@ func (l *Loop) generation(ctx context.Context, id, parent string) (string, error
 	}
 	l.logf("generation %s: mutating %s", id, parent)
 
-	// The gap (DESIGN.md sec 11): the next window's pairs, one batch per
-	// live variant and one for the newcomer, are made while the mutation
-	// runs, and the gate starts only once they are done.
+	// The gap (DESIGN.md sec 11): the next window's pairs, a batch per
+	// half for each live variant and for the newcomer, are made while the
+	// mutation runs, and the gate starts only once they are done.
 	type made struct {
 		b   []Batch
 		err error
@@ -237,7 +237,7 @@ func (l *Loop) generation(ctx context.Context, id, parent string) (string, error
 	defer stopBatches()
 	ch := make(chan made, 1)
 	go func() {
-		b, err := l.c.Windows.Batches(bctx, len(l.live)+1)
+		b, err := l.c.Windows.Batches(bctx, HalvesPerWindow*(len(l.live)+1))
 		ch <- made{b, err}
 	}()
 	mut, merr := l.c.Mutator.Mutate(ctx, files, prompt)
@@ -326,7 +326,8 @@ func (l *Loop) gateCandidate(ctx context.Context, id string, files map[string][]
 		return false, rep, fmt.Errorf("orchestrator: gate fault, generation %s: %w", id, err)
 	}
 	// Off again at once, so neither the next host pairs nor the next
-	// gate run shares the host with stress-ng.
+	// gate run shares the host with stress-ng, and the next window's
+	// baseline half starts with it gone.
 	if err := l.c.Cluster.StressOff(ctx); err != nil {
 		return false, rep, err
 	}
@@ -388,7 +389,7 @@ func (l *Loop) promote(id, parent string, files map[string][]byte, rep gate.Repo
 func (l *Loop) probation(ctx context.Context, newcomer string, batches []Batch) (string, error) {
 	for {
 		if batches == nil {
-			b, err := l.c.Windows.Batches(ctx, len(l.live))
+			b, err := l.c.Windows.Batches(ctx, HalvesPerWindow*len(l.live))
 			if err != nil {
 				return "", err
 			}
@@ -425,7 +426,7 @@ func (l *Loop) judge(ctx context.Context, res WindowResult) error {
 	if res.Scored() {
 		l.logf("window %s: scored", res.RunID)
 	} else {
-		l.logf("window %s: excluded %q", res.RunID, res.Excluded)
+		l.logf("window %s: excluded %q (baseline %q, stress %q)", res.RunID, res.Excluded, res.BaselineExcluded, res.StressExcluded)
 	}
 	for _, id := range slices.Clone(l.live) {
 		vr, ok := res.Variants[id]
@@ -438,7 +439,7 @@ func (l *Loop) judge(ctx context.Context, res WindowResult) error {
 		if vr.Disqualified == classifier.ReasonNone {
 			continue
 		}
-		l.logf("window %s: %s disqualified (%s), culled", res.RunID, id, vr.Disqualified)
+		l.logf("window %s: %s disqualified (%s, %s half), culled", res.RunID, id, vr.Disqualified, vr.DisqualifiedHalf)
 		a := l.records[id]
 		a.Disqualified = string(vr.Disqualified)
 		if err := l.cull(ctx, a); err != nil {
@@ -451,16 +452,21 @@ func (l *Loop) judge(ctx context.Context, res WindowResult) error {
 	scores := make(map[string]float64, len(l.live))
 	for _, id := range l.live {
 		vr := res.Variants[id]
-		if vr.Score == nil {
-			return fmt.Errorf("orchestrator: scored window %s has no score for %s", res.RunID, id)
+		if vr.Baseline == nil || vr.Stress == nil {
+			return fmt.Errorf("orchestrator: scored window %s has no score for %s in both halves", res.RunID, id)
 		}
 		a := l.records[id]
-		a.Fitness = toFitness(vr.Score)
+		a.Fitness = toFitness(vr)
 		scores[id] = a.Fitness.Score
-		if vr.CPUUnmeasured != "" {
-			l.logf("window %s: %s scored at the CPU ceiling: %s", res.RunID, id, vr.CPUUnmeasured)
+		for _, h := range []struct {
+			name string
+			s    *HalfScore
+		}{{HalfBaseline, vr.Baseline}, {HalfStress, vr.Stress}} {
+			if h.s.CPUUnmeasured != "" {
+				l.logf("window %s: %s scored at the CPU ceiling in the %s half: %s", res.RunID, id, h.name, h.s.CPUUnmeasured)
+			}
 		}
-		l.logf("window %s: %s scored %.4f", res.RunID, id, a.Fitness.Score)
+		l.logf("window %s: %s scored %.4f (baseline %.4f, stress %.4f)", res.RunID, id, a.Fitness.Score, vr.Baseline.Score, vr.Stress.Score)
 		if err := l.record(a); err != nil {
 			return err
 		}
@@ -492,18 +498,23 @@ func (l *Loop) cull(ctx context.Context, a lineage.Attempt) error {
 	return l.record(a)
 }
 
-// toFitness is a scored baseline half as lineage records it. The first
-// run scores one baseline half per window, so it is the variant's
-// fitness (fitness.Combine with no stress half; PR #52 S4).
-func toFitness(r *fitness.Result) *lineage.Fitness {
-	return &lineage.Fitness{
-		Score: fitness.Combine(r.Score, nil),
-		Baseline: &lineage.Half{
+// toFitness is a variant's scored window as lineage records it: both
+// halves' components and scores, and the variant's fitness, the lower
+// half score (DESIGN.md sec 9).
+func toFitness(vr VariantResult) *lineage.Fitness {
+	half := func(r *HalfScore) *lineage.Half {
+		if r == nil {
+			return nil
+		}
+		return &lineage.Half{
 			SuccessRate:   r.SuccessRate,
 			P95LatencyMS:  float64(r.P95Latency) / float64(time.Millisecond),
 			CPUPerSuccess: r.CPUPerSuccess,
-		},
+			Score:         r.Score,
+		}
 	}
+	score, _ := vr.Fitness()
+	return &lineage.Fitness{Score: score, Baseline: half(vr.Baseline), Stress: half(vr.Stress)}
 }
 
 // selectParent draws a tournament of k = 2 from the eligible archive:

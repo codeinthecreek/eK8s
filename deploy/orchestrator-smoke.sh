@@ -6,12 +6,16 @@
 # BuildPrompt prompt) appends a comment to tunables.go in the first attempt,
 # which passes the gate, and breaks the build in an attempt whose prompt
 # lists exactly one earlier attempt, which fails gate Stage 1. Loadgen runs
-# at r = 2 with 30 s windows (the manifest's 5 min W patched down, so the
-# run fits a CI job). Checks, after the run:
+# at r = 2 with 30 s window runs (the manifest's 5 min W patched down, so the
+# run fits a CI job); each window is a baseline run, then a stress run with
+# stress-ng on at the stress-ci dose (its request shrunk below). Checks,
+# after the run:
 #   (a) the orchestrator exits 0 and summary.json says reason "generations";
 #   (b) attempts.jsonl holds generation 0 (gate passed, scored) and one
 #       record per attempt; at least one attempt passed the gate and was
-#       scored, and at least one failed at stage 1;
+#       scored, and at least one failed at stage 1; every scored attempt
+#       has both halves, neither excluded, and its score is the lower
+#       half score;
 #   (c) every gate-passing genome is in the archive and every mutation has
 #       its transcript;
 #   (d) the cluster agrees with the records: a variant namespace exists for
@@ -134,7 +138,12 @@ jq -e '[.[] | select(.parent_id != "" and .gate.passed and .fitness != null)] | 
 	die "no mutation passed the gate and was scored"
 jq -e '[.[] | select(.parent_id != "" and (.gate.passed | not) and .gate.fail_stage == 1)] | length >= 1' <<<"$last" >/dev/null ||
 	die "no mutation failed gate stage 1"
-ok "attempts.jsonl: $n generations, one scored mutation, one stage 1 failure"
+# Both halves scored, fitness the lower of them (DESIGN.md sec 9).
+jq -e '[.[] | select(.fitness != null) | .fitness |
+	select(.baseline == null or .stress == null or .baseline.excluded or .stress.excluded or
+		.score != ([.baseline.score, .stress.score] | min))] | length == 0' <<<"$last" >/dev/null ||
+	die "a scored attempt lacks a scored stress or baseline half, or its score is not the lower: $(jq -c '[.[] | .fitness]' <<<"$last" | cut -c1-600)"
+ok "attempts.jsonl: $n generations, one scored mutation, one stage 1 failure, both halves scored"
 
 for id in $(jq -r '.[] | select(.gate.passed) | .generation_id' <<<"$last"); do
 	[ -d "$run/genomes/$id" ] || die "no archived genome for passed generation $id"
