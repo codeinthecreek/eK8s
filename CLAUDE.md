@@ -46,6 +46,14 @@ per-step prompts and asks the owner only on direction questions.
 
 Applies to every session in this repo.
 
+- Guard: every prompt with a Prompt ID starts with a header line
+  `Model: <x> | Effort: <y> | Why: <one line>` and ends with the line
+  END OF PROMPT. Before anything else: if your model or get_session
+  effort_level differs from the header, reply only "WRONG SETTINGS:
+  model=<yours> effort=<yours or unknown>"; if the prompt does not end
+  with END OF PROMPT, reply only "TRUNCATED"; if /tmp/ek8s-prompts.log
+  contains the Prompt ID, reply only "ALREADY RUN: <Prompt ID>", else
+  append the ID and `date -u` to it.
 - Code runs a task end to end: commits, runs the reviewer subagent once
   per task, pushes, opens the PR with its own title and body,
   and replies with a review packet. Review fixes go in follow-up commits

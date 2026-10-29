@@ -730,9 +730,16 @@ max. Earlier entries are not backfilled.
 - Reverse: drop the Preflight call and the run.json fields.
 - Origin: chat
 
-## 2026-10-29 · PR #67 (inferred) · Code runs PRs end to end; reply rules in CLAUDE.md
+## 2026-10-29 · PR #67 · Code runs PRs end to end; reply rules in CLAUDE.md
 - Decision: Code commits, self-reviews once, pushes, opens the PR and replies with a review packet without approval; it stops only for a design question with options, the escalation list, or an owner-only action. CLAUDE.md "Reply rules" fix what a reply carries.
 - Rejected: approval before every commit; a prompt-by-prompt restatement of output rules.
 - Reason: per-commit round trips and incomplete packets cost most of a week's quota by Thursday (2026-10-29); the owner wants to sit between chat and Code only for decisions, workstation actions and merges.
 - Reverse: restore the replaced CLAUDE.md wording.
+- Origin: owner
+
+## 2026-10-29 · PR #68 (inferred) · Prompt guard: header line, END OF PROMPT, a prompt log on the host
+- Decision: CLAUDE.md "Working agreement" gains a Guard bullet: a prompt with a Prompt ID opens with `Model: <x> | Effort: <y> | Why: <one line>` and ends with END OF PROMPT; Code replies only WRONG SETTINGS (model or get_session effort_level differs), TRUNCATED (no END OF PROMPT) or ALREADY RUN (ID in /tmp/ek8s-prompts.log), else appends the ID and `date -u` to that log.
+- Rejected: the guard restated in every prompt only (lost when a prompt is pasted without it).
+- Reason: owner's decision (2026-10-29): a wrong tier, a cut paste or a re-sent prompt costs a session's quota before anyone notices.
+- Reverse: drop the bullet.
 - Origin: owner
