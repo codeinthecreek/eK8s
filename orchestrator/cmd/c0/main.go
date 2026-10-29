@@ -98,9 +98,9 @@ func main() {
 	flag.StringVar(&c.repo, "repo", ".", "repo checkout (deploy/loadgen-up.sh runs from it)")
 	flag.StringVar(&c.kubeCtx, "kube-context", "kind-ek8s", "the kubectl context")
 	flag.IntVar(&c.workers, "workers", 0, "host Argon2 goroutines (0: GOMAXPROCS)")
-	flag.StringVar(&c.sysfs, "sysfs", hostclock.DefaultRoot, "the sysfs root the host clocks are read under")
 	flag.BoolVar(&c.allowUnpinned, "allow-unpinned", false, "measure although the host clocks are not pinned (governor performance, turbo off); recorded in the result")
 	flag.Parse()
+	c.sysfs = hostclock.DefaultRoot
 	if flag.NArg() > 0 || c.image == "" || c.out == "" {
 		flag.Usage()
 		os.Exit(2)

@@ -1,7 +1,7 @@
 // Package hostclock reads the host's CPU clock policy from sysfs: the
 // cpufreq governor of every CPU, the scaling driver, the energy
 // performance preference and the turbo switches. Unpinned clocks moved a
-// variant's CPU per success 2x between runs (docs/decisions.md, 2026-10-29),
+// variant's CPU per success 2x between windows (docs/decisions.md, 2026-10-29),
 // so c0 records the state and refuses to measure on an unpinned host.
 // Stdlib-only, so the orchestrator can reuse it.
 package hostclock

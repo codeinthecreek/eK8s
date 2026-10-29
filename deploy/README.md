@@ -271,7 +271,7 @@ echo 1 | sudo tee /sys/devices/system/cpu/intel_pstate/no_turbo
 
 On a host with `cpufreq/boost` instead, `echo 0 | sudo tee /sys/devices/system/cpu/cpufreq/boost`.
 c0 reads these (and the scaling driver and energy performance
-preference, which it records but does not enforce) under `-sysfs`, records them in the
+preference, which it records but does not enforce) under /sys, records them in the
 result's `host_clock`, and refuses to start unless every governor is
 `performance` and turbo is off where readable (`no_turbo` = 1 or `boost` =
 0); a host with no readable governor counts as unpinned. `-allow-unpinned`
@@ -336,7 +336,7 @@ go run ./orchestrator/cmd/c0 -image ek8s-wrapper:<12 hex> -out c0.json
 
 The second command must print `0` and the third no namespace. Optional
 flags: `-id`, `-ladder`, `-confirm`, `-keep` (keep the namespace and the
-loadgen target), `-repo`, `-workers`, `-sysfs`, `-allow-unpinned`. It prints one line
+loadgen target), `-repo`, `-workers`, `-allow-unpinned`. It prints one line
 per step to stderr and `C0 13, r = 6.5` (or `C0 >= 19, r = 9.5`) to stdout.
 Exit status: 0 for a C0 or a lower bound, 1 when the search halted without
 one (ladder too high, a step invalid twice, a confirm window failed: C0

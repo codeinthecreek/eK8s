@@ -181,6 +181,8 @@ loadgen/            open-loop load generator (DESIGN.md sec 10): sustained
                     internal/hashcore, internal/classifier/testvectors,
                     gate/ or any Argon2 package (the host generates its
                     /verify pairs and verifies its /hash pairs).
+internal/hostclock/ host cpufreq state from sysfs (stdlib-only); c0 refuses
+                    unpinned clocks.
 deploy/             kind cluster config, k8s manifests, stress-ng.
 driver/             mutation driver wrapping `claude -p`.
 orchestrator/       population manager, selection, scoring loop.
