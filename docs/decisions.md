@@ -765,3 +765,10 @@ max. Earlier entries are not backfilled.
 - Reverse: drop Half.Score and the bind logic in driver/prompt.go.
 - Origin: Code
 
+## 2026-10-29 · PR #68 · Fitness floors set just under gen 0's pinned baseline
+- Decision: DefaultParams CPUFloor 0.05 s to 0.025 s and LatencyFloor 50 ms to 25 ms; ceilings unchanged. Gen 0's pinned baseline (CPU per success 0.0296-0.0311 s, p95 33 ms) now sits above both floors, so gen-0-like variants no longer clamp to 1.0 at baseline.
+- Rejected: calibrating from stress data first (run 2 is the stop-or-go check); floors at gen 0's own values (gen 0 still clamps).
+- Reason: owner decision; the 0.05 s and 50 ms floors clamped gen 0 to 1.0 on both terms, so run 1's culls ranked p95 jitter.
+- Reverse: restore CPUFloor 0.05 and LatencyFloor 50 ms in fitness/params.go.
+- Origin: owner
+

@@ -114,8 +114,8 @@ func TestBuildPrompt(t *testing.T) {
 		"slower than " + classifier.HangTimeout.String(),
 		"Parent: generation 2, fitness 0.700.",
 		"- success_rate 0.990: normalized 0.990, weight 0.40.",
-		"- p95_latency 300ms: normalized 0.872, weight 0.30. 50ms scores 1, 2s scores 0.",
-		"- cpu_per_success 0.400 CPU-seconds: normalized 0.222, weight 0.30.",
+		"- p95_latency 300ms: normalized 0.861, weight 0.30. 25ms scores 1, 2s scores 0.",
+		"- cpu_per_success 0.400 CPU-seconds: normalized 0.211, weight 0.30.",
 		"Weakest component (largest weighted shortfall in the half that sets the fitness): cpu_per_success.",
 		`- Generation 1 (from 0): failed the gate at stage 1 (build and boot), check imports. Note: "Tried a quoted note."`,
 		`- Generation 2 (from 0): passed the gate and scored 0.700 (its parent 0.600); archived. Note: "Raised capacity."`,
@@ -183,7 +183,7 @@ func TestBuildPromptBindingHalf(t *testing.T) {
 	// Baseline: CPU far off its floor; stress: latency off, CPU at the
 	// floor, and the lower score.
 	a.Fitness.Baseline = &lineage.Half{SuccessRate: 1, P95LatencyMS: 50, CPUPerSuccess: 0.5, Score: 0.7}
-	a.Fitness.Stress = &lineage.Half{SuccessRate: 1, P95LatencyMS: 1000, CPUPerSuccess: 0.05, Score: 0.6}
+	a.Fitness.Stress = &lineage.Half{SuccessRate: 1, P95LatencyMS: 1000, CPUPerSuccess: 0.025, Score: 0.6}
 	a.Fitness.Score = 0.6
 	p, err := BuildPrompt([]lineage.Attempt{a}, "0", testParams())
 	if err != nil {
