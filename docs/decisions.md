@@ -695,7 +695,7 @@ max. Earlier entries are not backfilled.
 - Reverse: n/a (a record, no change).
 - Origin: Code
 
-## 2026-10-28 · PR #65 (inferred) · C0 counts shed and failed together, negatives out, scored windows only; maxRate not raised (DESIGN.md sec 10)
+## 2026-10-28 · PR #65 · C0 counts shed and failed together, negatives out, scored windows only; maxRate not raised (DESIGN.md sec 10)
 - Decision: C0's "sheds at most 1%" counts graceful_shed and failed together, negatives excluded, and needs a scored window; a pass at maxRate (19) gives C0 >= 19, and maxRate is not raised for C0.
 - Rejected: graceful_shed alone (a step of timeouts would pass); raising maxRate for a single target (the PR #45 memory sum is unmeasured).
 - Reason: an excluded window's offered rate was not r, and fitness scores failed below shed, so a C0 that ignores failures overstates capacity.
@@ -703,21 +703,21 @@ max. Earlier entries are not backfilled.
 - Later: C0 was measured once above maxRate with an uncommitted single-target patch, reverted afterwards; maxRate itself is unchanged (see the 2026-10-29 C0 = 31 entry).
 - Origin: chat
 
-## 2026-10-28 · PR #65 (inferred) · C0 tool: HPA merge patch, loadgen redeployed per step, excluded step not measured, no exported API changed
+## 2026-10-28 · PR #65 · C0 tool: HPA merge patch, loadgen redeployed per step, excluded step not measured, no exported API changed
 - Decision: orchestrator/cmd/c0 sets the HPA to 1/1 with a kubectl merge patch after creating the bundle, not a variant.Params field; each step runs deploy/loadgen-up.sh (a rollout restart if the manifest was unchanged) for a new boot_id and an empty loadgen; a step whose window is excluded or whose pod/HPA/restart checks fail is not measured (rerun once, then halt); a gen 0 disqualification halts. orchestrator, gate, fitness, loadgen/client and deploy/variant are used as exported, unchanged; maxRate is checked through deploy/loadgen's Params.Validate (loadgen's own Config.Validate).
 - Rejected: a Params field for the HPA bounds (only this tool wants a single-pod bundle, and the golden files and Stage 5 would carry it); one loadgen across steps (its salt sets and target would carry over); treating an excluded window as a fail (its offered rate was not r); exporting maxRate.
 - Reason: the brief ruled out refactoring the reused packages; a fresh loadgen per step keeps each window independent, as in the run.
 - Reverse: add the HPA bounds to variant.Params and drop the patch; keep one loadgen and Drop the target per step.
 - Origin: Code
 
-## 2026-10-29 · PR #65 (inferred) · C0 = 31, r = 15.5 for run 2 (b = 62), measured with pinned clocks
+## 2026-10-29 · PR #65 · C0 = 31, r = 15.5 for run 2 (b = 62), measured with pinned clocks
 - Decision: C0 = 31, so r = 15.5 and b = 62 for run 2; measured on the owner's workstation with pinned clocks and an uncommitted single-target patch (maxRate 40, maxBurstSends 4800, reverted afterwards); the committed limits stay 19 and 3000. Record: 0 shed and 0 failed in every pass, p95 33 ms, CPU per success 0.0296-0.0311 s from r 8 to 31; r = 32 failed on p95 550 ms, r = 31 passed 3 times.
 - Rejected: the unpinned results (C0 >= 19, and Unresolved: 28 passed once, then failed its confirm window at 15% shed, p95 644 ms).
 - Reason: CPU per success moved 2x with clock state, and C0 is set by the 1-CPU limit at about 0.0305 s per request (about 0.94 core at r = 31).
 - Reverse: re-measure if the host, the clocks or the Argon2 parameters change.
 - Origin: chat
 
-## 2026-10-29 · PR #65 (inferred) · Host clocks are pinned for C0, calibration and every run; c0 refuses otherwise
+## 2026-10-29 · PR #65 · Host clocks are pinned for C0, calibration and every run; c0 refuses otherwise
 - Decision: governor performance on every CPU and turbo off (intel_pstate no_turbo = 1, or cpufreq boost = 0) for C0, calibration and every run; internal/hostclock reads them and c0 records them in its JSON header and refuses unless pinned (-allow-unpinned overrides and is recorded; no readable governor counts as unpinned).
 - Rejected: leaving the clocks to the OS and averaging the noise out.
 - Reason: unpinned clocks moved gen 0's CPU per success 2x (0.0225 to 0.047 s) and its p95 from 27 to 67 ms across runs on one host.
