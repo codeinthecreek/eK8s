@@ -43,6 +43,7 @@ import (
 	"github.com/codeinthecreek/eK8s/fitness"
 	"github.com/codeinthecreek/eK8s/gate"
 	"github.com/codeinthecreek/eK8s/internal/hashcore"
+	"github.com/codeinthecreek/eK8s/internal/hostclock"
 	"github.com/codeinthecreek/eK8s/lineage"
 	"github.com/codeinthecreek/eK8s/orchestrator"
 )
@@ -70,6 +71,7 @@ func main() {
 	scratch := flag.String("scratch", "", "an existing directory for mutation and gate scratch files (default: a new temporary one)")
 	workers := flag.Int("workers", 0, "host Argon2 goroutines (0: GOMAXPROCS)")
 	seed := flag.Uint64("seed", 0, "tournament seed (0: a random one, logged)")
+	allowUnpinned := flag.Bool("allow-unpinned", false, "run although the host clocks are not pinned (governor performance, turbo off); recorded in run.json")
 	flag.Parse()
 	if flag.NArg() > 0 || *runDir == "" || *rate <= 0 || *window <= 0 || *claude == "" || *version == "" {
 		flag.Usage()
@@ -87,6 +89,7 @@ func main() {
 		runDir: *runDir, repo: *repo, rate: *rate, window: *window, kubeCtx: *kubeCtx, cluster: *cluster,
 		gens: *gens, turns: *turns, tokens: *tokens, claude: *claude, version: *version, token: token,
 		scratch: *scratch, workers: *workers, seed: *seed,
+		allowUnpinned: *allowUnpinned, sysfs: hostclock.DefaultRoot,
 	})
 	switch {
 	case err != nil:
@@ -101,13 +104,25 @@ func main() {
 
 type config struct {
 	runDir, repo, kubeCtx, cluster, claude, version, token, scratch string
-	rate, window                                                    float64
-	gens, turns, workers                                            int
-	tokens                                                          int64
-	seed                                                            uint64
+	// sysfs is the sysfs root the host clocks are read under; a test seam.
+	sysfs                string
+	allowUnpinned        bool
+	rate, window         float64
+	gens, turns, workers int
+	tokens               int64
+	seed                 uint64
 }
 
 func run(ctx context.Context, c config) (string, error) {
+	// First, before the run directory, kubectl, loadgen, the gate or the
+	// driver: an unpinned host is refused before anything is touched.
+	clock, err := hostclock.Preflight(c.sysfs, c.allowUnpinned)
+	if err != nil {
+		return "", err
+	}
+	if why := clock.Unpinned(); len(why) > 0 {
+		fmt.Fprintf(os.Stderr, "warning: -allow-unpinned: host clocks are not pinned: %s\n", strings.Join(why, "; "))
+	}
 	repo, err := filepath.Abs(c.repo)
 	if err != nil {
 		return "", err
@@ -168,7 +183,7 @@ func run(ctx context.Context, c config) (string, error) {
 	if seed == 0 {
 		seed = rand.Uint64()
 	}
-	runRec, err := lineage.Create(c.runDir)
+	runRec, err := lineage.Create(c.runDir, clock, c.allowUnpinned)
 	if err != nil {
 		return "", err
 	}

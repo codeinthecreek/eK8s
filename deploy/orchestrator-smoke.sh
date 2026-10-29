@@ -16,7 +16,9 @@
 #       its transcript;
 #   (d) the cluster agrees with the records: a variant namespace exists for
 #       exactly the variants recorded as currently live, and none for a
-#       culled or gate-failed one.
+#       culled or gate-failed one;
+#   (e) run.json records allow_unpinned true and a host_clock object.
+# The orchestrator gets -allow-unpinned: the CI runner cannot pin its clocks.
 # Not covered: a cull (the population cap is 3, and 4 live variants do not
 # fit the CI node), so (d) shows only that live and recorded agree. If
 # attempt 1 fails for a real reason, attempt 2 sees one earlier attempt
@@ -104,6 +106,7 @@ set +e
 CLAUDE_CODE_OAUTH_TOKEN=dry-run-token go run ./orchestrator/cmd/orchestrator \
 	-run "$work/run" -rate "$rate" -window "$window" -generations "$gens" \
 	-claude "$work/claude" -claude-version "$fakever" -scratch "$work/scratch" \
+	-allow-unpinned \
 	2>&1 | tee "$work/orchestrator.out"
 status=${PIPESTATUS[0]}
 set -e
@@ -115,6 +118,11 @@ run="$work/run"
 [ "$(jq -r .reason "$run/summary.json")" = generations ] ||
 	die "summary.json reason is $(jq -r .reason "$run/summary.json"), want generations"
 ok "summary.json: reason generations"
+
+# The CI runner cannot pin its clocks; host_clock is {} where it has no cpufreq.
+jq -e '.allow_unpinned == true and (.host_clock | type) == "object"' "$run/run.json" >/dev/null ||
+	die "run.json does not record allow_unpinned true and a host_clock object: $(cut -c1-300 "$run/run.json")"
+ok "run.json: allow_unpinned, host_clock recorded"
 
 # One record per id as last written (an id can be written more than once).
 last=$(jq -s 'group_by(.generation_id) | map(last)' "$run/attempts.jsonl")

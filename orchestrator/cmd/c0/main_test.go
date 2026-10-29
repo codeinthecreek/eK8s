@@ -12,6 +12,7 @@ import (
 
 	"github.com/codeinthecreek/eK8s/fitness"
 	"github.com/codeinthecreek/eK8s/internal/classifier"
+	"github.com/codeinthecreek/eK8s/internal/hostclock"
 )
 
 func TestPassRule(t *testing.T) {
@@ -109,7 +110,7 @@ func fakeSysfs(t *testing.T, governor, noTurbo string, n int) string {
 }
 
 func TestClockPreflight(t *testing.T) {
-	st, err := clockPreflight(fakeSysfs(t, "performance", "1", 2), false)
+	st, err := hostclock.Preflight(fakeSysfs(t, "performance", "1", 2), false)
 	if err != nil || len(st.Governors) != 2 {
 		t.Fatalf("pinned: %+v, %v; want accepted with 2 governors", st, err)
 	}
@@ -118,11 +119,11 @@ func TestClockPreflight(t *testing.T) {
 		"turbo on":   fakeSysfs(t, "performance", "0", 2),
 		"no cpufreq": t.TempDir(),
 	} {
-		_, err := clockPreflight(root, false)
+		_, err := hostclock.Preflight(root, false)
 		if err == nil || !strings.Contains(err.Error(), "-allow-unpinned") {
 			t.Errorf("%s: %v, want a refusal naming -allow-unpinned", name, err)
 		}
-		st, err := clockPreflight(root, true)
+		st, err := hostclock.Preflight(root, true)
 		if err != nil {
 			t.Errorf("%s with allow: %v, want accepted", name, err)
 		}
@@ -135,7 +136,7 @@ func TestClockPreflight(t *testing.T) {
 // TestRecordSave: the header carries the host clocks and the override,
 // and the encoder leaves < > & unescaped.
 func TestRecordSave(t *testing.T) {
-	st, err := clockPreflight(fakeSysfs(t, "powersave", "0", 1), true)
+	st, err := hostclock.Preflight(fakeSysfs(t, "powersave", "0", 1), true)
 	if err != nil {
 		t.Fatal(err)
 	}

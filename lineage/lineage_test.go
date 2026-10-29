@@ -9,11 +9,13 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/codeinthecreek/eK8s/internal/hostclock"
 )
 
 func newRun(t *testing.T) *Run {
 	t.Helper()
-	r, err := Create(filepath.Join(t.TempDir(), "run"))
+	r, err := Create(filepath.Join(t.TempDir(), "run"), nil, false)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -36,14 +38,14 @@ func mode(t *testing.T, path string) os.FileMode {
 
 func TestCreateOpen(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "run")
-	r, err := Create(dir)
+	r, err := Create(dir, nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if mode(t, dir) != 0o700 || mode(t, filepath.Join(dir, attemptsFile)) != 0o600 || mode(t, filepath.Join(dir, genomesDir)) != 0o700 {
 		t.Error("run directory modes are not 0700 and 0600")
 	}
-	if _, err := Create(dir); err == nil {
+	if _, err := Create(dir, nil, false); err == nil {
 		t.Error("Create on an existing directory succeeded")
 	}
 	if _, err := Open(dir); err != nil {
@@ -60,6 +62,60 @@ func TestCreateOpen(t *testing.T) {
 	}
 	if _, err := Open(filepath.Join(t.TempDir(), "none")); err == nil {
 		t.Error("Open accepted a missing directory")
+	}
+}
+
+// TestRunMetaHostClock: run.json carries the host clocks and the override,
+// and a run.json written before they existed still opens.
+func TestRunMetaHostClock(t *testing.T) {
+	gov, nt := "powersave", "0"
+	st := hostclock.State{Governors: map[string]string{"cpu0": gov}, NoTurbo: &nt}
+	dir := filepath.Join(t.TempDir(), "run")
+	if _, err := Create(dir, st, true); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(dir, runFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m struct {
+		Version       int
+		HostClock     hostclock.State `json:"host_clock"`
+		AllowUnpinned bool            `json:"allow_unpinned"`
+	}
+	if err := strictDecode(b, &m); err != nil {
+		t.Fatal(err)
+	}
+	if m.Version != version || !m.AllowUnpinned || m.HostClock.Governors["cpu0"] != gov || *m.HostClock.NoTurbo != nt {
+		t.Errorf("run.json = %s", b)
+	}
+	for _, key := range []string{`"host_clock"`, `"allow_unpinned":true`, `"intel_pstate_no_turbo":"0"`} {
+		if !strings.Contains(string(b), key) {
+			t.Errorf("run.json lacks %s: %s", key, b)
+		}
+	}
+	if _, err := Open(dir); err != nil {
+		t.Errorf("Open: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, runFile), []byte(`{"version":1}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Open(dir); err != nil {
+		t.Errorf("Open of a run.json without host_clock: %v", err)
+	}
+}
+
+// TestCreateUnmarshalableHostClock: a host clock value that cannot be
+// recorded is refused before anything is created.
+func TestCreateUnmarshalableHostClock(t *testing.T) {
+	for name, v := range map[string]any{"func": func() {}, "chan": make(chan int)} {
+		dir := filepath.Join(t.TempDir(), "run")
+		if _, err := Create(dir, v, false); err == nil {
+			t.Errorf("%s: Create succeeded", name)
+		}
+		if _, err := os.Lstat(dir); err == nil {
+			t.Errorf("%s: a run directory was created", name)
+		}
 	}
 }
 

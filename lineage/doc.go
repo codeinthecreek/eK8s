@@ -4,7 +4,7 @@
 //
 // A run directory holds
 //
-//	run.json              {"version":1}
+//	run.json              {"version":1,"host_clock":{...},"allow_unpinned":false}
 //	attempts.jsonl        one JSON Attempt per line, append-only
 //	genomes/<id>/         the wrapper files and their digest (sha256), made once
 //	transcripts/<id>.json the raw claude -p stream-json output (JSONL), made once

@@ -261,7 +261,7 @@ func run(ctx context.Context, c config) (Verdict, error) {
 	b := make([]byte, 8)
 	rand.Read(b) // never returns an error (Go 1.24+)
 	r.label = "ek8s-" + hex.EncodeToString(b)
-	if r.clock, err = clockPreflight(c.sysfs, c.allowUnpinned); err != nil {
+	if r.clock, err = hostclock.Preflight(c.sysfs, c.allowUnpinned); err != nil {
 		return Verdict{}, err
 	}
 	if err := r.preflight(ctx); err != nil {
@@ -310,22 +310,6 @@ func (r *runner) finish(v Verdict, err error) (Verdict, error) {
 		err = serr
 	}
 	return v, err
-}
-
-// clockPreflight reads the host clocks under sysfs and refuses unless
-// they are pinned (hostclock.State.Unpinned), or allow is set. Unpinned
-// clocks moved gen 0's CPU per success 2x (docs/decisions.md, 2026-10-29).
-// It returns the state either way, for the record.
-func clockPreflight(sysfs string, allow bool) (hostclock.State, error) {
-	st, err := hostclock.Read(sysfs)
-	if err != nil {
-		return st, fmt.Errorf("preflight: host clocks: %w", err)
-	}
-	if why := st.Unpinned(); len(why) > 0 && !allow {
-		return st, fmt.Errorf("preflight: host clocks are not pinned: %s (set them as deploy/README.md, Host clocks, or pass -allow-unpinned)",
-			strings.Join(why, "; "))
-	}
-	return st, nil
 }
 
 // preflight refuses to start on a cluster the measurement would not be
