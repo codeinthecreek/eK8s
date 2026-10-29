@@ -56,14 +56,31 @@ type Run struct {
 	mu  sync.Mutex // serialises attempt appends
 }
 
+// runMeta is run.json. The host clock fields are absent from a file
+// written before they were added; Open reads those as the zero values.
 type runMeta struct {
 	Version int `json:"version"`
+	// HostClock is what hostclock.Read found at the run's start. It is
+	// held as any so lineage, and the driver that builds on it, do not
+	// depend on internal/hostclock (the driver's TestDeps).
+	HostClock any `json:"host_clock"`
+	// AllowUnpinned is whether the run was started with the unpinned-clock
+	// override.
+	AllowUnpinned bool `json:"allow_unpinned"`
 }
 
 // Create makes a new run directory at dir, which must not exist (its
-// parent must). Directories are 0700 and files 0600: transcripts hold the
-// mutation model's raw output.
-func Create(dir string) (*Run, error) {
+// parent must), and records in run.json hostClock (a hostclock.State;
+// any value that marshals to JSON) and whether the run overrode the
+// pinned-clock check. Directories are 0700 and files 0600: transcripts
+// hold the mutation model's raw output.
+func Create(dir string, hostClock any, allowUnpinned bool) (*Run, error) {
+	// Marshal first: a value that cannot be recorded must not leave a
+	// run directory behind.
+	meta, err := json.Marshal(runMeta{Version: version, HostClock: hostClock, AllowUnpinned: allowUnpinned})
+	if err != nil {
+		return nil, fmt.Errorf("lineage: run.json: %w", err)
+	}
 	if err := os.Mkdir(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("lineage: %w", err)
 	}
@@ -72,8 +89,7 @@ func Create(dir string) (*Run, error) {
 			return nil, fmt.Errorf("lineage: %w", err)
 		}
 	}
-	b, _ := json.Marshal(runMeta{Version: version})
-	if err := writeNew(filepath.Join(dir, runFile), append(b, '\n')); err != nil {
+	if err := writeNew(filepath.Join(dir, runFile), append(meta, '\n')); err != nil {
 		return nil, err
 	}
 	if err := writeNew(filepath.Join(dir, attemptsFile), nil); err != nil {

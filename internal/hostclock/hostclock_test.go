@@ -126,3 +126,21 @@ func TestReadError(t *testing.T) {
 		t.Errorf("Read = %+v, want an error", st)
 	}
 }
+
+func TestPreflight(t *testing.T) {
+	st, err := Preflight(fake(t, pinned()), false)
+	if err != nil || len(st.Governors) != 3 {
+		t.Fatalf("pinned: %+v, %v; want accepted with 3 governors", st, err)
+	}
+	files := pinned()
+	files["cpu1/cpufreq/scaling_governor"] = "powersave\n"
+	root := fake(t, files)
+	_, err = Preflight(root, false)
+	if err == nil || !strings.Contains(err.Error(), "-allow-unpinned") || !strings.Contains(err.Error(), "cpu1") {
+		t.Errorf("unpinned without allow: %v, want a refusal naming cpu1 and -allow-unpinned", err)
+	}
+	st, err = Preflight(root, true)
+	if err != nil || st.Governors["cpu1"] != "powersave" {
+		t.Errorf("unpinned with allow: %+v, %v; want the state read, accepted", st, err)
+	}
+}

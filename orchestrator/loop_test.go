@@ -236,7 +236,7 @@ type loopFixture struct {
 func newLoopFixture(t *testing.T, gens int, mut func(n int, parent map[string][]byte) (*driver.Mutation, error)) *loopFixture {
 	t.Helper()
 	ev := &events{}
-	run, err := lineage.Create(filepath.Join(t.TempDir(), "run"))
+	run, err := lineage.Create(filepath.Join(t.TempDir(), "run"), nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -127,3 +127,20 @@ func cpuNum(name string) int {
 	n, _ := strconv.Atoi(strings.TrimPrefix(name, "cpu"))
 	return n
 }
+
+// Preflight reads the host clocks under root (DefaultRoot on a real host)
+// and refuses unless they are pinned (State.Unpinned is empty), or allow
+// is set. Unpinned clocks moved gen 0's CPU per success 2x
+// (docs/decisions.md, 2026-10-29). It returns the state either way, for
+// the record.
+func Preflight(root string, allow bool) (State, error) {
+	st, err := Read(root)
+	if err != nil {
+		return st, fmt.Errorf("preflight: host clocks: %w", err)
+	}
+	if why := st.Unpinned(); len(why) > 0 && !allow {
+		return st, fmt.Errorf("preflight: host clocks are not pinned: %s (set them as deploy/README.md, Host clocks, or pass -allow-unpinned)",
+			strings.Join(why, "; "))
+	}
+	return st, nil
+}
