@@ -10,6 +10,8 @@ autonomous").
 
 ## Rules for every packet
 
+- CLAUDE.md "Reply rules" apply to every packet: the packet is the final
+  text of the reply, pasted in full, and its "main" is origin/main.
 - Output exactly one code block fenced with FOUR backticks, and nothing
   outside it, so it is a single copy on an iPad.
 - ASCII only. Transliterate any non-ASCII in quoted repo text (e.g. a
@@ -71,6 +73,9 @@ the current origin/main SHA and compares it with the newest PR in
 docs/STATUS.md Recent. When a packet header's main is newer than its
 copies, it asks for a sync packet (or for the project-knowledge files to
 be re-added from GitHub) before relying on them.
+
+A prompt that asks Code for answers to Feedback quotes each item's text
+in full, since compaction drops earlier messages.
 
 ## Which packet
 

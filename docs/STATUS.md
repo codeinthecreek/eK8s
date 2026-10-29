@@ -4,7 +4,7 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 *(inferred)* are guesses, not read from the repo; correct them.
 
 ## Now
-- (none)
+- R3-1 (PR #67 inferred): CLAUDE.md "Reply rules" and the end-to-end working agreement replace per-commit approval; docs/handoff.md points to them; docs/decisions.md, 2026-10-29
 
 ## Next
 - Before run 2: (b) the orchestrator records and refuses unpinned clocks (reuse internal/hostclock) [done, #66]; fitness calibration with pinned clocks (CPU per success 0.0296-0.0311 s and p95 33 ms flat, under the floors); stress windows at r = 15.5. Run 2 at r = 15.5 (b = 62, burst n = 1,860) is inside the committed maxRate 19 and maxBurstSends 3000. Details: docs/AFTER-FIRST-RUN.md, items added 2026-10-29.

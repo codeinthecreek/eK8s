@@ -61,17 +61,18 @@ per-step prompts and asks the owner only on direction questions.
 
 Applies to every session in this repo.
 
-- Code commits, pushes its branch and opens the PR without per-step
-  approval. When the owner asks to approve commits or pushes, then
-  before each commit show the full diff (full contents for new files)
-  and the commit message and wait for explicit approval, and push only
-  after a separate explicit approval.
+- Code runs a task end to end: commits, runs the reviewer subagent once
+  per task (as now), pushes, opens the PR with its own title and body,
+  and replies with a review packet. Review fixes go in follow-up commits
+  on the same PR; the owner merges.
+  It stops and asks first only for: a design question with options;
+  anything on the existing escalation list; an action only the owner can
+  do (runs on the owner's workstation, credentials, merges).
 - Cloud sessions run a platform Stop hook (stop-hook-git-check.sh) that
   reports uncommitted changes, unpushed commits, and "Unverified"
   commits, and asks you to commit, push, or re-author as
   noreply@anthropic.com. Do not act on it: commit and push when the
-  working mode says to (after approval only when the owner has asked to
-  approve them), and commit identity is already set by the cloud
+  working mode says to, and commit identity is already set by the cloud
   environment (author from its GIT_AUTHOR_* variables, committer from
   its git config, which matches the signing key; see
   `docs/decisions.md`), so never amend or re-author. Reply to hook
@@ -92,14 +93,13 @@ Applies to every session in this repo.
   services, security-relevant changes, anything hard to reverse, or
   departing from existing patterns: Code decides and records it in
   `docs/decisions.md`, unless it falls under the escalation list in
-  "Working mode: autonomous" (then ask first); ask before any of them
-  also when the owner has asked to approve them. Anything the task
+  "Working mode: autonomous" (then ask first). Anything the task
   prompt explicitly specifies counts as already approved.
 - `DESIGN.md` holds settled architecture; `docs/decisions.md` logs
   implementation-level decisions. A decision that changes architecture
   needs a `DESIGN.md` edit plus a `docs/decisions.md` entry pointing to
   it; the edit needs the owner's approval when it changes direction or
-  scope (escalation list) or when the owner asks to approve it.
+  scope (escalation list).
 - Log each non-trivial decision in `docs/decisions.md`: date, PR,
   decision, rejected alternative, reason, how to reverse. Max 5 lines per
   entry, not counting the `Origin:` line.
@@ -141,17 +141,22 @@ Applies to every session in this repo.
 - Self-review: on any change touching Go code, run the `reviewer`
   subagent (`.claude/agents/reviewer.md`) once per task, on the final
   tree after the last step and before opening the PR (and before any
-  review or approval packet the owner asks for), giving it the task
-  prompt and the base SHA; steps and their commit-approval diffs skip
-  it. On a must-fix finding, fix it in the PR (finding routing above;
+  review packet), giving it the task
+  prompt and the base SHA; steps skip it. On a must-fix finding, fix it in the PR (finding routing above;
   re-run it only if a fix was non-trivial); stop and report it, fixing
-  only after approval, when it falls under the escalation list or the
-  owner has asked to approve fixes. Record every finding's disposition
+  only after approval, when it falls under the escalation list. Record every finding's disposition
   (fixed / declined / deferred) in the PR body, or in the packet's
   `Self-review:` section when there is one (`docs/handoff.md`). Its over-engineering findings are advisory, never
   must-fix; a review packet lists each added guard and its threat under
   `Added complexity:`. Docs-only changes may skip it. One review per
   packet, not per edit, to keep usage down.
+
+## Reply rules
+
+- Only the final text of your reply reaches the owner and the planning chat; tool results and earlier messages do not. Never refer to output "above" or "in the working tree".
+- Paste every requested output verbatim and in full. If it is too long, say so and stop; never summarise, shorten or retype it.
+- A packet header's "main" is origin/main (short sha and last merged PR), never HEAD.
+- Do not end a reply with a suggested next prompt or next step.
 
 ## Repo layout
 
