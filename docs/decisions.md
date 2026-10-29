@@ -743,3 +743,25 @@ max. Earlier entries are not backfilled.
 - Reason: owner's decision (2026-10-29): a wrong tier, a cut paste or a re-sent prompt costs a session's quota before anyone notices.
 - Reverse: drop the bullet.
 - Origin: owner
+
+## 2026-10-29 · PR #68 (inferred) · Owner answers to the R2-SH stress-half questions: Q1-Q4 A
+- Decision: Q1 A: a window is two loadgen runs of W each, a baseline run then a stress run (W, C0, r and the loadgen limits unchanged). Q2 A: a window is scored only when both halves are; the stress half is not run once the baseline half is excluded; the streak counts windows. Q3 A: CI runs both halves at the stress-ci dose (fall back to a lower CPU_LOAD only if CI shows lag exclusions, logged here). Q4 A: stress-ng off right after the stress run, before its records are read and verified; one host verification per window. Code's two decisions accepted (weakest component from the half that sets the min; lineage records both halves).
+- Rejected: W/2 halves (reverses the PR #45 W entry; C0 was measured at W = 5 min); one run with a mid-run switch (variable half length, a transition band, CPU charged across the switch); scoring the remaining half (a baseline-only fitness sits above min()); re-running an excluded half.
+- Reason: owner's call (2026-10-29, design packet R2-SH).
+- Reverse: re-ask the owner.
+- Origin: owner
+
+## 2026-10-29 · PR #68 (inferred) · Stress half: two runs per window, per-half judgement, RunBaseline for C0 (DESIGN.md sec 9-11)
+- Decision: Session.RunWindow runs runHalf twice (batches[2i], [2i+1] for live[i], each uploaded just before its run, since an upload replaces a pending batch): upload, stress off (baseline) or on and Running (stress), kindnet, canary, CPU, run, CPU, stress off (a defer also stops it on any early return), records, exclusions. The host verifies both halves' pairs in one hostpairs call, then judges each half in order on one salt history (a stress salt repeating a baseline one is caught); claims a half confirms none of stay a fault, per half as per run before. Each half scores with its own CPU samples; every variant's CPU unmeasured at once in a half is a fault. RunBaseline keeps C0's one-half, no-stress window. WindowResult names each half's run_id and exclusions; VariantResult carries Baseline and Stress HalfScores and the half a disqualification came from.
+- Rejected: a Windows interface change for halves (the loop only needs twice the batches); judging the baseline half before the stress run (Q4 B); a window-wide unconfirmed-claims rule (a confirmed half could hide a disagreement in the other).
+- Reason: owner answers above; loadgen stays unaware of halves (PR #36 entry).
+- Reverse: edit orchestrator/window.go and loop.go; c0 back to RunWindow only if C0 ever needs stress.
+- Origin: Code
+
+## 2026-10-29 · PR #68 (inferred) · lineage.Half gains its score; the prompt's weakest component is the lower half's
+- Decision: lineage.Half has `score` (the half's fitness.Score); Fitness.Score is the min of both. driver.BuildPrompt shows each half's score when both are scored, marks the lower (a tie goes to stress) as the one that sets the fitness, and names the weakest component from that half only.
+- Rejected: deriving the half score in the prompt from the stored components (Served is not stored, AFTER-FIRST-RUN); the largest shortfall across both halves (a shortfall in the higher half cannot raise min()).
+- Reason: schema addition only; run-1 records read with score 0 and have one half, so nothing compares them.
+- Reverse: drop Half.Score and the bind logic in driver/prompt.go.
+- Origin: Code
+

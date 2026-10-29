@@ -763,9 +763,10 @@ terms count in proportion to the share of requests served (a half that
 sheds nearly everything keeps no latency or CPU credit for the few it
 serves; docs/decisions.md, PR #56 entry).
 
-**The first run scores a baseline half only**, so its fitness is the
-baseline score (docs/decisions.md, PR #52 S4 and the PR #56 entry);
-the rule below applies once the stress half is restored.
+**Two halves per window, baseline then stress** (section 11): each is a
+loadgen window run of its own, of length W, so a record's half is its
+run's. Run 1 scored a baseline half only (docs/decisions.md, PR #52 S4);
+the stress half is restored from run 2 on (docs/decisions.md, PR #68).
 
 **Combine across halves: `fitness = min(score_baseline, score_stress)`,
 not an average.** This operationalizes the resilience claim explicitly: a
@@ -807,7 +808,7 @@ negatives.** 50% `/hash`, 48% `/verify`, 2% contract negatives (starting
 guesses, section 15). There is no shared pool: every pair is generated
 fresh, so a mutant has nothing finite to memoize or replay.
 
-**`/verify` pairs** are generated on the host, fresh for each window, and
+**`/verify` pairs** are generated on the host, fresh for each half, and
 handed to loadgen through its control API. Each pair is sent once, to one
 variant; no pair is reused across variants in v1. Loadgen sends a batch
 in random order, whatever order the host hands it over in. A window
@@ -881,7 +882,7 @@ gets the intended hashcore error; they are not in the binary.
 
 **Two operating modes, one generator component:**
 - Sustained mode, for the multi-minute observation window (baseline +
-  stress-active halves): one fixed-rate open-loop stream per live
+  stress-active halves, each one window run): one fixed-rate open-loop stream per live
   variant, each against that variant's own Service, at the same rate `r`
   for every variant ever scored -- keeps scores comparable across time
   (section 9). Total offered load therefore scales with live population
@@ -910,7 +911,7 @@ W entry).
 start + i/`r`, computed from the index and never from a running sleep, so
 drift cannot accumulate. Each send runs in its own goroutine, so a slow
 response delays no later send. A late send goes out at once and its lag is
-recorded; sends are never skipped to catch up. A window is round(`r` x W)
+recorded; sends are never skipped to catch up. A window run (one half of an observation window, section 11) is round(`r` x W)
 sends; a burst uses the same scheduler with its own rate and count n. A
 send is skipped only when a `/verify` is due and the stream has no pair
 left (`ErrOutOfPairs`); it becomes a skipped record. In-flight requests are
@@ -936,22 +937,24 @@ reads the rings only in gaps, and a window is done only when every send
 has completed or timed out; a target is dropped only after its records
 have been read. The thresholds
 are starting guesses (section 15). CFS throttling of loadgen is logged as
-a diagnostic, not a trigger. After 3 consecutive excluded halves the
-orchestrator flags the run and halts.
+a diagnostic, not a trigger. After 3 consecutive excluded windows (a
+window is excluded when either half is, section 11) the orchestrator
+flags the run and halts.
 
 **Records, not summaries; loadgen has no halves.** Loadgen returns raw
 per-request records, each carrying its per-request verdict (section 8)
 and, for a `/hash` the host must verify, its recorded (password, hash)
 pair. Each record carries its intended send time in wall-clock time
-(assigns it to a half) and in monotonic time (lag, latency), plus its
+and in monotonic time (lag, latency), plus its
 actual send time. Monotonic times are durations since a process-start
 base, so they compare only within one `boot_id`. The intended monotonic
 time comes from the index; the intended wall-clock time is the window's
 wall-clock start + i/`r`, in UTC with the monotonic reading stripped. The
 actual time is taken immediately before `client.Do`, and latency runs
-from there to the full body read. The orchestrator assigns each
-record to a half by intended send time, against its own stress-ng switch
-times, and computes every per-half statistic (lag p99, `success_rate`,
+from there to the full body read. Each half is a loadgen run of its
+own, so a record's half is its run's and no record is sent while
+stress-ng starts or stops (docs/decisions.md, PR #68); the orchestrator
+computes every per-half statistic (lag p99, `success_rate`,
 `p95_latency`, verdict counts) and every exclusion decision. Loadgen and
 the orchestrator read one clock: the kind node is a container on the host.
 
@@ -1163,6 +1166,17 @@ verification and scoring follow it, in the next gap (section 8). There is
 no warm-up exclusion: every variant starts each window from an idle gap,
 so cold start is scored, identically for every variant.
 
+A window is a baseline half, then a stress half, each a loadgen window
+run of length W with its own `/verify` batch (an upload replaces a
+pending one, so the stress half's batch is uploaded after the baseline
+run). The stress half follows once stress-ng is Running, so it starts
+with the replicas the baseline half left (HPA scale-down stabilisation),
+the same for every variant; only the baseline half starts cold. Each
+half has its own kindnet first look, policy canary and kubelet CPU
+samples, taken around its run. Stress-ng goes off again as soon as the
+stress run ends, before its records are read, so the host's
+verification never shares the host with it.
+
 The gap runs in a fixed order: verify the previous window's pairs on the
 host, score it, generate the next window's `/verify` pairs while the
 mutation runs, and start the gate only after pair generation finishes.
@@ -1174,9 +1188,10 @@ host's reasons.
 Deployment on for each stress half and off for each baseline half, and on
 in a gap before calling gate Stage 5 (section 7). A stress half starts
 once the stress-ng pods are Running; a window, and so its baseline half,
-starts only once the stress-ng pods are gone. In the first run a window
-is one baseline half, so stress is on only for gate Stage 5, in a gap
-(docs/decisions.md, PR #52 S4 and the PR #58 window entry).
+starts only once the stress-ng pods are gone. Run 1's windows were one
+baseline half, so its stress was on only for gate Stage 5, in a gap
+(docs/decisions.md, PR #52 S4); from run 2 on stress is on for Stage 5
+and for each window's stress half only (docs/decisions.md, PR #68).
 
 **Gate faults.** A gate fault (a NotReady node, a refused admission, a
 cluster step that hung, loadgen misbehaving) says nothing about a
@@ -1187,9 +1202,12 @@ run on a second fault; the first run halts at the first one
 **Excluded windows.** The orchestrator marks a window excluded from
 scoring for a loadgen restart during it (section 10) or a loadgen
 exclusion trigger (lag, a skipped send, a loadgen fault, a ring gap, a
-policy canary that connects, or reads error). A kindnet DaemonSet that
-is not Ready, or a canary not refused, excludes the window before it
-starts. Exclusion is from scoring only: the host verifies and judges
+policy canary that connects, or reads error), in either half. A kindnet
+DaemonSet that is not Ready, or a canary not refused, excludes the half
+before it starts. A window is scored only when both halves are, so every
+recorded fitness is a min over two scored halves; the stress half is not
+run once the baseline half is excluded (docs/decisions.md, PR #68).
+Exclusion is from scoring only: the host verifies and judges
 every window whose records it reads in full (a loadgen restart loses
 them), so a confirmed integrity failure in an excluded window still
 culls. Probe Events (readiness
@@ -1546,7 +1564,7 @@ with the reason and the total usage of every mutation call.
   match:mismatch split, the Stage 5 negative share (5%), loadgen's
   750m/256Mi sizing, the lag thresholds (p99 10 ms, any 100 ms), the 5%
   lag-exclusion trigger for the static CPU manager, 3 consecutive excluded
-  halves, readiness-probe timings, K = 3 fully verified scored windows per
+  windows, readiness-probe timings, K = 3 fully verified scored windows per
   variant, the `/hash` repeat share (1%), the `/hash` password floor (16
   characters), the `/hash` password length distribution (uniform, 16 to
   1024), the sampled verification share after K (10% of a variant's
