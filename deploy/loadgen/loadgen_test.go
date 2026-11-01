@@ -204,7 +204,12 @@ func TestRenderManifest(t *testing.T) {
 	if !strings.Contains(string(ci), "requests:\n            cpu: 100m\n") || strings.Count(string(ci), "cpu: 1\n") != 1 {
 		t.Errorf("CI-size manifest: want request 100m and limit 1:\n%s", ci)
 	}
-	for _, bad := range []string{"0", "1.5", "-1", "1Gi", "m", "0m"} {
+	for _, good := range []string{"1", "1000m", "1m", "999m"} {
+		if _, err := Render(Params{Rate: "2", Image: validImage, CPURequest: good}); err != nil {
+			t.Errorf("CPURequest %q rejected: %v", good, err)
+		}
+	}
+	for _, bad := range []string{"0", "2", "1001m", "1500m", "1.5", "-1", "1Gi", "m", "0m", "01m"} {
 		if _, err := Render(Params{Rate: "2", Image: validImage, CPURequest: bad}); err == nil {
 			t.Errorf("CPURequest %q accepted", bad)
 		}

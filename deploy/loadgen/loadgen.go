@@ -62,8 +62,9 @@ type Params struct {
 	CPURequest string
 }
 
-// cpuRequestRE is a whole number of CPUs or of millicores.
-var cpuRequestRE = regexp.MustCompile(`^[1-9][0-9]*m?$`)
+// cpuRequestRE is "1" or 1m to 1000m: at most the limit of 1 CPU, which the
+// API server enforces at apply.
+var cpuRequestRE = regexp.MustCompile(`^(1|[1-9][0-9]{0,2}m|1000m)$`)
 
 // imageRE is the image shape, adapted from deploy/variant's: the
 // repository ek8s-loadgen and a 12-character lowercase hex tag.
@@ -100,7 +101,7 @@ func (p Params) values() (values, error) {
 		cpu = defaultCPURequest
 	}
 	if !cpuRequestRE.MatchString(cpu) {
-		return values{}, fmt.Errorf("loadgen cpu request %q: want whole CPUs (1) or millicores (100m)", cpu)
+		return values{}, fmt.Errorf("loadgen cpu request %q: want 1 or 1m to 1000m (e.g. 100m)", cpu)
 	}
 	r, err := strconv.ParseFloat(p.Rate, 64)
 	if err != nil {
