@@ -772,3 +772,30 @@ max. Earlier entries are not backfilled.
 - Reverse: restore CPUFloor 0.05 and LatencyFloor 50 ms in fitness/params.go.
 - Origin: owner
 
+
+## 2026-10-31 · PR A (r3a-static-cpu) · Run 2 recorded: STOP, load far below capacity
+- Decision: run 2 (r = 15.5, b = 62, -generations 2) is a STOP. First attempt: gen 0 failed its own Stage 5 gate (220 of 1860 over_hang_timeout, from index 1428), 0 turns; by hand gen 0 then passed Stage 5 at full and near-zero stress dose, and run2b passed Stage 5 3 of 3: read as a rare flake at b = 2 x C0 with zero tolerance.
+- run2b: exit 0, 2 generations, 13 turns, 3 windows, 6 halves, 0 excluded. Gen 0 stress half success_rate 1 (no sheds, no failures), p95 40/43/53 ms as live grew 1/2/3, score 0.9930/0.9914/0.9892; gens 1-2 matched gen 0 within noise; window-to-window drift (~0.004) >> spread between variants in one window (~0.0002).
+- Cause: load far below capacity (~0.5 core per variant, idle cores beside the 3-CPU stress dose).
+- Origin: owner
+
+## 2026-11-01 · PR A (r3a-static-cpu) · Harsher environment via load, in two PRs
+- Decision: PR A (this one): static CPU manager, loadgen exclusive core. PR B: r = C0 = 31, maxRate 31, b decoupled from r (b decided after PR A from about 10 Stage 5 runs of gen 0 at b = 62 on the rebuilt cluster). Then run 3, -generations 2: Go if gen 0 sheds or fails under stress and variants spread more than window drift.
+- Rejected: one PR changing everything (cannot attribute a result to one change).
+- Reason: owner decision after run 2.
+- Reverse: drop cpuManagerPolicy and restore the PR #29 sizing (see the "Static CPU manager, loadgen 1 CPU / 384Mi" entry).
+- Origin: owner
+
+## 2026-11-01 · PR A (r3a-static-cpu) · Static CPU manager, loadgen 1 CPU / 384Mi, stress-ng 2750m request
+- Decision: cluster.yaml `cpuManagerPolicy: static` (CI keeps none); loadgen requests = limits = cpu 1, memory 384Mi (GOMEMLIMIT 362387866); stress-ng CPU request 2750m, limit "3", memory unchanged. CI size: `EK8S_LOADGEN_CPU_REQUEST=100m`, set once in deploy.yml, read by loadgen-up.sh and passed to the renderer as `-cpu-request` (limit stays 1); stage5-smoke.sh's own patch is gone. CI: Burstable 100m/1, cpuManagerPolicy none; workstation: Guaranteed 1/1, exclusive core (static policy).
+- Rejected: keeping 256Mi (at r = 31 the PR #45/#47 estimates reach the ~230 MiB GOMEMLIMIT, and GC pressure shows as send lag and excluded halves, confounding run 3's Go test); stress-ng limit 2750m (CFS throttling pulses the neighbour every 100 ms and lowers the dose, changing two things versus run 2); the static policy in CI (does not fit a 2-CPU runner); a post-deploy kubectl patch for CI size (a second Recreate rollout, two mechanisms).
+- Reason: the Guaranteed integer CPU takes loadgen out of the shared pool so the neighbour cannot starve the sender; stress-ng stays in the shared pool (non-integer request) and the node budget is 6800m of 7000m.
+- Reverse: remove cpuManagerPolicy and restore 750m / 256Mi and the stress-ng 3 CPU request; reverses the PR #29 sizing entry (docs/decisions-archive.md).
+- Origin: Code
+
+## 2026-11-01 · PR A (r3a-static-cpu) · Smoke check (7) and the CPU request bound
+- Decision: loadgen-smoke.sh check (7) reads the kubelet's cpu_manager_state (docker exec on the node) and, under static, requires one exclusive CPU outside defaultCpuSet and loadgen's Cpus_allowed_list equal to it (ephemeral container, --target=loadgen, process found by comm); under none it prints a skip. The renderer accepts a CPU request of "1" or 1m-1000m only.
+- Rejected: jq for the state file (a new tool for this script; sed/grep/awk suffice); assuming pid 1; an unbounded request (fails at apply, far from the cause).
+- Reason: nothing else proves the static policy took effect.
+- Reverse: delete check (7); restore cpuRequestRE in deploy/loadgen/loadgen.go.
+- Origin: Code

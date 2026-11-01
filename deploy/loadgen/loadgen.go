@@ -41,7 +41,12 @@ const targetURL = "http://hasher.ek8s-v{id}.svc.cluster.local:8080"
 // range (RFC 5737).
 const standInCanary = "192.0.2.1:443"
 
-// Params are the Deployment's values. Both are required.
+// defaultCPURequest is loadgen's CPU request and limit, one whole CPU: an
+// integer CPU on a Guaranteed pod is an exclusive core under the static CPU
+// manager (docs/decisions.md, PR A r3a-static-cpu; DESIGN.md sec 10).
+const defaultCPURequest = "1"
+
+// Params are the Deployment's values. Rate and Image are required.
 type Params struct {
 	// Rate is r, each window stream's sends per second, in the shortest
 	// decimal form that parses back to it (strconv 'g', -1), e.g. 2 or
@@ -50,7 +55,16 @@ type Params struct {
 	// Image is the loadgen image, ek8s-loadgen:<12 hex>, already loaded
 	// into the kind node.
 	Image string
+	// CPURequest is loadgen's CPU request, "1" when empty; the limit is
+	// always 1 CPU. CI size lowers the request only (deploy.yml,
+	// EK8S_LOADGEN_CPU_REQUEST), e.g. "100m": the 2-CPU runner cannot
+	// request a whole core, and there is no static CPU manager there.
+	CPURequest string
 }
+
+// cpuRequestRE is "1" or 1m to 1000m: at most the limit of 1 CPU, which the
+// API server enforces at apply.
+var cpuRequestRE = regexp.MustCompile(`^(1|[1-9][0-9]{0,2}m|1000m)$`)
 
 // imageRE is the image shape, adapted from deploy/variant's: the
 // repository ek8s-loadgen and a 12-character lowercase hex tag.
@@ -61,11 +75,12 @@ var tmpl = template.Must(
 
 // values are what the template reads, all already formatted.
 type values struct {
-	Image     string
-	Rate      string
-	Window    string
-	BurstRate string
-	TargetURL string
+	Image      string
+	Rate       string
+	Window     string
+	BurstRate  string
+	TargetURL  string
+	CPURequest string
 }
 
 // Validate reports the first value that does not match its shape, or the
@@ -80,6 +95,13 @@ func (p Params) Validate() error {
 func (p Params) values() (values, error) {
 	if !imageRE.MatchString(p.Image) {
 		return values{}, fmt.Errorf("loadgen image %q: want ek8s-loadgen:<12 lowercase hex>", p.Image)
+	}
+	cpu := p.CPURequest
+	if cpu == "" {
+		cpu = defaultCPURequest
+	}
+	if !cpuRequestRE.MatchString(cpu) {
+		return values{}, fmt.Errorf("loadgen cpu request %q: want 1 or 1m to 1000m (e.g. 100m)", cpu)
 	}
 	r, err := strconv.ParseFloat(p.Rate, 64)
 	if err != nil {
@@ -99,11 +121,12 @@ func (p Params) values() (values, error) {
 		return values{}, err
 	}
 	return values{
-		Image:     p.Image,
-		Rate:      formatFloat(cfg.Rate),
-		Window:    cfg.Window.String(),
-		BurstRate: formatFloat(cfg.BurstRate),
-		TargetURL: cfg.TargetURL,
+		Image:      p.Image,
+		Rate:       formatFloat(cfg.Rate),
+		Window:     cfg.Window.String(),
+		BurstRate:  formatFloat(cfg.BurstRate),
+		TargetURL:  cfg.TargetURL,
+		CPURequest: cpu,
 	}, nil
 }
 

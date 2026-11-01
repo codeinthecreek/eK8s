@@ -1,7 +1,7 @@
 # loadgen's pod (DESIGN.md sec 10): one replica, in ek8s-system, where the
 # NetworkPolicy and the control Service select app=loadgen. Recreate, not
 # a rolling update: a surge pod would put two loadgens, with two boot_ids,
-# behind the control Service, and a second Guaranteed 750m pod may not fit.
+# behind the control Service, and a second Guaranteed 1 CPU pod may not fit.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -62,17 +62,22 @@ spec:
               containerName: loadgen
               resource: limits.memory
               divisor: "1"
-        # Requests equal limits (Guaranteed QoS): under node memory pressure
-        # loadgen is among the last pods evicted or OOM-killed. CPU is shared
-        # by request, not by QoS class. The memory limit is the one the
-        # PR #45 memory sum assumes (docs/decisions.md).
+        # Requests equal limits (Guaranteed QoS) at the workstation size: under
+        # node memory pressure loadgen is among the last pods evicted or
+        # OOM-killed, and an integer CPU (1) makes it an exclusive core under
+        # the static CPU manager (deploy/kind/cluster.yaml), so the variants
+        # and stress-ng cannot take loadgen's CPU. At CI size (no static
+        # policy, a 2-CPU runner) only the CPU request is lowered, by
+        # deploy/loadgen-up.sh; the limit stays 1. Memory 384Mi: GOMEMLIMIT
+        # (90%) leaves room for the PR #45/#47 estimates at r = 31
+        # (docs/decisions.md, PR A r3a-static-cpu).
         resources:
           requests:
-            cpu: 750m
-            memory: 256Mi
+            cpu: {{.CPURequest}}
+            memory: 384Mi
           limits:
-            cpu: 750m
-            memory: 256Mi
+            cpu: 1
+            memory: 384Mi
         # Ready once the control API accepts connections. There is no
         # liveness probe: a restart empties loadgen (targets, records, salt
         # sets); the orchestrator's control-call timeouts see a hung one.

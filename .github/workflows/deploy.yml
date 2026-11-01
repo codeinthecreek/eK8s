@@ -57,6 +57,11 @@ jobs:
       EK8S_STRESS_KUSTOMIZE: stress-ci
       EK8S_RESERVED_CPU_MILLIS: '10'
       EK8S_STRESS_MIN_CPU_MILLIS: '250'
+      # loadgen's CPU request at CI size (limit stays 1); read by
+      # deploy/loadgen-up.sh, so loadgen-smoke.sh and stage5-smoke.sh both
+      # get it. The node cannot hold a whole-core request beside the system
+      # pods, stress-ng and a candidate.
+      EK8S_LOADGEN_CPU_REQUEST: '100m'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

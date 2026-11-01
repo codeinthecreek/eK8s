@@ -189,6 +189,31 @@ func TestRenderManifest(t *testing.T) {
 			t.Errorf("manifest lacks exactly one %q", want)
 		}
 	}
+	// Guaranteed at the workstation size: 1 CPU and 384Mi, requests =
+	// limits, so an exclusive core under the static CPU manager.
+	for _, want := range []string{"cpu: 1\n", "memory: 384Mi\n"} {
+		if n := strings.Count(s, want); n != 2 {
+			t.Errorf("manifest has %d %q, want 2 (request and limit)", n, want)
+		}
+	}
+	// CI size lowers the request only.
+	ci, err := Render(Params{Rate: "2", Image: validImage, CPURequest: "100m"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(ci), "requests:\n            cpu: 100m\n") || strings.Count(string(ci), "cpu: 1\n") != 1 {
+		t.Errorf("CI-size manifest: want request 100m and limit 1:\n%s", ci)
+	}
+	for _, good := range []string{"1", "1000m", "1m", "999m"} {
+		if _, err := Render(Params{Rate: "2", Image: validImage, CPURequest: good}); err != nil {
+			t.Errorf("CPURequest %q rejected: %v", good, err)
+		}
+	}
+	for _, bad := range []string{"0", "2", "1001m", "1500m", "1.5", "-1", "1Gi", "m", "0m", "01m"} {
+		if _, err := Render(Params{Rate: "2", Image: validImage, CPURequest: bad}); err == nil {
+			t.Errorf("CPURequest %q accepted", bad)
+		}
+	}
 	// The NetworkPolicy and the control Service select app=loadgen.
 	if n := strings.Count(s, "app: loadgen\n"); n != 3 {
 		t.Errorf("%d app: loadgen labels, want 3 (metadata, selector, pod template)", n)

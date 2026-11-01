@@ -6,7 +6,7 @@ workstation (DESIGN.md sec 2).
 
 ```
 kind/cluster.yaml     the cluster: name ek8s, one node, Kubernetes 1.37.0
-kind/cluster-ci.yaml  the same at CI size (100m / 256Mi reserved)
+kind/cluster-ci.yaml  the same at CI size (10m / 256Mi reserved, default CPU manager)
 metrics-server/       metrics-server v0.9.0, vendored, + --kubelet-insecure-tls
 stress/               namespace ek8s-stress: stress-ng Deployment (0 replicas),
                       its dose ConfigMap, a deny-all NetworkPolicy
@@ -225,7 +225,7 @@ loadgen (DESIGN.md sec 11).
 Deployment `loadgen` in `ek8s-system`, rendered from
 `loadgen/deployment.yaml.tmpl` by package `deploy/loadgen` and applied by
 `loadgen-up.sh`, not by the ek8s-system kustomization. One replica,
-strategy `Recreate`, 750m CPU / 256Mi Guaranteed, a `tcpSocket` readiness
+strategy `Recreate`, 1 CPU / 384Mi Guaranteed (an exclusive core under the workstation cluster's static CPU manager; `EK8S_LOADGEN_CPU_REQUEST` lowers only the CPU request, 100m in CI), a `tcpSocket` readiness
 probe on the container port `control` (9090) and no liveness probe, a 15 s
 grace period, `GOMEMLIMIT` from the downward API, no service-account
 token (DESIGN.md sec 10). The renderer takes only the rate `r` and an
@@ -388,6 +388,7 @@ kubectl --context kind-ek8s -n ek8s-stress scale deploy/stress-ng --replicas=0  
 
 The dose lives in ConfigMap `stress-dose` (stress/dose.yaml): CPU workers,
 per-worker CPU load, VM workers and VM bytes. Change it while stress is off;
-the next scale-up reads the new values. The pod is Guaranteed QoS at 3 CPU /
-2Gi; keep `VM_BYTES` under the 2Gi limit. All values are starting guesses
+the next scale-up reads the new values. The pod is Burstable (CPU request
+2750m, limit 3: the dose stays 3 cores, as in run 2); memory request = limit =
+2Gi, so keep `VM_BYTES` under it. All values are starting guesses
 (DESIGN.md sec 15).
