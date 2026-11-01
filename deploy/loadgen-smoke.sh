@@ -2,6 +2,8 @@
 # loadgen smoke test, after deploy/up.sh: deploys loadgen in ek8s-system
 # with deploy/loadgen-up.sh and checks, at r = 2,
 #   (5) the pod becomes Ready;
+#   (7) under the static CPU manager, loadgen holds one exclusive core and
+#       its process is confined to it; skipped (printed) under policy none;
 #   (6) its start line carries the memory limit and GOMEMLIMIT, 90% of it;
 #   (3) its canary address is the API server's ClusterIP and port, and the
 #       policy canary reads refused within 60s, then once more
@@ -154,6 +156,59 @@ pairs() {
 deploy/loadgen-up.sh 2 || die "(5) loadgen at r=2 not Ready"
 pod=$(loadgen_pod)
 ok "(5) $sys/$pod Ready at r=2"
+
+# --- (7) an exclusive core, when the node runs the static CPU manager.
+# The kubelet's checkpoint, read from the kind node container, names the
+# policy, the shared pool (defaultCpuSet) and each exclusive container's
+# CPUs: {"policyName":"static","defaultCpuSet":"0-1,4-7","entries":
+# {"<pod uid>":{"<container>":"2"}},"checksum":N}, one line. Under "none"
+# (CI) there is nothing to check, which is printed, not silent.
+node="$cluster-control-plane"
+state=$(docker exec "$node" cat /var/lib/kubelet/cpu_manager_state) ||
+	die "(7) cannot read /var/lib/kubelet/cpu_manager_state in $node"
+policy=$(sed -n 's/.*"policyName":"\([^"]*\)".*/\1/p' <<<"$state")
+case "$policy" in
+none) echo "loadgen-smoke.sh: (7) skipped: cpuManagerPolicy none" ;;
+static)
+	uid=$(k -n "$sys" get pod "$pod" -o jsonpath='{.metadata.uid}') || die "(7) cannot read $pod's uid"
+	# The entry for the pod, then the container's value within it.
+	entry=$(grep -o "\"$uid\":{[^}]*}" <<<"$state") || die "(7) no cpu_manager_state entry for pod $uid: $state"
+	cpu=$(sed -n 's/.*"loadgen":"\([^"]*\)".*/\1/p' <<<"$entry")
+	[[ $cpu =~ ^[0-9]+$ ]] || die "(7) want exactly one CPU for container loadgen, have \"${cpu:-none}\" in: $entry"
+	shared=$(sed -n 's/.*"defaultCpuSet":"\([^"]*\)".*/\1/p' <<<"$state")
+	# Expand the shared pool's ranges (0-1,4-7) and look for the core.
+	awk -v cpu="$cpu" -v set="$shared" 'BEGIN {
+		n = split(set, part, ",")
+		for (i = 1; i <= n; i++) {
+			m = split(part[i], ends, "-")
+			if (part[i] == "") continue
+			for (c = ends[1]; c <= ends[m]; c++) if (c == cpu) exit 1
+		}
+	}' || die "(7) loadgen's CPU $cpu is in the shared pool $shared"
+	# Enforcement: the process's affinity, read from an ephemeral container
+	# that shares loadgen's process namespace (--target). The restricted
+	# profile meets the namespace's Pod Security level; the curl image has
+	# busybox sh. loadgen is found by comm, not assumed to be pid 1.
+	k -n "$sys" debug "$pod" --profile=restricted --image="$curl_tag" --image-pull-policy=Never \
+		-c cpucheck --target=loadgen -q --attach=false -- \
+		sh -c 'for d in /proc/[0-9]*; do if [ "$(cat $d/comm 2>/dev/null)" = loadgen ]; then echo "cpus_allowed_list $(sed -n "s/^Cpus_allowed_list:[[:space:]]*//p" $d/status)"; fi; done' >/dev/null ||
+		die "(7) kubectl debug failed"
+	deadline=$((SECONDS + 60))
+	until code=$(k -n "$sys" get pod "$pod" \
+		-o jsonpath='{.status.ephemeralContainerStatuses[?(@.name=="cpucheck")].state.terminated.exitCode}') &&
+		[ -n "$code" ]; do
+		[ "$SECONDS" -lt "$deadline" ] || die "(7) cpucheck did not finish in 60s"
+		sleep 2
+	done
+	[ "$code" = 0 ] || die "(7) cpucheck exited $code: $(k -n "$sys" logs "$pod" -c cpucheck 2>&1)"
+	allowed=$(k -n "$sys" logs "$pod" -c cpucheck) || die "(7) cannot read cpucheck's log"
+	[ "$(grep -c . <<<"$allowed")" -eq 1 ] || die "(7) want one process with comm loadgen, have: ${allowed:-none}"
+	[ "$allowed" = "cpus_allowed_list $cpu" ] ||
+		die "(7) loadgen's Cpus_allowed_list differs from its exclusive CPU $cpu: $allowed"
+	ok "(7) static CPU manager: loadgen has exclusive CPU $cpu (shared pool $shared), Cpus_allowed_list $cpu"
+	;;
+*) die "(7) cpuManagerPolicy \"$policy\" is neither static nor none: $state" ;;
+esac
 
 # --- (6) the start line's memory limit (384Mi) and GOMEMLIMIT (90%).
 logs=$(k -n "$sys" logs "$pod" -c loadgen) || die "(6) cannot read $pod's log"
