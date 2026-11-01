@@ -981,9 +981,11 @@ halts the first run (docs/decisions.md, PR #58 host-confirmation entry).
 
 **Runs in the cluster**, as one long-lived Deployment in namespace
 `ek8s-system` serving every variant's stream and every Stage 5 burst.
-Guaranteed QoS, 750m CPU / 256Mi, in the shared pool; the static CPU
-manager is used only if the workstation run excludes more than about 5%
-of halves for lag. It reaches each variant by Service DNS (section 11)
+Guaranteed QoS, 1 CPU / 384Mi: on the workstation cluster the static
+CPU manager (`cpuManagerPolicy: static`, deploy/kind/cluster.yaml) gives
+it an exclusive core. The CI-size cluster keeps the default policy (a
+2-CPU runner cannot fit a whole loadgen core) and lowers only loadgen's
+CPU request. It reaches each variant by Service DNS (section 11)
 with HTTP keep-alives disabled and no proxy (one `http.Client` over a
 clone of `http.DefaultTransport` with `Proxy` nil), sending
 `Content-Type: application/json`, so every request opens its own
@@ -1563,8 +1565,8 @@ with the reason and the total usage of every mutation call.
   stagnation soft/hard thresholds, usage ceiling, per-variant stream rate
   `r` and the 0.5 x C0 factor, the 50/48/2 request mix and the
   match:mismatch split, the Stage 5 negative share (5%), loadgen's
-  750m/256Mi sizing, the lag thresholds (p99 10 ms, any 100 ms), the 5%
-  lag-exclusion trigger for the static CPU manager, 3 consecutive excluded
+  1 CPU / 384Mi sizing (exclusive core under the static CPU manager), the
+  lag thresholds (p99 10 ms, any 100 ms), 3 consecutive excluded
   windows, readiness-probe timings, K = 3 fully verified scored windows per
   variant, the `/hash` repeat share (1%), the `/hash` password floor (16
   characters), the `/hash` password length distribution (uniform, 16 to

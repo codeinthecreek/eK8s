@@ -155,13 +155,13 @@ deploy/loadgen-up.sh 2 || die "(5) loadgen at r=2 not Ready"
 pod=$(loadgen_pod)
 ok "(5) $sys/$pod Ready at r=2"
 
-# --- (6) the start line's memory limit (256Mi) and GOMEMLIMIT (90%).
+# --- (6) the start line's memory limit (384Mi) and GOMEMLIMIT (90%).
 logs=$(k -n "$sys" logs "$pod" -c loadgen) || die "(6) cannot read $pod's log"
 start=$(grep -m1 'msg="loadgen starting"' <<<"$logs") || die "(6) no start line in $pod's log"
-for w in mem_limit_bytes=268435456 go_mem_limit=241591911; do
+for w in mem_limit_bytes=402653184 go_mem_limit=362387866; do
 	[[ " $start " == *" $w "* ]] || die "(6) start line lacks $w: $start"
 done
-ok "(6) start line: mem_limit_bytes=268435456 go_mem_limit=241591911"
+ok "(6) start line: mem_limit_bytes=402653184 go_mem_limit=362387866"
 
 # --- (3) the canary address is the API server's ClusterIP and port, as
 # the kubelet expanded them into the args; the canary reads refused.

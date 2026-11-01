@@ -55,12 +55,18 @@ spec:
           valueFrom: {configMapKeyRef: {name: stress-dose, key: VM_WORKERS}}
         - name: VM_BYTES
           valueFrom: {configMapKeyRef: {name: stress-dose, key: VM_BYTES}}
-        # Guaranteed QoS: under contention CPU is shared by request, so a
-        # small request would make a weak neighbour. Starting guesses
+        # Burstable on CPU, Guaranteed on memory. CPU is shared by request, so
+        # a small request would make a weak neighbour: 2750m is large, but a
+        # non-integer request keeps stress-ng in the shared pool under the
+        # static CPU manager (an integer request would take exclusive cores
+        # from the variants) and fits the node budget beside loadgen's
+        # exclusive core. The limit "3" keeps the dose at 3 cores, as in run 2;
+        # a limit of 2750m would add CFS throttling pulses to the neighbour
+        # (docs/decisions.md, PR A r3a-static-cpu). Starting guesses
         # (DESIGN.md sec 15).
         resources:
           requests:
-            cpu: "3"
+            cpu: 2750m
             memory: 2Gi
           limits:
             cpu: "3"

@@ -785,3 +785,10 @@ max. Earlier entries are not backfilled.
 - Reason: owner decision after run 2.
 - Reverse: drop cpuManagerPolicy and restore the PR #29 sizing (see the commit 3 entry).
 - Origin: owner
+
+## 2026-11-01 · PR A (r3a-static-cpu) · Static CPU manager, loadgen 1 CPU / 384Mi, stress-ng 2750m request
+- Decision: cluster.yaml `cpuManagerPolicy: static` (CI keeps none); loadgen requests = limits = cpu 1, memory 384Mi (GOMEMLIMIT 362387866); stress-ng CPU request 2750m, limit "3", memory unchanged. CI size: `EK8S_LOADGEN_CPU_REQUEST=100m`, set once in deploy.yml, read by loadgen-up.sh and passed to the renderer as `-cpu-request` (limit stays 1); stage5-smoke.sh's own patch is gone.
+- Rejected: keeping 256Mi (at r = 31 the PR #45/#47 estimates reach the ~230 MiB GOMEMLIMIT, and GC pressure shows as send lag and excluded halves, confounding run 3's Go test); stress-ng limit 2750m (CFS throttling pulses the neighbour every 100 ms and lowers the dose, changing two things versus run 2); the static policy in CI (does not fit a 2-CPU runner); a post-deploy kubectl patch for CI size (a second Recreate rollout, two mechanisms).
+- Reason: the Guaranteed integer CPU takes loadgen out of the shared pool so the neighbour cannot starve the sender; stress-ng stays in the shared pool (non-integer request) and the node budget is 6800m of 7000m.
+- Reverse: remove cpuManagerPolicy and restore 750m / 256Mi and the stress-ng 3 CPU request; reverses the PR #29 sizing entry (docs/decisions-archive.md).
+- Origin: Code

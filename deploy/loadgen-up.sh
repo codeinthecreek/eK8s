@@ -5,6 +5,9 @@
 # re-run with another r replaces the pod (strategy Recreate). Run from
 # anywhere; needs go, docker, kind and kubectl.
 #   deploy/loadgen-up.sh <r>    e.g. deploy/loadgen-up.sh 2
+# EK8S_LOADGEN_CPU_REQUEST lowers loadgen's CPU request (default 1, which is
+# also its limit); .github/workflows/deploy.yml sets 100m for the 2-CPU CI
+# runner, where a whole core cannot be requested. The limit stays 1.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -40,7 +43,7 @@ kind load docker-image "$image" --name "$cluster"
 
 # Rendered to a file first, so a rate the renderer refuses stops here
 # with its message and nothing is applied.
-go run ./deploy/loadgen/cmd/render -rate "$rate" -image "$image" >"$work/loadgen.yaml"
+go run ./deploy/loadgen/cmd/render -rate "$rate" -image "$image" -cpu-request "${EK8S_LOADGEN_CPU_REQUEST:-1}" >"$work/loadgen.yaml"
 k apply -f "$work/loadgen.yaml"
 k -n "$sys" rollout status deploy/loadgen --timeout=180s || die "Deployment loadgen not Ready"
 echo "loadgen-up.sh: loadgen at r=$rate is Ready ($image)"

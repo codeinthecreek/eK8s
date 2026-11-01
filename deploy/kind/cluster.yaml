@@ -16,6 +16,11 @@ nodes:
   kubeadmConfigPatches:
   - |
     kind: KubeletConfiguration
+    # Static CPU manager: loadgen (Guaranteed, integer CPU 1) gets an
+    # exclusive core, so the variants and stress-ng cannot take its CPU
+    # (docs/decisions.md, PR A r3a-static-cpu). It needs the nonzero CPU
+    # reservation below. cluster-ci.yaml keeps the default (none).
+    cpuManagerPolicy: static
     # Takes ~1 CPU and ~2Gi out of node allocatable, so pod requests are
     # scheduled against DESIGN.md sec 2's budget, not the whole host.
     kubeReserved:
