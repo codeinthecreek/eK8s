@@ -772,3 +772,16 @@ max. Earlier entries are not backfilled.
 - Reverse: restore CPUFloor 0.05 and LatencyFloor 50 ms in fitness/params.go.
 - Origin: owner
 
+
+## 2026-10-31 · PR A (r3a-static-cpu) · Run 2 recorded: STOP, load far below capacity
+- Decision: run 2 (r = 15.5, b = 62, -generations 2) is a STOP. First attempt: gen 0 failed its own Stage 5 gate (220 of 1860 over_hang_timeout, from index 1428), 0 turns; by hand gen 0 then passed Stage 5 at full and near-zero stress dose, and run2b passed Stage 5 3 of 3: read as a rare flake at b = 2 x C0 with zero tolerance.
+- run2b: exit 0, 2 generations, 13 turns, 3 windows, 6 halves, 0 excluded. Gen 0 stress half success_rate 1 (no sheds, no failures), p95 40/43/53 ms as live grew 1/2/3, score 0.9930/0.9914/0.9892; gens 1-2 matched gen 0 within noise; window-to-window drift (~0.004) >> spread between variants in one window (~0.0002).
+- Cause: load far below capacity (~0.5 core per variant, idle cores beside the 3-CPU stress dose).
+- Origin: owner
+
+## 2026-11-01 · PR A (r3a-static-cpu) · Harsher environment via load, in two PRs
+- Decision: PR A (this one): static CPU manager, loadgen exclusive core. PR B: r = C0 = 31, maxRate 31, b decoupled from r (b decided after PR A from about 10 Stage 5 runs of gen 0 at b = 62 on the rebuilt cluster). Then run 3, -generations 2: Go if gen 0 sheds or fails under stress and variants spread more than window drift.
+- Rejected: one PR changing everything (cannot attribute a result to one change).
+- Reason: owner decision after run 2.
+- Reverse: drop cpuManagerPolicy and restore the PR #29 sizing (see the commit 3 entry).
+- Origin: owner
