@@ -55,7 +55,8 @@ spec:
           valueFrom: {configMapKeyRef: {name: stress-dose, key: VM_WORKERS}}
         - name: VM_BYTES
           valueFrom: {configMapKeyRef: {name: stress-dose, key: VM_BYTES}}
-        # Burstable on CPU, Guaranteed on memory. CPU is shared by request, so
+        # The pod is Burstable (CPU request below limit); memory request =
+        # limit. CPU is shared by request, so
         # a small request would make a weak neighbour: 2750m is large, but a
         # non-integer request keeps stress-ng in the shared pool under the
         # static CPU manager (an integer request would take exclusive cores

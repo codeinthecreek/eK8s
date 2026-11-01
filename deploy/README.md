@@ -388,6 +388,7 @@ kubectl --context kind-ek8s -n ek8s-stress scale deploy/stress-ng --replicas=0  
 
 The dose lives in ConfigMap `stress-dose` (stress/dose.yaml): CPU workers,
 per-worker CPU load, VM workers and VM bytes. Change it while stress is off;
-the next scale-up reads the new values. The pod is Burstable on CPU (request
-2750m, limit 3: the dose stays 3 cores, as in run 2) and requests 2Gi = limit; keep `VM_BYTES` under the 2Gi limit. All values are starting guesses
+the next scale-up reads the new values. The pod is Burstable (CPU request
+2750m, limit 3: the dose stays 3 cores, as in run 2); memory request = limit =
+2Gi, so keep `VM_BYTES` under it. All values are starting guesses
 (DESIGN.md sec 15).
