@@ -4,7 +4,7 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 *(inferred)* are guesses, not read from the repo; correct them.
 
 ## Now
-- PR A (r3a-static-cpu): static CPU manager on the workstation cluster, loadgen exclusive core (1 CPU / 384Mi), stress-ng request 2750m / limit 3; CI-size loadgen request via EK8S_LOADGEN_CPU_REQUEST (docs/decisions.md, 2026-11-01)
+- PR A (r3a-static-cpu): static CPU manager on the workstation cluster, loadgen exclusive core (1 CPU / 384Mi), stress-ng request 2750m / limit 3; CI-size loadgen request via EK8S_LOADGEN_CPU_REQUEST (docs/decisions.md, 2026-11-01); loadgen-smoke.sh check (7) proves the exclusive core under the static policy (skipped, printed, under none), unrun until the owner's workstation run
 
 ## Next
 - After PR A merges: rebuild the cluster (deploy/up.sh from scratch; the kubelet config changes), about 10 Stage 5 runs of gen 0 at b = 62, then PR B (r = C0 = 31, maxRate 31, b decoupled from r, b decided from those runs), then run 3 (-generations 2; Go if gen 0 sheds or fails under stress and variants spread more than window drift; docs/decisions.md, 2026-11-01).
