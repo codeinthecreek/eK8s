@@ -815,3 +815,9 @@ max. Earlier entries are not backfilled.
 - Reverse: re-ask the owner.
 - Origin: owner
 
+## 2026-11-03 · PR #70 (inferred) · deploy/diag/stage5-nopolicy.sh: an alternating ON/OFF experiment in bash, no Go change
+- Decision: one workstation-only script runs real `gate -stage5` bursts on gen 0 at b = 4r, alternating ON (cluster as deployed) and OFF (NetworkPolicies ek8s-system/loadgen and the diag's ek8s-v999997/variant deleted, canary arg patched to 192.0.2.1:443 with a JSON-patch test op), at most 15 runs per arm, never extended. Each run asserts its arm's state (policies, start line canary_addr, POST /canary refused twice, loadgen's and hasher IPs against kindnet's podips-v4 set every ~0.5 s); OFF restores ON after every run and on exit (G5). Per run it keeps loadgen's netns TcpExt TCPSynRetrans and Tcp RetransSegs (/proc/<pid>/net via the node; per-netns counters, kernel snmp_counter.rst and tcp_output.c), the raw kindnet log lines, sync-line times, and records reduced to index, kind, send time, latency, bucket, reason, skipped, fault.
+- Rejected: a build-tag hook in gate/ (a no-isolation path in gate source beside fail-closed code); nstat (not on every host; /proc read directly); raw records on disk (pairs carry passwords and hashes); one ON-to-OFF switch for the whole experiment (time drift confounds the arms).
+- Reason: packet item 3 and owner feedback F2-F6; kindnet queues a connection when either end is policy-selected (vendored controller.go), so both policies must go, and the canary with loadgen's.
+- Reverse: delete deploy/diag/ and its deploy/README.md section.
+- Origin: Code
