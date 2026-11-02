@@ -773,7 +773,7 @@ max. Earlier entries are not backfilled.
 - Origin: owner
 
 
-## 2026-10-31 · PR #69 (r3a-static-cpu) · Run 2 recorded: STOP, load far below capacity
+## 2026-10-31 · PR #69 (r3a-static-cpu) · Run 2 recorded: STOP, load far below capacity (amended by the 2026-11-02 Stage 5 stall entry)
 - Decision: run 2 (r = 15.5, b = 62, -generations 2) is a STOP. First attempt: gen 0 failed its own Stage 5 gate (220 of 1860 over_hang_timeout, from index 1428), 0 turns; by hand gen 0 then passed Stage 5 at full and near-zero stress dose, and run2b passed Stage 5 3 of 3: read as a rare flake at b = 2 x C0 with zero tolerance.
 - run2b: exit 0, 2 generations, 13 turns, 3 windows, 6 halves, 0 excluded. Gen 0 stress half success_rate 1 (no sheds, no failures), p95 40/43/53 ms as live grew 1/2/3, score 0.9930/0.9914/0.9892; gens 1-2 matched gen 0 within noise; window-to-window drift (~0.004) >> spread between variants in one window (~0.0002).
 - Cause: load far below capacity (~0.5 core per variant, idle cores beside the 3-CPU stress dose).
@@ -799,3 +799,19 @@ max. Earlier entries are not backfilled.
 - Reason: nothing else proves the static policy took effect.
 - Reverse: delete check (7); restore cpuRequestRE in deploy/loadgen/loadgen.go.
 - Origin: Code
+
+## 2026-11-02 · PR #70 (inferred) · Stage 5 stalls on an HPA pod add are a harness defect (amends the 2026-10-31 run 2 entry's "rare flake")
+- Decision: recorded. At b = 62, stress on, 10 of 37 gen-0 Stage 5 runs failed on one contiguous ~213-225 over_hang_timeout run (~5 s stall of new connections), only when the HPA's second pod appeared mid-burst; kindnet logged "Could not receive message ... netlink receive: no such file or directory" (controller.go:305) in 5/5 failing runs, 0/7 passing. Run 2's first-attempt Stage 5 failure (220 of 1860 from index 1428) is this defect, not a flake.
+- Cause candidate: kindnet's vendored kube-network-policies (v1.0.1-0.20260528073847-f67f0fb35e2b, kind v0.33.0) deletes and recreates its nftables table on every sync, and deleting a base chain drops every packet waiting in an nfqueue. Changed upstream in v1.1.2 (rules replaced in place, table kept); not yet confirmed as the cause; no kindnetd image carries v1.1.2 (newest kindest/kindnetd tag v20260820-69b56db7, ours).
+- Rejected: lowering b or the gate's tolerance (hides the defect); changing the environment around it (design packet option 3).
+- Reason: zero-tolerance Stage 5 must fail only for the candidate, and the same stall can hit live windows whenever an HPA scales.
+- Reverse: n/a (a finding); the fix is decided after the experiment (Q2).
+- Origin: owner
+
+## 2026-11-03 · PR #70 (inferred) · Owner answers to the kindnet-stall design packet: Q1 yes, Q2 deferred, Q3 yes, Q4 yes
+- Decision: Q1 yes: run deploy/diag/stage5-nopolicy.sh on the workstation cluster (both policies on the burst's path removed and the canary on 192.0.2.1:443 in its OFF arm, gen 0 only, guards G1-G5). Q2 (switch to Calico v3.33.0, CI parity, reversing the PR #31 "another CNI out of scope" rejection, DESIGN.md sec 11 rewrite) deferred until the experiment's result. Q3 yes: re-measure C0 on any new CNI before PR B. Q4 yes: option 4 now as detection and recording only (D3); its retry and exclusion rules go to docs/AFTER-FIRST-RUN.md.
+- Rejected: Calico now (unconfirmed cause); retry-once and cross-variant exclusion now (fault-vs-fail semantics, S10).
+- Reason: owner's call (2026-11-03, prompt EK-D1-STALL-20261103).
+- Reverse: re-ask the owner.
+- Origin: owner
+
