@@ -16,13 +16,20 @@
 # generation 0 built from this checkout, stress-ng on.
 #
 # Every run asserts its arm's state:
-#   ON   both policies exist; loadgen's start line has the real
-#        canary_addr; POST /canary reads refused twice before the burst;
+#   ON   before the gate: ek8s-system/loadgen exists, loadgen's start
+#        line has the real canary_addr, POST /canary reads refused twice;
+#        once the burst has begun (its first record read): ek8s-v<id>/
+#        variant exists and the first hasher pod's IP is in podips-v4;
 #        loadgen's IP is in kindnet's podips-v4 set in every snapshot.
-#   OFF  no NetworkPolicy in ek8s-system or ek8s-v<id>; canary_addr is
-#        192.0.2.1:443 and POST /canary reads refused; neither loadgen's
-#        nor any hasher pod's IP is in podips-v4 in any snapshot taken
-#        while the gate runs.
+#   OFF  before the gate: no NetworkPolicy in ek8s-system, canary_addr is
+#        192.0.2.1:443, POST /canary reads refused twice, loadgen's IP is
+#        not in podips-v4; loadgen's IP is in no snapshot taken while the
+#        gate runs, and no hasher pod's IP is in any snapshot taken once
+#        the burst has begun (before it, the variant's policy may still
+#        exist for an instant); after the gate: no NetworkPolicy in
+#        ek8s-system or ek8s-v<id>.
+#   Both a run the gate judged (exit 0 or 1) must have records read, so
+#        the burst-time checks above cannot pass by never running.
 # A failed assertion, a gate fault (exit 2) or a policy that cannot be
 # restored ends the experiment: the run is not counted.
 #
@@ -33,15 +40,22 @@
 #      exists, or a process named orchestrator, c0 or gate runs (the names
 #      `go run` and `go build` give ./orchestrator/cmd/orchestrator,
 #      ./orchestrator/cmd/c0 and ./gate/cmd/gate); the namespace and the
-#      first two names are checked again before every run;
-#   G4 builds generation 0 from this checkout and refuses a checkout with
+#      first two names are checked again before every run, and the two
+#      names on every poll while the gate runs;
+#   G4 builds generation 0 from this checkout's HEAD and refuses a tree with
 #      changes under cmd/service, internal/, go.mod or go.sum, so no
 #      mutant ever runs without isolation;
-#   G5 on exit, and after every OFF run, restores the ON state (applies
-#      deploy/ek8s-system, puts the canary argument back, then requires
-#      the real canary_addr and POST /canary refused twice within 60s) and
-#      prints "POLICY NOT RESTORED" and exits non-zero if it cannot. On
-#      exit it also deletes the diag namespace and turns stress-ng off.
+#   G5 on exit (INT, TERM and HUP included; further signals are ignored
+#      while it restores), and after every OFF run, restores the ON state
+#      (applies deploy/ek8s-system, puts the canary argument back, then
+#      requires the real canary_addr and POST /canary refused twice within
+#      60s) and prints "POLICY NOT RESTORED" and exits non-zero if it
+#      cannot. On exit it also deletes the diag namespace and turns
+#      stress-ng off. SIGKILL or a host crash skips G5, and nothing else
+#      would notice: the orchestrator and the gate check neither the policy
+#      nor canary_addr, and the stand-in canary always reads refused. After
+#      any unclean end, run deploy/up.sh and deploy/loadgen-up.sh <r>
+#      before any orchestrator, c0 or gate run.
 #
 # Output (-out, default ~/workspace/scratch/ek8s-runs/diag-nopolicy-<UTC
 # stamp>/): meta.txt, diag.log, summary.tsv (one row per run),
@@ -54,9 +68,12 @@
 # "Syncing nftables rules" lines, with their timestamps).
 #
 # Verdict (summary.tsv, verdict.txt): a stall is a gate exit 1 whose
-# "responses" line names over_hang_timeout; a mid-burst add is a hasher
-# pod, other than the first, created between the burst's first intended
-# send and first + burst_sends / burst_rate. OFF is MET with 0 stalls in
+# "responses" line names over_hang_timeout, or whose records read hold
+# any over_hang_timeout (a pod-health FAIL ends the gate before
+# "responses"); a mid-burst add is a hasher pod, other than the first,
+# whose creationTimestamp is between the burst's first intended send
+# minus 1s (the timestamp is cut to whole seconds) and first +
+# burst_sends / burst_rate. OFF is MET with 0 stalls in
 # >= 15 runs holding >= 10 mid-burst adds, STALLED with any stall, else
 # INCONCLUSIVE; ON is MET with >= 1 stall in its mid-burst-add runs, else
 # INCONCLUSIVE. Both arms: CONFIRMED when both are MET, NOT-CONFIRMED
@@ -66,6 +83,7 @@
 # only, for a dry try; its verdict is per arm):
 #   EK8S_DIAG_NOPOLICY=yes-no-isolation deploy/diag/stage5-nopolicy.sh \
 #       [-rate 15.5] [-runs 15] [-arm both|on|off] [-out DIR]
+# (a relative -out is taken from the directory the script is run from).
 # Needs go, docker, kind, kubectl, git, pgrep; deploys loadgen at -rate
 # (deploy/loadgen-up.sh) and leaves it deployed, in the ON state.
 set -euo pipefail
@@ -214,7 +232,19 @@ loadgen_pod() {
 
 # start_line POD: loadgen's start log line.
 start_line() {
-	k -n "$sys" logs "$1" -c loadgen | grep -m1 'msg="loadgen starting"' || die "no start line in $1's log"
+	local logs
+	# Into a variable first: grep -m1 would end the pipe early and SIGPIPE
+	# kubectl under pipefail (deploy/stage5-smoke.sh does the same).
+	logs=$(k -n "$sys" logs "$1" -c loadgen) || die "cannot read $1's log"
+	grep -m1 'msg="loadgen starting"' <<<"$logs" || die "no start line in $1's log"
+}
+
+# pod_ip NS POD: the pod's IP, never empty.
+pod_ip() {
+	local ip
+	ip=$(k -n "$1" get pod "$2" -o jsonpath='{.status.podIP}') || die "cannot read $1/$2's IP"
+	[[ $ip =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || die "$1/$2 has no IPv4 address: '$ip'"
+	echo "$ip"
 }
 
 # canary: POST /canary's result, once GET /config answers (the Service
@@ -267,13 +297,15 @@ wait_set() {
 # loadgen_pid POD: the loadgen process's pid in the node's pid namespace,
 # whose /proc/<pid>/net is loadgen's network namespace.
 loadgen_pid() {
-	local cid pid
+	local cid pid comm
 	cid=$(k -n "$sys" get pod "$1" -o jsonpath='{.status.containerStatuses[?(@.name=="loadgen")].containerID}')
 	cid=${cid#containerd://}
 	[[ $cid =~ ^[0-9a-f]{64}$ ]] || die "loadgen's containerID is not a containerd id: '$cid'"
 	pid=$(docker exec "$node" crictl inspect "$cid" | grep -m1 -oE '"pid": *[0-9]+' | grep -oE '[0-9]+$') ||
 		die "crictl inspect $cid gave no pid"
 	docker exec "$node" test -r "/proc/$pid/net/netstat" || die "cannot read /proc/$pid/net/netstat on $node"
+	comm=$(docker exec "$node" cat "/proc/$pid/comm") || die "cannot read /proc/$pid/comm on $node"
+	[ "$comm" = loadgen ] || die "pid $pid on $node is '$comm', not loadgen"
 	echo "$pid"
 }
 
@@ -320,7 +352,7 @@ check_on() {
 	start=$(start_line "$pod")
 	[[ " $start " == *" canary_addr=$api "* ]] || die "ON: start line's canary_addr is not $api: $start"
 	canary_refused_twice 60 || die "ON: POST /canary not refused twice within 60s"
-	lip=$(k -n "$sys" get pod "$pod" -o jsonpath='{.status.podIP}')
+	lip=$(pod_ip "$sys" "$pod")
 	wait_set "$lip" present 15 || die "ON: loadgen's IP $lip not in $kn_set within 15s"
 	echo "ON $(now): NetworkPolicy $sys/loadgen present; canary_addr=$api; POST /canary refused twice; $lip in $kn_set" >>"$1"
 }
@@ -328,14 +360,14 @@ check_on() {
 # check_off FILE: asserts the OFF state before a run.
 check_off() {
 	local pod start lip nps
-	nps=$(k -n "$sys" get networkpolicy -o name)
+	nps=$(k -n "$sys" get networkpolicy -o name) || die "OFF: cannot list NetworkPolicies in $sys"
 	[ -z "$nps" ] || die "OFF: NetworkPolicies in $sys: $nps"
 	[ "$(canary_value)" = "-canary-addr=$standin" ] || die "OFF: loadgen's argument is '$(canary_value)'"
 	pod=$(loadgen_pod)
 	start=$(start_line "$pod")
 	[[ " $start " == *" canary_addr=$standin "* ]] || die "OFF: start line's canary_addr is not $standin: $start"
 	canary_refused_twice 30 || die "OFF: POST /canary to $standin not refused twice within 30s"
-	lip=$(k -n "$sys" get pod "$pod" -o jsonpath='{.status.podIP}')
+	lip=$(pod_ip "$sys" "$pod")
 	wait_set "$lip" absent 15 || die "OFF: loadgen's IP $lip still in $kn_set after 15s"
 	echo "OFF $(now): no NetworkPolicy in $sys; canary_addr=$standin; POST /canary refused twice; $lip not in $kn_set" >>"$1"
 }
@@ -353,21 +385,28 @@ restore_on() {
 	check_on "$1"
 }
 
+# live_procs: prints the G3 process names that are running.
+live_procs() {
+	local p
+	for p in orchestrator c0; do
+		! pgrep -x "$p" >/dev/null || echo "$p"
+	done
+}
+
 # live_guard: G3's namespace and process checks.
 live_guard() {
-	local live
-	live=$(k get namespaces -l ek8s.io/role=variant -o name)
+	local live procs
+	live=$(k get namespaces -l ek8s.io/role=variant -o name) || die "G3: cannot list namespaces"
 	[ -z "$live" ] || die "G3: variant namespaces exist (an orchestrator run, c0, or a failed earlier run?): $live"
-	for p in orchestrator c0; do
-		! pgrep -x "$p" >/dev/null || die "G3: a process named $p is running"
-	done
+	procs=$(live_procs)
+	[ -z "$procs" ] || die "G3: running: $procs"
 }
 
 # --- one run ------------------------------------------------------------
 
 # run_one N ARM
 run_one() {
-	local n=$1 a=$2 rdir pod lip pid t0 gpid kpid rc cur=0 body next result mid=no
+	local n=$1 a=$2 pods_ok=0 rdir pod lip pid t0 gpid kpid rc cur=0 body next result mid=no
 	local start_wall="" start_e="" end_e="" stats nread oht longest sfirst slast syn0="" rs0="" syn1="" rs1="" ts c
 	rdir="$out/run-$(printf %02d "$n")-$a"
 	mkdir -p "$rdir"
@@ -381,7 +420,7 @@ run_one() {
 		check_on "$rdir/state.txt"
 	fi
 	pod=$(loadgen_pod)
-	lip=$(k -n "$sys" get pod "$pod" -o jsonpath='{.status.podIP}')
+	lip=$(pod_ip "$sys" "$pod")
 	pid=$(loadgen_pid "$pod")
 	t0=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 	say "run $n ($a): loadgen $pod ($lip, pid $pid), gate starting at $t0"
@@ -405,6 +444,8 @@ run_one() {
 	fi
 
 	: >"$rdir/records.tsv"
+	: >"$rdir/pods.txt"
+	pods_ok=0
 	printf 'time\tTCPSynRetrans\tRetransSegs\n' >"$rdir/netstat.tsv"
 	: >"$rdir/podips.txt"
 	while kill -0 "$gpid" 2>/dev/null; do
@@ -414,21 +455,36 @@ run_one() {
 			records_tsv <<<"$body" >>"$rdir/records.tsv"
 			cur=$next
 		fi
-		k -n "$ns" get pods -l app=hasher -o jsonpath='{range .items[*]}{.metadata.name} {.metadata.creationTimestamp} {.status.podIP} {.status.conditions[?(@.type=="Ready")].lastTransitionTime}{"\n"}{end}' \
-			>"$rdir/pods.txt" 2>/dev/null || true
-		local ips hip
+		# A failed listing keeps the last good one (pods_ok counts listings).
+		if k -n "$ns" get pods -l app=hasher -o jsonpath='{range .items[*]}{.metadata.name} {.metadata.creationTimestamp} {.status.podIP} {.status.conditions[?(@.type=="Ready")].lastTransitionTime}{"\n"}{end}' \
+			>"$rdir/pods.tmp" 2>/dev/null; then
+			mv "$rdir/pods.tmp" "$rdir/pods.txt"
+			pods_ok=$((pods_ok + 1))
+		fi
+		local ips hip first_ip procs
 		ips=$(set_ips)
 		{ echo "== $ts"; echo "$ips"; } >>"$rdir/podips.txt"
+		procs=$(live_procs)
+		[ -z "$procs" ] || echo "VIOLATION $ts: G3: running: $procs" >>"$rdir/state.txt"
 		if [ "$a" = off ]; then
-			for hip in $lip $(awk '{ print $3 }' "$rdir/pods.txt"); do
-				# Before the burst a hasher pod may briefly be in the set;
-				# only snapshots taken once records exist count.
-				if [ -s "$rdir/records.tsv" ] && grep -qxF "$hip" <<<"$ips"; then
-					echo "VIOLATION $ts: $hip in $kn_set" >>"$rdir/state.txt"
-				fi
-			done
-		elif ! grep -qxF "$lip" <<<"$ips"; then
-			echo "VIOLATION $ts: loadgen's $lip not in $kn_set" >>"$rdir/state.txt"
+			! grep -qxF "$lip" <<<"$ips" || echo "VIOLATION $ts: loadgen's $lip in $kn_set" >>"$rdir/state.txt"
+			# Hasher pods only once the burst has begun: until the watcher
+			# deletes it, the variant's policy may put a pod in the set.
+			if [ -s "$rdir/records.tsv" ]; then
+				while read -r hip; do
+					[ -z "$hip" ] || ! grep -qxF "$hip" <<<"$ips" || echo "VIOLATION $ts: $hip in $kn_set" >>"$rdir/state.txt"
+				done < <(awk '{ print $3 }' "$rdir/pods.txt")
+			fi
+		else
+			grep -qxF "$lip" <<<"$ips" || echo "VIOLATION $ts: loadgen's $lip not in $kn_set" >>"$rdir/state.txt"
+			if [ -s "$rdir/records.tsv" ]; then
+				k -n "$ns" get networkpolicy variant >/dev/null 2>&1 || echo "VIOLATION $ts: $ns/variant missing during the burst" >>"$rdir/state.txt"
+				# The first pod was Ready before the burst, so kindnet has
+				# synced it; a newer pod may lag (the lag the canary exists for).
+				first_ip=$(sort -k2 "$rdir/pods.txt" | awk 'NR == 1 { print $3 }')
+				[ -z "$first_ip" ] || grep -qxF "$first_ip" <<<"$ips" ||
+					echo "VIOLATION $ts: first hasher pod's $first_ip not in $kn_set" >>"$rdir/state.txt"
+			fi
 		fi
 		sleep 0.5
 	done
@@ -451,22 +507,32 @@ run_one() {
 	grep -F 'Syncing nftables rules' "$rdir/kindnet.log" >"$rdir/syncs.txt" || true
 
 	if [ "$a" = off ]; then
-		[ -z "$(k -n "$sys" get networkpolicy -o name)" ] || echo "VIOLATION: a NetworkPolicy in $sys after the run" >>"$rdir/state.txt"
-		[ -z "$(k -n "$ns" get networkpolicy -o name 2>/dev/null)" ] || echo "VIOLATION: a NetworkPolicy in $ns after the run" >>"$rdir/state.txt"
+		local nps_sys nps_ns
+		if ! nps_sys=$(k -n "$sys" get networkpolicy -o name) || [ -n "$nps_sys" ]; then
+			echo "VIOLATION: a NetworkPolicy in $sys after the run, or the listing failed: ${nps_sys:-}" >>"$rdir/state.txt"
+		fi
+		if ! nps_ns=$(k -n "$ns" get networkpolicy -o name) || [ -n "$nps_ns" ]; then
+			echo "VIOLATION: a NetworkPolicy in $ns after the run, or the listing failed: ${nps_ns:-}" >>"$rdir/state.txt"
+		fi
 	else
 		k -n "$ns" get networkpolicy variant >/dev/null 2>&1 || echo "VIOLATION: $ns/variant missing after the run" >>"$rdir/state.txt"
 	fi
 
-	case "$rc" in
-	0) result=PASS ;;
-	1) if grep -Eq '^stage 5 responses +FAIL:.*over_hang_timeout' "$rdir/gate.out"; then result=STALL; else result=FAIL; fi ;;
-	*) result=FAULT ;;
-	esac
-
 	stats=$(stall_stats <"$rdir/records.tsv")
 	IFS=$'\t' read -r nread oht longest sfirst slast <<<"$stats"
+	case "$rc" in
+	0) result=PASS ;;
+	1)
+		result=FAIL
+		if grep -Eq '^stage 5 responses +FAIL:.*over_hang_timeout' "$rdir/gate.out" || [ "$oht" -gt 0 ]; then result=STALL; fi
+		;;
+	*) result=FAULT ;;
+	esac
+	if [ "$result" != FAULT ] && [ "$nread" -eq 0 ]; then
+		echo "VIOLATION: the gate judged the burst (exit $rc) but no record was read, so the burst-time checks never ran" >>"$rdir/state.txt"
+	fi
 	start_wall=$(awk -F'\t' '$1 == 0 { print $3; exit }' "$rdir/records.tsv")
-	if [ -n "$start_wall" ]; then
+	if [ -n "$start_wall" ] && [ "$pods_ok" -gt 0 ]; then
 		start_e=$(epoch "$start_wall")
 		end_e=$(awk -v s="$start_e" -v n="$burst_sends" -v b="$burst_rate" 'BEGIN { printf "%.3f", s + n / b }')
 		# Every hasher pod but the first created, by creation time.
@@ -507,7 +573,6 @@ run_one() {
 # --- main ---------------------------------------------------------------
 
 main() {
-	cd "$(dirname "$0")/../.."
 	while [ "$#" -gt 0 ]; do
 		case "$1" in
 		-rate) rate=$2; shift 2 ;;
@@ -521,6 +586,9 @@ main() {
 		die "-runs $runs: want 1 to $max_runs (never extended)"
 	fi
 	case "$arm" in both | on | off) ;; *) die "-arm $arm: want both, on or off" ;; esac
+	# A relative -out is the caller's, taken before moving to the repo root.
+	case "$out" in /* | "") ;; *) out="$PWD/$out" ;; esac
+	cd "$(dirname "$0")/../.."
 
 	# G1, G2: before any cluster call.
 	if [ -n "${CI:-}" ] || [ -n "${GITHUB_ACTIONS:-}" ]; then
@@ -549,6 +617,7 @@ main() {
 	trap on_exit EXIT
 	trap 'exit 130' INT
 	trap 'exit 143' TERM
+	trap 'exit 129' HUP
 	node=$(k get nodes -o jsonpath='{.items[0].metadata.name}')
 	api=$(k -n default get service kubernetes -o jsonpath='{.spec.clusterIP}:{.spec.ports[0].port}')
 
@@ -605,7 +674,11 @@ main() {
 # on_exit: G5, then stress-ng off and the scratch dir gone.
 on_exit() {
 	local rc=$?
-	trap - EXIT INT TERM
+	# The restore must finish: no errexit, and INT, TERM, HUP and PIPE
+	# (a closed terminal) ignored until it has.
+	set +e
+	trap '' INT TERM HUP PIPE
+	trap - EXIT
 	if [ "${touched:-0}" = 1 ]; then
 		# The gate cancels and drains its burst on SIGINT (gate/cmd/gate:
 		# signal.NotifyContext(os.Interrupt)); the policy watcher is killed.

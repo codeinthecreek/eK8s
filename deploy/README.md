@@ -410,7 +410,11 @@ changes to the code generation 0 is built from; it restores and re-checks
 the ON state after every OFF run and on exit, and prints
 `POLICY NOT RESTORED` (exit 1) if it cannot. Each run asserts its arm's
 state, and the experiment stops at the first failed assertion or gate
-fault. Runs about 2 minutes each (inferred), so the full 15 + 15 takes
+fault. **SIGKILL or a host crash skips the restore, and nothing else would
+notice** (the orchestrator and the gate check neither the policy nor the
+canary address, and the stand-in canary always reads refused): after any
+unclean end, run `deploy/up.sh` and `deploy/loadgen-up.sh <r>` before any
+orchestrator, c0 or gate run. Runs about 2 minutes each (inferred), so the full 15 + 15 takes
 about an hour.
 
 ```
@@ -420,7 +424,8 @@ EK8S_DIAG_NOPOLICY=yes-no-isolation deploy/diag/stage5-nopolicy.sh -arm off -run
 ```
 
 `-rate` (default 15.5, so b = 62) is loadgen's r, deployed by the script;
-`-out` defaults to `~/workspace/scratch/ek8s-runs/diag-nopolicy-<UTC stamp>/`.
+`-out` defaults to `~/workspace/scratch/ek8s-runs/diag-nopolicy-<UTC stamp>/`
+(a relative `-out` is taken from the directory you run it from).
 The verdict is in `verdict.txt` (CONFIRMED, NOT-CONFIRMED or INCONCLUSIVE;
 an arm short of its criterion after its runs is INCONCLUSIVE, never
 extended) and one row per run in `summary.tsv`; each `run-NN-<arm>/` keeps
