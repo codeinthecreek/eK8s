@@ -28,8 +28,12 @@
 #        the burst has begun (before it, the variant's policy may still
 #        exist for an instant); after the gate: no NetworkPolicy in
 #        ek8s-system or ek8s-v<id>.
-#   Both a run the gate judged (exit 0 or 1) must have records read, so
-#        the burst-time checks above cannot pass by never running.
+#   Both before the gate: exactly one stress-ng pod, Running and ready,
+#        whose requests and limits, and the stress-dose ConfigMap, equal
+#        origin/main's deploy/stress (a run without that stress is a
+#        violation, never judged); after the gate: the same pod, with no
+#        restart. A run the gate judged (exit 0 or 1) must have records
+#        read, so the burst-time checks above cannot pass by never running.
 # A failed assertion, a gate fault (exit 2) or a policy that cannot be
 # restored ends the experiment: the run is not counted.
 #
@@ -43,8 +47,10 @@
 #      first two names are checked again before every run, and the two
 #      names on every poll while the gate runs;
 #   G4 builds generation 0 from this checkout's HEAD and refuses a tree with
-#      changes under cmd/service, internal/, go.mod or go.sum, so no
-#      mutant ever runs without isolation;
+#      changes under cmd/service, internal/, go.mod or go.sum, and a HEAD
+#      that is not an ancestor of origin/main or of PR #70's head (both
+#      fetched first; a failed fetch refuses), so no mutant's wrapper ever
+#      runs without isolation; the result goes to meta.txt;
 #   G5 on exit (INT, TERM and HUP included; further signals are ignored
 #      while it restores), and after every OFF run, restores the ON state
 #      (applies deploy/ek8s-system, puts the canary argument back, then
@@ -54,8 +60,9 @@
 #      stress-ng off. SIGKILL or a host crash skips G5, and nothing else
 #      would notice: the orchestrator and the gate check neither the policy
 #      nor canary_addr, and the stand-in canary always reads refused. After
-#      any unclean end, run deploy/up.sh and deploy/loadgen-up.sh <r>
-#      before any orchestrator, c0 or gate run.
+#      any unclean end, run deploy/up.sh and deploy/loadgen-up.sh <r>, with
+#      the r in meta.txt and the exit message, before any orchestrator, c0
+#      or gate run.
 #
 # Output (-out, default ~/workspace/scratch/ek8s-runs/diag-nopolicy-<UTC
 # stamp>/): meta.txt, diag.log, summary.tsv (one row per run),
@@ -82,8 +89,11 @@
 # Usage, after deploy/up.sh on the workstation (-arm on|off runs one arm
 # only, for a dry try; its verdict is per arm):
 #   EK8S_DIAG_NOPOLICY=yes-no-isolation deploy/diag/stage5-nopolicy.sh \
-#       [-rate 15.5] [-runs 15] [-arm both|on|off] [-out DIR]
+#       [-rate R] [-runs 15] [-arm both|on|off] [-out DIR]
 # (a relative -out is taken from the directory the script is run from).
+# -rate defaults to the -rate argument of the loadgen already deployed
+# (the r the owner's Stage 5 runs used); with no loadgen deployed it is
+# required. The burst rate b is 4 x r (gate/cmd/gate).
 # Needs go, docker, kind, kubectl, git, pgrep; deploys loadgen at -rate
 # (deploy/loadgen-up.sh) and leaves it deployed, in the ON state.
 set -euo pipefail
@@ -106,11 +116,14 @@ canary_arg='-canary-addr=$(KUBERNETES_SERVICE_HOST):$(KUBERNETES_SERVICE_PORT)'
 kn_table=kindnet-network-policies
 kn_set=podips-v4
 max_runs=15
+# G4 also accepts commits of this script's own PR before it merges.
+# GitHub keeps refs/pull/<n>/head after the branch is deleted.
+diag_pr=70
 # loadgen's per-request client timeout, 3 x HangTimeout + 1s (DESIGN.md
 # sec 10): the last send of a burst completes within it.
 client_timeout_s=7
 
-rate=15.5 runs=$max_runs arm=both out="" gate_pid="" touched=0
+rate="" rate_src="" runs=$max_runs arm=both out="" gate_pid="" touched=0 g4_result="" want_stress=""
 
 k() { kubectl --context "$ctx" "$@"; }
 say() { echo "stage5-nopolicy.sh: $*" | if [ -n "${log_file:-}" ]; then tee -a "$log_file"; else cat; fi; }
@@ -385,6 +398,83 @@ restore_on() {
 	check_on "$1"
 }
 
+# deployed_rate: the -rate argument of the loadgen Deployment, if any.
+deployed_rate() {
+	k -n "$sys" get deploy loadgen -o jsonpath='{range .spec.template.spec.containers[0].args[*]}{@}{"\n"}{end}' 2>/dev/null |
+		sed -n 's/^-rate=//p'
+}
+
+# g4_ancestry: fetches origin/main and PR #$diag_pr's head, then prints
+# which of them HEAD is an ancestor of; fails otherwise.
+g4_ancestry() {
+	local head
+	head=$(git rev-parse HEAD) || return 1
+	git fetch --quiet origin "+refs/heads/main:refs/remotes/origin/main" "+refs/pull/$diag_pr/head:refs/ek8s-diag/pr$diag_pr" ||
+		{ echo "G4: git fetch of origin/main and PR #$diag_pr's head failed" >&2; return 1; }
+	if git merge-base --is-ancestor "$head" refs/remotes/origin/main; then
+		echo "G4: HEAD $head is an ancestor of origin/main $(git rev-parse refs/remotes/origin/main)"
+	elif git merge-base --is-ancestor "$head" "refs/ek8s-diag/pr$diag_pr"; then
+		echo "G4: HEAD $head is an ancestor of PR #$diag_pr's head $(git rev-parse "refs/ek8s-diag/pr$diag_pr")"
+	else
+		echo "G4: HEAD $head is an ancestor of neither origin/main nor PR #$diag_pr's head" >&2
+		return 1
+	fi
+}
+
+# main_stress: origin/main's stress-ng requests and limits and its dose,
+# read from deploy/stress at origin/main; prints one line:
+# "<req cpu> <req mem> <lim cpu> <lim mem> <K=V,...>" (dose keys sorted).
+main_stress() {
+	local dep dose res d
+	dep=$(git show refs/remotes/origin/main:deploy/stress/deployment.yaml) || return 1
+	dose=$(git show refs/remotes/origin/main:deploy/stress/dose.yaml) || return 1
+	res=$(awk '
+		/^[[:space:]]*resources:/ { inres = 1; next }
+		inres && /^[[:space:]]*requests:/ { sec = "req"; next }
+		inres && /^[[:space:]]*limits:/ { sec = "lim"; next }
+		inres && sec != "" && /^[[:space:]]*(cpu|memory):/ {
+			v = $2; gsub(/"/, "", v); val[sec "." $1] = v; next
+		}
+		inres && sec != "" { inres = 0 }
+		END { print val["req.cpu:"], val["req.memory:"], val["lim.cpu:"], val["lim.memory:"] }' <<<"$dep")
+	d=$(sed -nE 's/^[[:space:]]+([A-Z_]+):[[:space:]]*"([^"]*)".*/\1=\2/p' <<<"$dose" | sort | paste -sd, -)
+	if ! [[ $res =~ ^[^[:space:]]+\ [^[:space:]]+\ [^[:space:]]+\ [^[:space:]]+$ ]] || [ -z "$d" ]; then
+		echo "cannot read stress-ng's resources or dose from origin/main: '$res' '$d'" >&2
+		return 1
+	fi
+	echo "$res $d"
+}
+
+# stress_state: the one stress-ng pod, Running and ready, at main's dose
+# ($want_stress); prints "<pod> <restarts> <req cpu> <req mem> <lim cpu>
+# <lim mem> <dose>", or fails saying why.
+stress_state() {
+	local pods pod phase ready restarts res d key keys
+	pods=$(k -n "$stress_ns" get pods -l app=stress-ng \
+		-o jsonpath='{range .items[*]}{.metadata.name} {.status.phase} {.metadata.deletionTimestamp}{"\n"}{end}') ||
+		{ echo "cannot list stress-ng pods" >&2; return 1; }
+	[ "$(grep -c . <<<"$pods")" -eq 1 ] || { echo "want one stress-ng pod, have: ${pods:-none}" >&2; return 1; }
+	read -r pod phase _ <<<"$pods"
+	if [ "$phase" != Running ] || [ "$(awk '{ print NF }' <<<"$pods")" -ne 2 ]; then
+		echo "stress-ng pod not Running, or being deleted: $pods" >&2
+		return 1
+	fi
+	ready=$(k -n "$stress_ns" get pod "$pod" -o jsonpath='{.status.containerStatuses[0].ready} {.status.containerStatuses[0].restartCount}') ||
+		{ echo "cannot read $pod's status" >&2; return 1; }
+	read -r ready restarts <<<"$ready"
+	[ "$ready" = true ] || { echo "stress-ng container not ready" >&2; return 1; }
+	res=$(k -n "$stress_ns" get pod "$pod" -o jsonpath='{.spec.containers[0].resources.requests.cpu} {.spec.containers[0].resources.requests.memory} {.spec.containers[0].resources.limits.cpu} {.spec.containers[0].resources.limits.memory}') ||
+		{ echo "cannot read $pod's resources" >&2; return 1; }
+	keys=$(sed 's/=[^,]*//g; s/,/ /g' <<<"${want_stress##* }")
+	d=""
+	for key in $keys; do
+		d+="${d:+,}$key=$(k -n "$stress_ns" get configmap stress-dose -o jsonpath="{.data.$key}")" ||
+			{ echo "cannot read stress-dose" >&2; return 1; }
+	done
+	[ "$res $d" = "$want_stress" ] || { echo "stress-ng at '$res $d', origin/main has '$want_stress'" >&2; return 1; }
+	echo "$pod $restarts $res $d"
+}
+
 # live_procs: prints the G3 process names that are running.
 live_procs() {
 	local p
@@ -407,7 +497,7 @@ live_guard() {
 # run_one N ARM
 run_one() {
 	local n=$1 a=$2 pods_ok=0 rdir pod lip pid t0 gpid kpid rc cur=0 body next result mid=no
-	local start_wall="" start_e="" end_e="" stats nread oht longest sfirst slast syn0="" rs0="" syn1="" rs1="" ts c
+	local stress0 stress1 start_wall="" start_e="" end_e="" stats nread oht longest sfirst slast syn0="" rs0="" syn1="" rs1="" ts c
 	rdir="$out/run-$(printf %02d "$n")-$a"
 	mkdir -p "$rdir"
 	live_guard
@@ -419,6 +509,11 @@ run_one() {
 	else
 		check_on "$rdir/state.txt"
 	fi
+	if ! stress0=$(stress_state 2>"$work/stress.err"); then
+		echo "VIOLATION: stress-ng before the gate: $(cat "$work/stress.err")" >>"$rdir/state.txt"
+		die "run $n ($a): stress-ng is not Running at origin/main's dose ($(cat "$work/stress.err")); the run is not judged"
+	fi
+	echo "stress before the gate: $stress0" >>"$rdir/state.txt"
 	pod=$(loadgen_pod)
 	lip=$(pod_ip "$sys" "$pod")
 	pid=$(loadgen_pid "$pod")
@@ -506,6 +601,10 @@ run_one() {
 	k -n kube-system logs ds/kindnet --timestamps --since-time="$t0" >"$rdir/kindnet.log" 2>&1 || say "run $n: cannot read kindnet's log"
 	grep -F 'Syncing nftables rules' "$rdir/kindnet.log" >"$rdir/syncs.txt" || true
 
+	# The same pod, no restart, the same resources and dose.
+	if ! stress1=$(stress_state 2>"$work/stress.err") || [ "$stress1" != "$stress0" ]; then
+		echo "VIOLATION: stress-ng changed during the run: before '$stress0', after '${stress1:-$(cat "$work/stress.err")}'" >>"$rdir/state.txt"
+	fi
 	if [ "$a" = off ]; then
 		local nps_sys nps_ns
 		if ! nps_sys=$(k -n "$sys" get networkpolicy -o name) || [ -n "$nps_sys" ]; then
@@ -553,13 +652,14 @@ run_one() {
 	else
 		mid=unknown
 	fi
-	printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+	printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
 		"$n" "$a" "$rc" "$result" "$mid" "${start_wall:--}" "$burst_sends" "$nread" "$oht" "$longest" "$sfirst" "$slast" \
 		"$(awk -v a="$syn0" -v b="$syn1" 'BEGIN { if (a == "" || b == "") print "-"; else print b - a }')" \
 		"$(awk -v a="$rs0" -v b="$rs1" 'BEGIN { if (a == "" || b == "") print "-"; else print b - a }')" \
 		"$(grep -c 'Could not receive message' "$rdir/kindnet.log" || true)" \
 		"$(grep -c . "$rdir/syncs.txt" || true)" \
-		"$(awk '{ print $1 "@" $2 }' "$rdir/pods.txt" | sort -t@ -k2 | tr '\n' ' ' | sed 's/ $//; s/^$/-/')" >>"$out/summary.tsv"
+		"$(awk '{ print $1 "@" $2 }' "$rdir/pods.txt" | sort -t@ -k2 | tr '\n' ' ' | sed 's/ $//; s/^$/-/')" \
+		"$stress0" >>"$out/summary.tsv"
 	say "run $n ($a): gate exit $rc, $result; mid-burst add $mid; over_hang_timeout $oht, longest run $longest ($sfirst .. $slast); $nread of $burst_sends records read"
 
 	k delete namespace "$ns" --wait=true --timeout=300s >/dev/null || die "namespace $ns not deleted in 300s"
@@ -598,10 +698,21 @@ main() {
 	for tool in go docker kind kubectl git pgrep; do
 		command -v "$tool" >/dev/null || die "$tool not on PATH"
 	done
-	# G4: generation 0 is this checkout's.
+	# G4: generation 0 is this checkout's, and the checkout is main's or
+	# this PR's.
 	[ -z "$(git status --porcelain -- cmd/service internal go.mod go.sum)" ] ||
 		die "G4: cmd/service, internal/, go.mod or go.sum differ from HEAD; generation 0 must be the commit's"
+	g4_result=$(g4_ancestry) || die "G4: refused (see above)"
+	say "$g4_result"
+	want_stress=$(main_stress) || die "cannot read origin/main's deploy/stress"
 	k get nodes >/dev/null || die "cluster unreachable (context $ctx); run deploy/up.sh"
+	if [ -z "$rate" ]; then
+		rate=$(deployed_rate)
+		[ -n "$rate" ] || die "no -rate given and no loadgen deployed to take it from; pass -rate R (b = 4 x R)"
+		rate_src="the deployed loadgen's -rate argument"
+	else
+		rate_src="-rate"
+	fi
 	# G3.
 	live_guard
 	! pgrep -x gate >/dev/null || die "G3: a process named gate is running"
@@ -645,18 +756,21 @@ main() {
 	burst_rate=$(json_num burst_rate "$cfg") || die "no burst_rate in /config: ${cfg:0:300}"
 	k -n "$stress_ns" scale deploy/stress-ng --replicas=1 >/dev/null
 	k -n "$stress_ns" rollout status deploy/stress-ng --timeout=180s >/dev/null || die "stress-ng not Ready"
+	stress_state >/dev/null || die "stress-ng is not at origin/main's dose; run deploy/up.sh"
 
 	{
 		echo "started $(now)"
 		echo "git $(git rev-parse HEAD)"
-		echo "rate $rate burst_rate $burst_rate burst_sends $burst_sends runs/arm $runs arm $arm"
+		echo "rate $rate (from $rate_src) burst_rate $burst_rate burst_sends $burst_sends runs/arm $runs arm $arm"
+		echo "$g4_result"
+		echo "stress expected (origin/main deploy/stress): $want_stress"
 		echo "image $image"
 		echo "kind $(kind version)"
 		echo "node image $(docker inspect -f '{{.Config.Image}}' "$node" 2>/dev/null || echo unknown)"
 		echo "kindnet $(k -n kube-system get ds kindnet -o jsonpath='{..image}')"
 		echo "api $api standin $standin"
 	} >"$out/meta.txt"
-	printf 'run\tarm\tgate_rc\tresult\tmid_burst_add\tburst_start\tburst_sends\trecords_read\tover_hang_timeout\tlongest_run\tstall_first_send\tstall_last_send\tsyn_retrans\tretrans_segs\tkindnet_enoent\tkindnet_sync_lines\tpods\n' >"$out/summary.tsv"
+	printf 'run\tarm\tgate_rc\tresult\tmid_burst_add\tburst_start\tburst_sends\trecords_read\tover_hang_timeout\tlongest_run\tstall_first_send\tstall_last_send\tsyn_retrans\tretrans_segs\tkindnet_enoent\tkindnet_sync_lines\tpods\tstress\n' >"$out/summary.tsv"
 
 	local i order=""
 	case "$arm" in
@@ -690,7 +804,7 @@ on_exit() {
 		wait 2>/dev/null || true
 		k delete namespace "$ns" --ignore-not-found --wait=true --timeout=300s >/dev/null 2>&1 || say "namespace $ns not deleted; delete it by hand"
 		if ! (restore_on "$out/restore.txt"); then
-			say "POLICY NOT RESTORED: check NetworkPolicy $sys/loadgen and loadgen's -canary-addr, then run deploy/up.sh and deploy/loadgen-up.sh $rate" >&2
+			say "POLICY NOT RESTORED: check NetworkPolicy $sys/loadgen and loadgen's -canary-addr, then run deploy/up.sh and deploy/loadgen-up.sh $rate (the r this run used, from $rate_src)" >&2
 			rc=1
 		fi
 		k -n "$stress_ns" scale deploy/stress-ng --replicas=0 >/dev/null 2>&1 || say "stress-ng not scaled to 0; scale it by hand"

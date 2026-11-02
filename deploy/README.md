@@ -405,8 +405,11 @@ the burst's path: ek8s-system/loadgen and the diag variant's policy are
 deleted, and loadgen's canary points at 192.0.2.1:443 so the gate's canary
 still reads refused). **OFF removes isolation while it runs**: it refuses to
 start in CI, without `EK8S_DIAG_NOPOLICY=yes-no-isolation`, while a variant
-namespace or an orchestrator, c0 or gate process exists, or with local
-changes to the code generation 0 is built from; it restores and re-checks
+namespace or an orchestrator, c0 or gate process exists, with local
+changes to the code generation 0 is built from, or on a commit that is not
+on origin/main or PR #70 (it fetches both first, and refuses if it cannot);
+before every gate start it requires stress-ng Running at origin/main's
+`deploy/stress` requests, limits and dose; it restores and re-checks
 the ON state after every OFF run and on exit, and prints
 `POLICY NOT RESTORED` (exit 1) if it cannot. Each run asserts its arm's
 state, and the experiment stops at the first failed assertion or gate
@@ -414,7 +417,8 @@ fault. **SIGKILL or a host crash skips the restore, and nothing else would
 notice** (the orchestrator and the gate check neither the policy nor the
 canary address, and the stand-in canary always reads refused): after any
 unclean end, run `deploy/up.sh` and `deploy/loadgen-up.sh <r>` before any
-orchestrator, c0 or gate run. Runs about 2 minutes each (inferred), so the full 15 + 15 takes
+orchestrator, c0 or gate run, with the r the experiment used (meta.txt's
+`rate` line; the exit message prints it). Runs about 2 minutes each (inferred), so the full 15 + 15 takes
 about an hour.
 
 ```
@@ -423,7 +427,10 @@ EK8S_DIAG_NOPOLICY=yes-no-isolation deploy/diag/stage5-nopolicy.sh -runs 1      
 EK8S_DIAG_NOPOLICY=yes-no-isolation deploy/diag/stage5-nopolicy.sh -arm off -runs 1   # one arm only
 ```
 
-`-rate` (default 15.5, so b = 62) is loadgen's r, deployed by the script;
+`-rate` is loadgen's r (b = 4 x r), deployed by the script; it defaults to
+the `-rate` argument of the loadgen already deployed (r = 15.5 for the
+owner's 37 Stage 5 runs: docs/decisions.md, PR #65 C0 entry, r = 0.5 x C0),
+and is required when none is;
 `-out` defaults to `~/workspace/scratch/ek8s-runs/diag-nopolicy-<UTC stamp>/`
 (a relative `-out` is taken from the directory you run it from).
 The verdict is in `verdict.txt` (CONFIRMED, NOT-CONFIRMED or INCONCLUSIVE;

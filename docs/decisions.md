@@ -821,3 +821,10 @@ max. Earlier entries are not backfilled.
 - Reason: packet item 3 and owner feedback F2-F6; kindnet queues a connection when either end is policy-selected (vendored controller.go), so both policies must go, and the canary with loadgen's.
 - Reverse: delete deploy/diag/ and its deploy/README.md section.
 - Origin: Code
+
+## 2026-11-03 · PR #70 · Diag review: G4 ancestry, stress-ng asserted per run, r from the deployed loadgen
+- Decision: G4 also refuses unless HEAD is an ancestor of origin/main or of PR #70's head (`git fetch` of both, refs/pull/70/head, first; a failed fetch refuses; the result goes to meta.txt). Before every gate start, both arms: exactly one stress-ng pod, Running and ready, with origin/main's deploy/stress requests, limits and stress-dose data (read by `git show`); after the gate, the same pod, no restart; otherwise a violation, the run not judged; summary.tsv records it. -rate defaults to the deployed loadgen's -rate argument (required with none); the recovery message prints the r used and its source.
+- Rejected: HEAD checks against a named branch (a branch can carry anything); comparing the dose with the working tree's deploy/stress (the checkout may be older than main); a default r in the script (a second copy PR B would have to change).
+- Reason: owner review of #70 (R1-R3, prompt EK-D1-REVIEW-20261103).
+- Reverse: drop g4_ancestry, stress_state and deployed_rate from deploy/diag/stage5-nopolicy.sh.
+- Origin: owner
