@@ -828,3 +828,10 @@ max. Earlier entries are not backfilled.
 - Reason: owner review of #70 (R1-R3, prompt EK-D1-REVIEW-20261103).
 - Reverse: drop g4_ancestry, stress_state and deployed_rate from deploy/diag/stage5-nopolicy.sh.
 - Origin: owner
+
+## 2026-11-03 · PR #70 · Diag second self-review: the restore checks every step; G4 counts untracked and ignored files
+- Decision: restore_on, set_canary, check_on and check_off check each step (the restore runs with errexit off), and wait_set refuses an empty IP; G4's tree check counts untracked and ignored files and covers deploy/ek8s-system, which the restore applies; a pgrep error refuses; stress-ng is restarted once at start so its dose is the checked ConfigMap's; the r and its source are printed 5 s before anything is deployed; the output dir and meta.txt are made before G4, so a refusal is recorded.
+- Rejected: running the restore in its own session (setsid) so a second Ctrl-C cannot kill a kubectl in it (a killed step already ends in POLICY NOT RESTORED); guarding against deliberate workstation tampering (replace refs, skip-worktree, GOFLAGS overlays).
+- Reason: second reviewer pass (owner R4).
+- Reverse: revert the commit.
+- Origin: Code

@@ -47,12 +47,14 @@
 #      first two names are checked again before every run, and the two
 #      names on every poll while the gate runs;
 #   G4 builds generation 0 from this checkout's HEAD and refuses a tree with
-#      changes under cmd/service, internal/, go.mod or go.sum, and a HEAD
+#      changes (untracked and ignored files included) under cmd/service,
+#      internal/, go.mod, go.sum or deploy/ek8s-system, and a HEAD
 #      that is not an ancestor of origin/main or of PR #70's head (both
 #      fetched first; a failed fetch refuses), so no mutant's wrapper ever
 #      runs without isolation; the result goes to meta.txt;
-#   G5 on exit (INT, TERM and HUP included; further signals are ignored
-#      while it restores), and after every OFF run, restores the ON state
+#   G5 on exit (INT, TERM and HUP included; bash ignores further signals
+#      while it restores, though a second Ctrl-C can still kill a kubectl
+#      it is running, which ends in POLICY NOT RESTORED), and after every OFF run, restores the ON state
 #      (applies deploy/ek8s-system, puts the canary argument back, then
 #      requires the real canary_addr and POST /canary refused twice within
 #      60s) and prints "POLICY NOT RESTORED" and exits non-zero if it
@@ -92,8 +94,9 @@
 #       [-rate R] [-runs 15] [-arm both|on|off] [-out DIR]
 # (a relative -out is taken from the directory the script is run from).
 # -rate defaults to the -rate argument of the loadgen already deployed
-# (the r the owner's Stage 5 runs used); with no loadgen deployed it is
-# required. The burst rate b is 4 x r (gate/cmd/gate).
+# (whatever deployed it last: a smoke run may have changed it), printed
+# with its source 5s before anything is deployed and kept in meta.txt;
+# with no loadgen deployed it is required. The burst rate b is 4 x r (gate/cmd/gate).
 # Needs go, docker, kind, kubectl, git, pgrep; deploys loadgen at -rate
 # (deploy/loadgen-up.sh) and leaves it deployed, in the ON state.
 set -euo pipefail
@@ -299,6 +302,7 @@ set_ips() {
 # wait_set IP present|absent BOUND: waits for kindnet's next sync.
 wait_set() {
 	local deadline=$((SECONDS + $3)) ips
+	[ -n "$1" ] || return 1
 	while :; do
 		ips=$(set_ips) || return 1
 		if grep -qxF "$1" <<<"$ips"; then [ "$2" = present ] && return 0; else [ "$2" = absent ] && return 0; fi
@@ -348,11 +352,13 @@ canary_value() {
 # for the Recreate rollout.
 set_canary() {
 	local idx old
-	idx=$(canary_index)
-	old=$(canary_value)
+	# Every step is checked: the restore runs with errexit off.
+	idx=$(canary_index) || die "cannot find loadgen's -canary-addr argument"
+	old=$(canary_value) || die "cannot read loadgen's -canary-addr argument"
 	[ "$old" = "$1" ] && return 0
 	k -n "$sys" patch deploy loadgen --type=json -p \
-		"[{\"op\":\"test\",\"path\":\"/spec/template/spec/containers/0/args/$idx\",\"value\":\"$old\"},{\"op\":\"replace\",\"path\":\"/spec/template/spec/containers/0/args/$idx\",\"value\":\"$1\"}]" >/dev/null
+		"[{\"op\":\"test\",\"path\":\"/spec/template/spec/containers/0/args/$idx\",\"value\":\"$old\"},{\"op\":\"replace\",\"path\":\"/spec/template/spec/containers/0/args/$idx\",\"value\":\"$1\"}]" >/dev/null ||
+		die "cannot patch loadgen's -canary-addr to $1"
 	k -n "$sys" rollout status deploy/loadgen --timeout=180s >/dev/null || die "loadgen not Ready after setting $1"
 }
 
@@ -361,11 +367,11 @@ check_on() {
 	local pod start lip
 	k -n "$sys" get networkpolicy loadgen >/dev/null 2>&1 || die "ON: NetworkPolicy $sys/loadgen missing"
 	[ "$(canary_value)" = "$canary_arg" ] || die "ON: loadgen's argument is '$(canary_value)', not $canary_arg"
-	pod=$(loadgen_pod)
-	start=$(start_line "$pod")
+	pod=$(loadgen_pod) || die "ON: no loadgen pod"
+	start=$(start_line "$pod") || die "ON: no start line"
 	[[ " $start " == *" canary_addr=$api "* ]] || die "ON: start line's canary_addr is not $api: $start"
 	canary_refused_twice 60 || die "ON: POST /canary not refused twice within 60s"
-	lip=$(pod_ip "$sys" "$pod")
+	lip=$(pod_ip "$sys" "$pod") || die "ON: no IP for $pod"
 	wait_set "$lip" present 15 || die "ON: loadgen's IP $lip not in $kn_set within 15s"
 	echo "ON $(now): NetworkPolicy $sys/loadgen present; canary_addr=$api; POST /canary refused twice; $lip in $kn_set" >>"$1"
 }
@@ -376,31 +382,31 @@ check_off() {
 	nps=$(k -n "$sys" get networkpolicy -o name) || die "OFF: cannot list NetworkPolicies in $sys"
 	[ -z "$nps" ] || die "OFF: NetworkPolicies in $sys: $nps"
 	[ "$(canary_value)" = "-canary-addr=$standin" ] || die "OFF: loadgen's argument is '$(canary_value)'"
-	pod=$(loadgen_pod)
-	start=$(start_line "$pod")
+	pod=$(loadgen_pod) || die "OFF: no loadgen pod"
+	start=$(start_line "$pod") || die "OFF: no start line"
 	[[ " $start " == *" canary_addr=$standin "* ]] || die "OFF: start line's canary_addr is not $standin: $start"
 	canary_refused_twice 30 || die "OFF: POST /canary to $standin not refused twice within 30s"
-	lip=$(pod_ip "$sys" "$pod")
+	lip=$(pod_ip "$sys" "$pod") || die "OFF: no IP for $pod"
 	wait_set "$lip" absent 15 || die "OFF: loadgen's IP $lip still in $kn_set after 15s"
 	echo "OFF $(now): no NetworkPolicy in $sys; canary_addr=$standin; POST /canary refused twice; $lip not in $kn_set" >>"$1"
 }
 
 # set_off: removes loadgen's policy and points the canary at the stand-in.
 set_off() {
-	k -n "$sys" delete networkpolicy loadgen --ignore-not-found >/dev/null
+	k -n "$sys" delete networkpolicy loadgen --ignore-not-found >/dev/null || die "cannot delete NetworkPolicy $sys/loadgen"
 	set_canary "-canary-addr=$standin"
 }
 
 # restore_on FILE: the ON state, re-applied and asserted (G5).
 restore_on() {
-	k apply -k deploy/ek8s-system >/dev/null
+	k apply -k deploy/ek8s-system >/dev/null || die "cannot apply deploy/ek8s-system"
 	set_canary "$canary_arg"
 	check_on "$1"
 }
 
 # deployed_rate: the -rate argument of the loadgen Deployment, if any.
 deployed_rate() {
-	k -n "$sys" get deploy loadgen -o jsonpath='{range .spec.template.spec.containers[0].args[*]}{@}{"\n"}{end}' 2>/dev/null |
+	{ k -n "$sys" get deploy loadgen -o jsonpath='{range .spec.template.spec.containers[0].args[*]}{@}{"\n"}{end}' 2>/dev/null || true; } |
 		sed -n 's/^-rate=//p'
 }
 
@@ -477,9 +483,15 @@ stress_state() {
 
 # live_procs: prints the G3 process names that are running.
 live_procs() {
-	local p
+	local p rc
 	for p in orchestrator c0; do
-		! pgrep -x "$p" >/dev/null || echo "$p"
+		rc=0
+		pgrep -x "$p" >/dev/null || rc=$?
+		case "$rc" in
+		0) echo "$p" ;;
+		1) ;;
+		*) echo "$p(pgrep failed: exit $rc)" ;;
+		esac
 	done
 }
 
@@ -521,8 +533,8 @@ run_one() {
 	say "run $n ($a): loadgen $pod ($lip, pid $pid), gate starting at $t0"
 
 	"$work/gate" -stage5 -image "$image" -id "$id" -rate "$rate" >"$rdir/gate.out" 2>&1 &
-	gpid=$!
-	gate_pid=$gpid
+	gate_pid=$!
+	gpid=$gate_pid
 	kpid=""
 	if [ "$a" = off ]; then
 		# The gate creates the bundle with its policy; delete it as soon as
@@ -698,13 +710,25 @@ main() {
 	for tool in go docker kind kubectl git pgrep; do
 		command -v "$tool" >/dev/null || die "$tool not on PATH"
 	done
+	# The output directory first, so a refusal from here on is recorded.
+	out=${out:-$HOME/workspace/scratch/ek8s-runs/diag-nopolicy-$(date -u +%Y%m%dT%H%M%SZ)}
+	[ ! -e "$out" ] || die "$out exists"
+	mkdir -p "$out"
+	log_file="$out/diag.log"
+	echo "started $(now)" >"$out/meta.txt"
+
 	# G4: generation 0 is this checkout's, and the checkout is main's or
-	# this PR's.
-	[ -z "$(git status --porcelain -- cmd/service internal go.mod go.sum)" ] ||
-		die "G4: cmd/service, internal/, go.mod or go.sum differ from HEAD; generation 0 must be the commit's"
-	g4_result=$(g4_ancestry) || die "G4: refused (see above)"
+	# this PR's. Untracked and ignored files count too: go build compiles
+	# them. deploy/ek8s-system is what the restore applies.
+	local changed g4_paths="cmd/service internal go.mod go.sum deploy/ek8s-system"
+	# shellcheck disable=SC2086
+	changed=$(git status --porcelain --untracked-files=all --ignored -- $g4_paths) || die "G4: git status failed"
+	[ -z "$changed" ] || die "G4: $g4_paths differ from HEAD (untracked and ignored files included): $changed"
+	g4_result=$(g4_ancestry) || { echo "G4: refused" >>"$out/meta.txt"; die "G4: refused (see above)"; }
 	say "$g4_result"
+	echo "$g4_result" >>"$out/meta.txt"
 	want_stress=$(main_stress) || die "cannot read origin/main's deploy/stress"
+	echo "stress expected (origin/main deploy/stress): $want_stress" >>"$out/meta.txt"
 	k get nodes >/dev/null || die "cluster unreachable (context $ctx); run deploy/up.sh"
 	if [ -z "$rate" ]; then
 		rate=$(deployed_rate)
@@ -713,16 +737,17 @@ main() {
 	else
 		rate_src="-rate"
 	fi
+	# Printed before anything is deployed: the default is whatever loadgen
+	# was last deployed with, which a smoke run may have changed.
+	say "r = $rate (from $rate_src), so b = 4 x r; stop now (Ctrl-C) if that is not the r intended"
 	# G3.
 	live_guard
-	! pgrep -x gate >/dev/null || die "G3: a process named gate is running"
+	local grc=0
+	pgrep -x gate >/dev/null || grc=$?
+	[ "$grc" -eq 1 ] || die "G3: a process named gate is running, or pgrep failed (exit $grc)"
 	! k get namespace "$ns" >/dev/null 2>&1 || die "namespace $ns exists (a failed earlier run?); delete it first"
 	k -n "$sys" get networkpolicy loadgen >/dev/null 2>&1 || die "NetworkPolicy $sys/loadgen missing at start; run deploy/up.sh"
-
-	out=${out:-$HOME/workspace/scratch/ek8s-runs/diag-nopolicy-$(date -u +%Y%m%dT%H%M%SZ)}
-	[ ! -e "$out" ] || die "$out exists"
-	mkdir -p "$out"
-	log_file="$out/diag.log"
+	sleep 5
 	work=$(mktemp -d)
 	: >"$work/empty"
 	trap on_exit EXIT
@@ -754,22 +779,25 @@ main() {
 	done
 	burst_sends=$(json_int burst_sends "$cfg") || die "no burst_sends in /config: ${cfg:0:300}"
 	burst_rate=$(json_num burst_rate "$cfg") || die "no burst_rate in /config: ${cfg:0:300}"
+	# A fresh pod, so the dose it runs is the ConfigMap's as checked
+	# (stress_state compares the ConfigMap, which a running pod read at its
+	# start); the same pod must then last the whole experiment.
+	k -n "$stress_ns" scale deploy/stress-ng --replicas=0 >/dev/null
+	k -n "$stress_ns" wait --for=delete pod -l app=stress-ng --timeout=120s >/dev/null 2>&1 ||
+		[ -z "$(k -n "$stress_ns" get pods -l app=stress-ng -o name)" ] || die "old stress-ng pods still present"
 	k -n "$stress_ns" scale deploy/stress-ng --replicas=1 >/dev/null
 	k -n "$stress_ns" rollout status deploy/stress-ng --timeout=180s >/dev/null || die "stress-ng not Ready"
 	stress_state >/dev/null || die "stress-ng is not at origin/main's dose; run deploy/up.sh"
 
 	{
-		echo "started $(now)"
 		echo "git $(git rev-parse HEAD)"
 		echo "rate $rate (from $rate_src) burst_rate $burst_rate burst_sends $burst_sends runs/arm $runs arm $arm"
-		echo "$g4_result"
-		echo "stress expected (origin/main deploy/stress): $want_stress"
 		echo "image $image"
 		echo "kind $(kind version)"
 		echo "node image $(docker inspect -f '{{.Config.Image}}' "$node" 2>/dev/null || echo unknown)"
 		echo "kindnet $(k -n kube-system get ds kindnet -o jsonpath='{..image}')"
 		echo "api $api standin $standin"
-	} >"$out/meta.txt"
+	} >>"$out/meta.txt"
 	printf 'run\tarm\tgate_rc\tresult\tmid_burst_add\tburst_start\tburst_sends\trecords_read\tover_hang_timeout\tlongest_run\tstall_first_send\tstall_last_send\tsyn_retrans\tretrans_segs\tkindnet_enoent\tkindnet_sync_lines\tpods\tstress\n' >"$out/summary.tsv"
 
 	local i order=""
@@ -788,8 +816,10 @@ main() {
 # on_exit: G5, then stress-ng off and the scratch dir gone.
 on_exit() {
 	local rc=$?
-	# The restore must finish: no errexit, and INT, TERM, HUP and PIPE
-	# (a closed terminal) ignored until it has.
+	# The restore must finish or report: no errexit (each step checks
+	# itself), and bash ignores INT, TERM, HUP and PIPE (a closed terminal)
+	# until it has. A kubectl it runs still gets the terminal's SIGINT; a
+	# killed step ends in POLICY NOT RESTORED.
 	set +e
 	trap '' INT TERM HUP PIPE
 	trap - EXIT
@@ -802,9 +832,12 @@ on_exit() {
 		fi
 		jobs -p | xargs -r kill -TERM 2>/dev/null || true
 		wait 2>/dev/null || true
-		k delete namespace "$ns" --ignore-not-found --wait=true --timeout=300s >/dev/null 2>&1 || say "namespace $ns not deleted; delete it by hand"
+		if ! k delete namespace "$ns" --ignore-not-found --wait=true --timeout=300s >/dev/null 2>&1; then
+			say "namespace $ns not deleted: it may still run generation 0 without its NetworkPolicy; delete it by hand" >&2
+			rc=1
+		fi
 		if ! (restore_on "$out/restore.txt"); then
-			say "POLICY NOT RESTORED: check NetworkPolicy $sys/loadgen and loadgen's -canary-addr, then run deploy/up.sh and deploy/loadgen-up.sh $rate (the r this run used, from $rate_src)" >&2
+			say "POLICY NOT RESTORED: check NetworkPolicy $sys/loadgen and loadgen's -canary-addr, then run deploy/up.sh and deploy/loadgen-up.sh ${rate:-<r>} (the r this run used, from ${rate_src:-unknown}; meta.txt has it)" >&2
 			rc=1
 		fi
 		k -n "$stress_ns" scale deploy/stress-ng --replicas=0 >/dev/null 2>&1 || say "stress-ng not scaled to 0; scale it by hand"
