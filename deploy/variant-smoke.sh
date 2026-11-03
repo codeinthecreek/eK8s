@@ -35,8 +35,8 @@
 #       the other stays ready;
 #   (i) deleting the namespace removes everything in it;
 # and, last, that the Calico CNI plugin never gave up waiting for a new
-# pod's policy (no "Unblocking pod creation" line in its log on the node,
-# from any pod since the cluster started; deploy/calico).
+# pod's policy (no "Unblocking pod creation" line in what its log on the
+# node gained during this smoke; deploy/calico).
 # Exits non-zero on the first failed check. Run from anywhere; needs go,
 # docker, kind and kubectl. On failure it leaves the namespace and the
 # smoke pods as they are for inspection; on success it removes them.
@@ -103,6 +103,14 @@ docker pull -q "$curl_src" >/dev/null
 docker tag "$curl_src" "$curl_tag"
 kind load docker-image "$curl_tag" --name "$cluster"
 ok "built and loaded $image and $curl_tag"
+
+# The CNI log's size before this smoke's first pod: the final check reads
+# only what this run's pods added (a long-lived workstation cluster keeps
+# older lines; the deploy CI checks the whole log after every smoke).
+cni_log=/var/log/calico/cni/cni.log
+cni_node=$(k get nodes -o jsonpath='{.items[0].metadata.name}')
+cni0=$(docker exec "$cni_node" stat -c %s "$cni_log") || die "cannot stat $cni_log on node $cni_node"
+[[ $cni0 =~ ^[0-9]+$ ]] || die "$cni_log on node $cni_node: size '$cni0' is not a number"
 
 label="ek8s-$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
 go run ./deploy/variant/cmd/render -id "$id" -label "$label" -image "$image" | k apply -f -
@@ -387,11 +395,13 @@ left=$(k get all,networkpolicies,limitranges,horizontalpodautoscalers -A --no-he
 ok "(i) namespace $ns and its objects are gone"
 
 # --- The CNI plugin's policy wait (policy_setup_timeout_seconds,
-# deploy/calico) never ran out, for any pod since the cluster started: a
-# timeout logs this line and starts the pod before Felix has programmed
-# it. The log must show this run's pods, or it is the wrong file.
-cni_log=/var/log/calico/cni/cni.log
-cni=$(docker exec "$node" cat "$cni_log") || die "cannot read $cni_log on node $node"
+# deploy/calico) never ran out for this run's pods: a timeout logs this
+# line and starts the pod before Felix has programmed it. Only the lines
+# written since the smoke began; a log that shrank (rotated, at 100 MB) is
+# read whole. They must show this run's pods, or it is the wrong file.
+cni1=$(docker exec "$node" stat -c %s "$cni_log") || die "cannot stat $cni_log on node $node"
+[[ $cni1 =~ ^[0-9]+$ ]] && [ "$cni1" -ge "$cni0" ] || cni0=0
+cni=$(docker exec "$node" tail -c "+$((cni0 + 1))" "$cni_log") || die "cannot read $cni_log on node $node"
 grep -qF "$ns" <<<"$cni" || die "$cni_log on node $node has no line for namespace $ns"
 unblocked=$(grep -F 'Unblocking pod creation' <<<"$cni" || true)
 [ -z "$unblocked" ] || die "the CNI plugin started pods before their policy was programmed: $unblocked"

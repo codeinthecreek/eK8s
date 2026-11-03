@@ -63,6 +63,14 @@ for c in cali-FORWARD cali-from-wl-dispatch cali-to-wl-dispatch; do
 	grep -q "^:$c " <<<"$chains" || die "node $node's filter table has no chain $c (Felix has not programmed it)"
 done
 ok "node $node: $(grep -c '^:cali-' <<<"$chains") cali- chains in the filter table"
+# Fail-closed: each workload dispatch chain (or a sub-chain of it, past
+# many pods) ends in Felix's "Unknown interface" DROP
+# (felix/rules/dispatch.go), what a pod Felix has not programmed meets.
+for c in cali-from-wl-dispatch cali-to-wl-dispatch; do
+	grep -qE "^-A $c(-[^ ]+)? .*--comment \"Unknown interface\" .*-j DROP\$" <<<"$chains" ||
+		die "node $node's chain $c has no \"Unknown interface\" DROP rule (Calico would not fail closed)"
+done
+ok "node $node: both workload dispatch chains end in the \"Unknown interface\" DROP"
 # The node's CNI configs: only Calico's conflist (beside it install-cni
 # writes calico-kubeconfig, which is no config), carrying the policy wait.
 # The file names containerd's CNI loader reads (.conf, .conflist, .json).

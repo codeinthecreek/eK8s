@@ -107,8 +107,11 @@ jobs:
       # Calico's CNI plugin logs "Unblocking pod creation" when it started a
       # pod before Felix reported the pod's policy programmed
       # (policy_setup_timeout_seconds, deploy/calico). variant-smoke.sh
-      # checks the pods up to its end; this step covers every smoke's pods.
-      # The log rotates only at 100 MB, so one file must hold it all.
+      # checks its own pods; this step covers every smoke's pods. The log
+      # rotates only at 100 MB, so one file must hold it all, and it must
+      # show the last two smokes' pods (stage5-smoke's ek8s-v999998,
+      # orchestrator-smoke's generation 0 in ek8s-v0), or it stopped being
+      # written.
       - name: No pod started before its policy
         run: |
           files=$(docker exec ek8s-control-plane ls /var/log/calico/cni)
@@ -117,7 +120,12 @@ jobs:
             exit 1
           fi
           log=$(docker exec ek8s-control-plane cat /var/log/calico/cni/cni.log)
-          [ -n "$log" ] || { echo "::error::the node's CNI log is empty"; exit 1; }
+          for ns in ek8s-v999998 ek8s-v0; do
+            if ! grep -qE "$ns([^0-9]|\$)" <<<"$log"; then
+              echo "::error::the node's CNI log has no line for namespace $ns"
+              exit 1
+            fi
+          done
           if grep -F 'Unblocking pod creation' <<<"$log"; then
             echo "::error::the CNI started a pod before its policy was programmed (lines above)"
             exit 1

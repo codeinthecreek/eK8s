@@ -6,8 +6,9 @@
 #       its process is confined to it; skipped (printed) under policy none;
 #   (6) its start line carries the memory limit and GOMEMLIMIT, 90% of it;
 #   (3) its canary address is the API server's ClusterIP and port, and the
-#       policy canary never reads connected, from pod age 0, and reads
-#       refused within 60s, then once more (DESIGN.md sec 11);
+#       policy canary never reads connected, from its first poll once the
+#       pod is Ready, and reads refused within 60s, then once more
+#       (DESIGN.md sec 11);
 #   (4) its network namespace has one listening socket, TCP 9090, and no
 #       bound UDP socket, checked before any run (a run's DNS lookups
 #       open UDP sockets);
@@ -220,10 +221,12 @@ ok "(6) start line: mem_limit_bytes=402653184 go_mem_limit=362387866"
 
 # --- (3) the canary address is the API server's ClusterIP and port, as
 # the kubelet expanded them into the args; the canary reads refused.
-# Calico fails closed: until Felix has programmed loadgen's endpoint, its
-# packets meet the "Unknown interface" drop, and after that its egress
-# policy refuses the canary (deploy/calico). So connected fails at any
-# pod age, the first poll included. error alone means poll again, every
+# The CNI starts loadgen only once Felix has programmed its endpoint
+# (policy_setup_timeout_seconds; a timeout fails variant-smoke and CI), and
+# the first poll waits for the pod to be Ready, so loadgen's egress policy
+# refuses the canary from the first poll (a pod started without its rules
+# would meet the "Unknown interface" drop, which smoke.sh checks is
+# installed). So connected fails at any poll, the first included. error alone means poll again, every
 # 2s for up to 60s; the first refused must be followed by another, so a
 # flapping policy fails.
 api=$(k -n default get service kubernetes -o jsonpath='{.spec.clusterIP}:{.spec.ports[0].port}')
