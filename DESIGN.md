@@ -1110,10 +1110,11 @@ selects anything. Telemetry is attributed by namespace.
 
 **Variant pods have no egress.** A per-namespace NetworkPolicy denies all
 egress and admits ingress only on TCP 8080 from loadgen's pods in
-`ek8s-system` (kind's built-in kindnet enforces NetworkPolicy, egress
-included: deploy/variant-smoke.sh, run in CI, fails unless a pod in a
-variant namespace is refused an external address, the API server's
-ClusterIP and the node address it serves on). A wrapper
+`ek8s-system` (Calico v3.33 enforces NetworkPolicy, egress included, in
+place of kind's kindnet: deploy/calico. deploy/variant-smoke.sh, run in CI,
+fails unless a pod in a variant namespace is refused an external address,
+the API server's ClusterIP, the node address it serves on and the
+kubelet's port on the node). A wrapper
 can read files with `net/http` (section 7, Stage 1 known limit) but cannot
 send them anywhere.
 
@@ -1121,12 +1122,15 @@ send them anywhere.
 (deploy/ek8s-system) has no ingress rule, and allows egress only to TCP
 8080 in namespaces labelled `ek8s.io/role: variant` and DNS to kube-dns.
 The API server's service proxy still reaches the control port, because
-kindnet never applies policy to traffic from a root-owned socket on the
-node. No policy can single the proxy out, so control-port ingress is
-"node root processes only": the API server, the kubelet, the control plane
-and root hostNetwork pods, all of which can already exec into loadgen.
-The bypass covers only packets made on loadgen's own node, which holds
-because the cluster has one node. The control port is the only one
+Calico never polices traffic from the node to a pod on it (felix/rules/
+static.go at v3.33.0). No policy can single the proxy out, so control-port
+ingress is every process in the node's network namespace, under any uid,
+and every hostNetwork pod. In this cluster all of them run as root (the
+API server, the kubelet, the control plane, kube-proxy, calico-node; the
+ek8s namespaces are Pod Security restricted, which forbids hostNetwork),
+and all of them can already exec into loadgen. Traffic forwarded through
+the node is policed, so the bypass covers only packets made on loadgen's
+own node, which holds because the cluster has one node. The control port is the only one
 reachable because loadgen listens on no other, not because of the policy.
 deploy/variant-smoke.sh, run in CI, fails unless the proxy reaches a
 stand-in on the control port, a variant pod and an `ek8s-system` pod
@@ -1134,13 +1138,17 @@ without `app=loadgen` are refused there, and the stand-in reaches a
 variant by Service DNS but not an external address, an outside DNS server
 or the API server.
 
-**Known limit: kindnet's policy enforcement fails open.** kindnet runs
-its policy queue FailOpen: if kindnet's userspace stops reading the
-queue, packets pass unchecked, so every NetworkPolicy fails open. That
-includes variant egress denial, now a containment measure only: fitness
-integrity no longer relies on it, since no `/verify` pair is shared
-across variants (section 10). So at the start of each half the
-orchestrator calls loadgen's control API for the policy canary: loadgen
+**Policy enforcement and the canary.** Calico fails closed for a pod it
+has not programmed: until Felix has written the pod's endpoint chains,
+every packet to or from it is dropped (its "Unknown interface" rule), and
+the CNI holds the pod's start for up to 10 s until Felix reports it
+programmed (a timeout is logged as "Unblocking pod creation", which fails
+the deploy smoke). Every NetworkPolicy is open only when Calico's rules
+are absent altogether: Felix has not programmed since the node started,
+or its chains are gone. That includes variant egress denial, a
+containment measure only: fitness integrity does not rely on it, since
+no `/verify` pair is shared across variants (section 10). So the canary
+still decides per half: at the start of each half the orchestrator calls loadgen's control API for the policy canary: loadgen
 makes one connection attempt its own policy must refuse and returns
 connected, refused or error. It dials the `-canary-addr` flag, the API
 server's ClusterIP, which must be an IP literal (a failed lookup would
@@ -1152,13 +1160,15 @@ EAGAIN, which on connect is local, and any other error give error, which
 the orchestrator treats like connected: enforcement is not shown to be
 on, and the half is excluded. The dial is detached from the request's
 context, so a caller's deadline cannot read as refused. The canary is
-allowed during a run. The orchestrator also checks the kindnet DaemonSet
-is Ready, as a cheap first look; Ready alone does not show the queue is
-being read. kindnet enforces a new pod's policy only after a short lag
-(CI read connected at a pod age of about 0.7 s), so a canary soon after
-loadgen starts can read connected. After a new boot_id the orchestrator
-polls the canary until it reads refused, bounded, before starting a
-half; the deploy smoke waits the same way.
+allowed during a run. The orchestrator also checks the calico-node
+DaemonSet is Ready, as a cheap first look; Ready alone does not show
+Felix's rules are in place. A canary that connects is not expected at
+any pod age: a loadgen Felix has not programmed yet reads refused, like
+a programmed one, and the deploy smoke fails on any connected from pod
+age 0. After a
+new boot_id the orchestrator still polls the canary until it reads
+refused, bounded, before starting a half (kept from kindnet, which
+enforced a new pod's policy only after a short lag).
 
 **Observation windows and gaps.** Traffic flows only during observation
 windows; the gaps between windows carry no load. Builds, gate runs and
@@ -1175,7 +1185,7 @@ run). The stress half follows once stress-ng is Running, so each
 variant starts it with whatever replicas its own HPA left after the
 baseline half (HPA scale-down stabilisation), under one rule for every
 variant; only the baseline half starts cold. Each
-half has its own kindnet first look, policy canary and kubelet CPU
+half has its own CNI first look, policy canary and kubelet CPU
 samples, taken around its run. Stress-ng goes off again as soon as the
 stress run ends, before its records are read, so the host's
 verification never shares the host with it.
@@ -1205,8 +1215,8 @@ run on a second fault; the first run halts at the first one
 **Excluded windows.** The orchestrator marks a window excluded from
 scoring for a loadgen restart during it (section 10) or a loadgen
 exclusion trigger (lag, a skipped send, a loadgen fault, a ring gap, a
-policy canary that connects, or reads error), in either half. A kindnet
-DaemonSet that is not Ready, or a canary not refused, excludes the half
+policy canary that connects, or reads error), in either half. The
+calico-node DaemonSet not Ready, or a canary not refused, excludes the half
 before it starts. A window is scored only when both halves are, so every
 recorded fitness is a min over two scored halves; the stress half is not
 run once the baseline half is excluded (docs/decisions.md, PR #68).

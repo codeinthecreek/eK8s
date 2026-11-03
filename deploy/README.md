@@ -7,6 +7,8 @@ workstation (DESIGN.md sec 2).
 ```
 kind/cluster.yaml     the cluster: name ek8s, one node, Kubernetes 1.37.0
 kind/cluster-ci.yaml  the same at CI size (10m / 256Mi reserved, default CPU manager)
+calico/               Calico v3.33.0, vendored, the CNI and NetworkPolicy engine
+                      (kind's kindnet disabled), + four patches
 metrics-server/       metrics-server v0.9.0, vendored, + --kubelet-insecure-tls
 stress/               namespace ek8s-stress: stress-ng Deployment (0 replicas),
                       its dose ConfigMap, a deny-all NetworkPolicy
@@ -38,6 +40,40 @@ diag/                 diagnostics, workstation only, never in a run or CI
 - The kubelet reserves 1 CPU and 2Gi (kubeReserved + systemReserved), so
   pod requests are scheduled against the ~7 cores / ~13-14 GB budget of
   DESIGN.md sec 2, not the whole host.
+- No kind default CNI (`disableDefaultCNI`): Calico is the CNI and the
+  NetworkPolicy engine (Calico below). Pod subnet 10.244.0.0/16.
+
+## Calico
+
+`calico/` vendors Calico v3.33.0's release manifest (`calico.yaml`,
+unmodified; its URL, tag commit and sha256 are in `kustomization.yaml`,
+with a re-check command) and pins its three images from quay.io by
+digest, the way `metrics-server/` does. No operator: one `calico-node`
+DaemonSet (Felix, the iptables dataplane) and the
+`calico-kube-controllers` Deployment. up.sh applies it server-side (the
+CRD bundle is too large for a client-side apply). The patches:
+
+- IP pool `default-ipv4-ippool`: 10.244.0.0/16 (both kind configs' pod
+  subnet), no IPIP tunnel (one node).
+- `FELIX_NFTABLESMODE=Disabled`: the iptables dataplane, pinned.
+- CNI `policy_setup_timeout_seconds: 10`: a new pod starts only once Felix
+  reports its policy programmed; past 10 s the CNI starts it anyway and
+  logs `Unblocking pod creation` to `/var/log/calico/cni/cni.log` on the
+  node. variant-smoke.sh and a final CI step fail on any such line.
+- `calico-node` requests 100m CPU (the manifest has 250m), on CI and the
+  workstation alike.
+
+`FELIX_DEFAULTENDPOINTTOHOSTACTION` stays the manifest's `ACCEPT`: a pod's
+traffic to the node itself passes only after the pod's own egress policy
+did, and coredns, metrics-server and calico-kube-controllers need the
+node. Calico fails closed: until Felix has programmed a pod, every packet
+to or from it is dropped (the "Unknown interface" rule). Traffic from the
+node to a pod on it is never policed (Felix's rules, static.go), which is
+how the API server's proxy reaches loadgen (ek8s-system below).
+
+A cluster built before Calico still runs kindnet: up.sh refuses it, so
+delete and recreate it (`kind delete cluster --name ek8s`, then
+`deploy/up.sh`).
 
 ## Host setup
 
@@ -119,8 +155,8 @@ fails under the restriction with "loopback: Failed RTM_NEWADDR".
 ## Bring-up and smoke test
 
 ```
-deploy/up.sh      # create cluster ek8s if absent; load stress-ng; apply infra
-deploy/smoke.sh   # node reservation, metrics-server, stress-ng on and off
+deploy/up.sh      # create cluster ek8s if absent; apply Calico; load stress-ng; apply infra
+deploy/smoke.sh   # Calico, node reservation, metrics-server, stress-ng on and off
 deploy/loadgen-up.sh 2   # build and deploy loadgen at r = 2 (see loadgen below)
 kind delete cluster --name ek8s   # tear down
 ```
@@ -196,12 +232,16 @@ server's service proxy reaches the stand-in's control port, and neither a
 pod in the variant namespace nor an `ek8s-system` pod without
 `app=loadgen` does; that pod is also refused by the variant; neither the
 stand-in nor a pod in the variant namespace reaches an external address or
-the API server, and the stand-in cannot use a DNS server other than
-kube-dns (each first shown reachable from the `ek8s-system` pod without
-`app=loadgen`); with the variant at 2 pods (HPA `minReplicas` raised in the
-smoke only), a deleted pod's EndpointSlice entry is `ready=false`,
+the API server or the kubelet's port on the node, and the stand-in cannot
+use a DNS server other than kube-dns (each first shown reachable from the
+`ek8s-system` pod without `app=loadgen`); a pod in `ek8s-stress`, under
+its deny-all policy, reaches none of those targets, nor the variant or
+DNS, and that `ek8s-system` pod cannot reach it, though the node can (each
+refusal paired with a target shown reachable); with the variant at 2 pods
+(HPA `minReplicas` raised in the smoke only), a deleted pod's EndpointSlice entry is `ready=false`,
 `terminating=true` within 2s while the other stays ready; and deleting the
-namespace removes everything. It needs `ek8s-system` from up.sh and
+namespace removes everything. Last, it fails on any `Unblocking pod
+creation` line in the node's CNI log. It needs `ek8s-system` from up.sh and
 removes what it created on success; on failure it leaves the variant
 namespace and the smoke pods for inspection. CI runs it after smoke.sh.
 
@@ -216,11 +256,13 @@ it (see loadgen below).
 | Service `loadgen` | ClusterIP, port `control` 9090 -> the pod port named `control`; reached from the host as `kubectl get --raw /api/v1/namespaces/ek8s-system/services/loadgen:control/proxy/...` |
 | NetworkPolicy `loadgen` | pods `app=loadgen`: no ingress rule; egress TCP 8080 to namespaces labelled `ek8s.io/role: variant`, DNS (UDP/TCP 53) to kube-dns only |
 
-With no ingress rule, the API server's proxy gets in only because kindnet
-never applies policy to traffic from a root-owned socket on the node. That
-covers every root process on the node (the API server, the kubelet, the
-control plane, root hostNetwork pods), all of which can already exec into
-loadgen (DESIGN.md sec 11).
+With no ingress rule, the API server's proxy gets in only because Calico
+never polices traffic from the node to a pod on it. That covers every
+process in the node's network namespace, under any uid, and every
+hostNetwork pod; in this cluster all of them run as root (the API server,
+the kubelet, the control plane, kube-proxy, calico-node), and all can
+already exec into loadgen. The ek8s namespaces are Pod Security
+`restricted`, which forbids hostNetwork (DESIGN.md sec 11).
 
 ## loadgen
 

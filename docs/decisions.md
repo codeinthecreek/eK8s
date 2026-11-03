@@ -850,6 +850,56 @@ max. Earlier entries are not backfilled.
 - Reverse: re-run the experiment; re-ask the owner.
 - Origin: owner
 
+## 2026-11-03 · PR #71 · Calico v3.33.0 replaces kindnet as the CNI and NetworkPolicy engine (reverses PR #31's "another CNI" rejection)
+- Decision: both kind configs set disableDefaultCNI and podSubnet 10.244.0.0/16; Calico v3.33.0's plain manifest (iptables dataplane, no operator, no Typha) is the CNI and policy engine on CI and the workstation alike. F7 checked from upstream source and docs (D2 design packet): (a) Kubernetes 1.37 supported; (b) the node budget fits (E3); (c) a pod Felix has not programmed is closed ("Unknown interface" drop, felix/rules/dispatch.go); (d) DefaultEndpointToHostAction ACCEPT admits only pod-to-node traffic the pod's own egress policy passed, and the kubelet port is now a refused target; (e) ek8s-stress deny-all is probed (variant-smoke (j)). DESIGN.md sec 11 rewritten: control-port ingress is processes in the node's network namespace, any uid, and hostNetwork pods, all root here (Q4).
+- Rejected: staying on kindnet (it fails open, and no kindnetd image carries kube-network-policies v1.1.2); tigera-operator (another pod, image and CRD layer on one node); Cilium (only if Calico fails F7 or the owner's validation runs, Q2).
+- Reason: PR #70's experiment put the Stage 5 stall on kindnet's policy path. Reverses decisions-archive.md PR #31 ("another CNI (out of scope for v1)") and the PR #26 and PR #28 Calico/Cilium rejections.
+- Reverse: revert PR #71, then kind delete cluster --name ek8s and deploy/up.sh.
+- Origin: owner (Q2)
+
+## 2026-11-03 · PR #71 · deploy/calico: the release manifest vendored unmodified, images by digest, four patches
+- Decision: deploy/calico/calico.yaml is v3.33.0's manifests/calico.yaml byte for byte (sha256 2de8f475...4da5; URL, tag commit and re-check command in kustomization.yaml), applied server-side (its CRD bundle is too large for a client-side apply); its three images from quay.io by index digest, equal to Docker Hub's (owner-checked, Q1). Patches: pool 10.244.0.0/16, IPIP Never, FELIX_NFTABLESMODE Disabled, CNI policy_setup_timeout_seconds 10 (a pod starts only once Felix reports its policy programmed; past 10 s the CNI logs "Unblocking pod creation", which fails variant-smoke and the deploy CI). FELIX_DEFAULTENDPOINTTOHOSTACTION stays the manifest's ACCEPT (Q2).
+- Rejected: Docker Hub images (anonymous pull limits); nftables mode left to Auto (a detection change would switch dataplanes silently); DROP or RETURN to host (breaks metrics-server, coredns and calico-kube-controllers on one node).
+- Reason: the deploy/metrics-server pattern, every byte pinned; the policy wait makes pod start wait for its rules, and a timeout is visible.
+- Reverse: edit deploy/calico/kustomization.yaml; an upgrade replaces calico.yaml, its sha256 and the three digests together.
+- Origin: Code (artifacts and patches owner-approved, Q1 and Q2)
+
+## 2026-11-03 · PR #71 · calico-node requests 100m CPU on CI and the workstation alike
+- Decision: deploy/calico patches calico-node's CPU request to 100m (the manifest has 250m), kindnet's own request, everywhere; no CI overlay and no EK8S_CALICO_KUSTOMIZE. calico-kube-controllers keeps the manifest's (no request).
+- Rejected: the manifest's 250m (workstation spare 200m to 50m; CI holds one variant pod fewer, so orchestrator-smoke's Stage 5 candidate could stay Pending); a CI-only overlay deploy/calico-ci (the design packet's proposal).
+- Reason: owner's Q3 change: no CI divergence, the workstation keeps its 200m spare, and kindnet ran at 100m in the same shared pool. calico-node's real use is unmeasured (`kubectl top pod -n kube-system` after the rebuild).
+- Reverse: drop the resources patch from deploy/calico/kustomization.yaml.
+- Origin: owner (Q3)
+
+## 2026-11-03 · PR #71 · The CNI first look reads calico-node; its exclusion token is cni-not-ready
+- Decision: Cluster.KindnetReady becomes CNIReady (DaemonSet kube-system/calico-node, the same Ready logic); ExcludedKindnet "kindnet-not-ready" becomes ExcludedCNI "cni-not-ready". The token appears in the orchestrator's stderr window line and c0.json's "excluded" list (attempts.jsonl holds only a bool). A run dir or c0.json written before this PR may say kindnet-not-ready: both tokens mean the CNI first look failed.
+- Rejected: keeping the old name and token (they name a DaemonSet that no longer exists); a CNI-neutral lookup by label (one CNI, named exactly).
+- Reason: with kindnet gone its check errors and every half becomes a fault, so the rename ships with the infra change.
+- Reverse: rename back, with kindnet's constants.
+- Origin: Code
+
+## 2026-11-03 · PR #71 · The policy canary and its post-boot poll stay; a connected canary fails loadgen-smoke at any pod age
+- Decision: the per-half canary stays, unchanged in Go, and so does the poll after a new boot_id: under Calico, connected means its rules are absent altogether. loadgen-smoke.sh (3) fails on any connected from pod age 0, the in-CI proof that Calico is closed from pod start (it was allowed 60 s for kindnet's lag). Trimming the poll is in docs/AFTER-FIRST-RUN.md.
+- Rejected: dropping the canary (Calico's rules can still be missing: the v3.33.0 release note 13425 fixed that failure in nftables mode); trimming the poll now (harmless, and not on the first-run path).
+- Reason: the canary is the only per-half proof that enforcement is on; the stricter smoke catches a fail-open start.
+- Reverse: restore loadgen-smoke.sh (3)'s 60 s allowance.
+- Origin: Code
+
+## 2026-11-03 · PR #71 · deploy/diag/stage5-runs.sh replaces stage5-nopolicy.sh for the owner's D2 validation
+- Decision: git mv and adapt (Q5, with the owner's change): one arm, the cluster as deployed, no OFF arm, canary patch or policy removal; G3 and G4 kept (G4: HEAD on origin/main or PR #71, no changes under cmd/service, internal, gate, loadgen, deploy, go.mod, go.sum); G1, G2 and G5 and EK8S_DIAG_NOPOLICY dropped with the isolation removal they guarded. Kept: per-run stress-ng assertion, loadgen pid, netns TCP counters, record reduction (raw records off disk), mid-burst-add detection, summary.tsv. Added per run: iptables-save -c deltas of Felix's "Unknown interface" and end-of-tier drop rules (before the gate, at the first record read, after), calico-node's log for the run (raw, and a warning/error count), the CNI "Unblocking" count.
+- Stop rule, fixed in advance: at least 15 runs, past 15 only while mid-burst adds < 10, at most 25; the first stall ends it. MET = 0 stalls with >= 10 mid-burst-add runs, STALLED on a stall, else INCONCLUSIVE. -try runs one run with no verdict.
+- Rejected: keeping stage5-nopolicy.sh (it asserts kindnet's nft set); a fresh script (the kept code was reviewed three times in PR #70); an opt-in variable (nothing it guarded remains).
+- Reason: the D2 validation plan needs PR #70's measurements on Calico, plus Calico's own drop and log signals to tell a stall from pod-start lag.
+- Reverse: delete deploy/diag/stage5-runs.sh; git has stage5-nopolicy.sh (merge 4ec4b4a).
+- Origin: owner (Q5)
+
+## 2026-11-03 · PR #71 · up.sh: kind create without --wait; a cluster that runs kindnet is refused
+- Decision: up.sh creates the cluster without --wait, applies deploy/calico, then waits for the calico-node and calico-kube-controllers rollouts, every node Ready and coredns; on an existing cluster it refuses when DaemonSet kube-system/kindnet exists (delete and recreate it).
+- Rejected: --wait (with no CNI the node stays NotReady, and kind v0.33.0's waitforready.go only warns on its timeout, so it adds its full length to every create); layering Calico onto a kindnet cluster or migrating it in place.
+- Reason: the Ready wait belongs after the CNI exists; up.sh never recreates a cluster, so an old one must be refused, not half-converted.
+- Reverse: restore `--wait 180s` and drop the kindnet check from deploy/up.sh.
+- Origin: Code
+
 ## 2026-11-03 · PR #71 · The reviewer subagent runs on every change that is not docs-only (Markdown only)
 - Decision: CLAUDE.md's Self-review rule and .claude/agents/reviewer.md now trigger on every change that is not docs-only, docs-only meaning only Markdown files change; "Docs-only changes may skip it." is deleted. Shell, YAML and workflow changes, such as the deploy/ scripts that set up or check isolation, now trigger it.
 - Rejected: "any change touching Go code" (left shell, YAML and workflow changes undefined, and this PR is mostly those); an "isolation-relevant" test (a judgement call).
