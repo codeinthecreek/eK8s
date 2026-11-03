@@ -44,6 +44,12 @@
 #      go.mod or go.sum, and a HEAD that is not an ancestor of origin/main
 #      or of PR #71's head (both fetched first; a failed fetch refuses), so
 #      the result is about main's code; the result goes to meta.txt.
+# On exit (INT, TERM and HUP included) the script stops a running gate,
+# deletes the diag namespace and turns stress-ng off. SIGKILL or a host
+# crash skips that: then a gate may still run, stress-ng stays on and
+# ek8s-v999997 stays (G3 refuses the next start while it exists), so
+# kill any leftover gate, delete ek8s-v999997 and scale stress-ng to 0
+# before any orchestrator, c0 or gate run.
 #
 # Stop rule, fixed in advance: at least 15 runs; past 15, another run only
 # while the mid-burst adds so far are under 10; at most 25. The first
@@ -61,16 +67,22 @@
 #
 # iptables.tsv: the packet counters (`iptables-save -c` on the node) of
 # every rule commented "Unknown interface" (felix/rules/dispatch.go: a
-# packet to or from a pod Felix has not programmed) or "End of tier
-# default. Drop if no policies passed packet" (felix/rules/endpoints.go: a
-# packet a programmed pod's policy denies), at three points: before the
-# gate (pre), at the first record read (burst) and after the gate (post),
-# with the deltas pre-post and burst-post. The gate's canary runs before
-# the burst and is denied by loadgen's egress policy, so it adds end-of-
-# tier drops to pre-post but not to burst-post. A drop in burst-post is
-# the burst's own traffic denied: Felix not yet programmed for a new pod,
-# or a new pod's IP not yet in a policy's IP set. A rule missing from post
-# (its pod deleted) has no delta, so the sums are lower bounds.
+# packet from a pod Felix has not programmed, or forwarded to one) or
+# "End of tier <tier>. Drop if no policies passed packet"
+# (felix/rules/endpoints.go: a packet a programmed pod's policy denies),
+# read before the gate, on every poll while it runs (about every 0.5 s)
+# and after it. A rule is keyed by its chain and text without Felix's
+# "cali:<hash>" comment, since the hash changes whenever the rules before
+# it do (a new pod added to a dispatch chain), and Felix's rewrite then
+# starts the rule's counters at 0: a counter lower than the last read is
+# taken as such a reset and counted from 0. Each rule's increases are
+# summed over the run and over the burst (from the first read once a
+# record has been read). The gate's canary runs before the burst and is
+# denied by loadgen's egress policy, so it adds end-of-tier drops to the
+# run but not to the burst. A drop in the burst is the burst's own
+# traffic denied: Felix not yet programmed for a new pod, or a new pod's
+# IP not yet in a policy's IP set. Drops between a rule's last read and
+# its rewrite or deletion are lost, so the sums are lower bounds.
 #
 # Verdict (summary.tsv, verdict.txt): a stall is a gate exit 1 whose
 # "responses" line names over_hang_timeout, or whose records read hold
@@ -79,7 +91,11 @@
 # whose creationTimestamp is between the burst's first intended send
 # minus 1s (the timestamp is cut to whole seconds) and first +
 # burst_sends / burst_rate. STALLED with any stall; MET with 0 stalls and
-# >= 10 mid-burst-add runs; else INCONCLUSIVE.
+# >= 10 mid-burst-add runs; else INCONCLUSIVE. A gate FAIL that is not a
+# stall is counted (other FAILs) but does not change the verdict.
+#
+# deploy/diag/stage5-runs_test.sh tests the pure helpers (stop rule,
+# verdict, drop accounting) without a cluster.
 #
 # Usage, after deploy/up.sh on the workstation:
 #   deploy/diag/stage5-runs.sh [-rate R] [-try] [-out DIR]
@@ -198,62 +214,85 @@ stall_stats() {
 
 # drop_rules: `iptables-save -c -t filter` on stdin; one line per rule
 # iptables.tsv counts (header): packets, kind (unknown_if or end_of_tier)
-# and the rule without its counters, tab-separated. Felix renders a rule's
-# comment as -m comment --comment "<text>" (felix/iptables/renderer.go),
-# and the end-of-tier text names the deny action, Drop by default.
+# and the rule without its counters and its "cali:<hash>" comment,
+# tab-separated. Felix renders a rule's comments as -m comment --comment
+# "<text>", the hash first (felix/iptables/renderer.go); the end-of-tier
+# text names the deny action, Drop (felix/iptables/actions.go).
 drop_rules() {
 	awk -v OFS='\t' '
 		/^\[[0-9]+:[0-9]+\] -A / {
 			kind = ""
 			if (index($0, "--comment \"Unknown interface\"")) kind = "unknown_if"
-			else if ($0 ~ /--comment "End of tier [^"]* if no policies passed packet"/) kind = "end_of_tier"
+			else if ($0 ~ /--comment "End of tier [^"]*\. Drop if no policies passed packet"/) kind = "end_of_tier"
 			if (kind == "") next
 			pk = $1; sub(/^\[/, "", pk); sub(/:.*$/, "", pk)
 			rule = $0; sub(/^\[[0-9]+:[0-9]+\] /, "", rule)
+			gsub(/ -m comment --comment "cali:[^"]*"/, "", rule)
 			print pk, kind, rule
 		}'
 }
 
-# drop_deltas HAVE_BURST: drop_rules lines on stdin, each prefixed with
-# its snapshot (pre, burst or post) and a tab; prints iptables.tsv: kind,
-# chain, pre, burst, post, run_delta (post - pre), burst_delta (post -
-# burst), rule. A rule absent from a snapshot shows "-" there; one new
-# since pre (or burst) counts from 0. HAVE_BURST is 0 when no burst
-# snapshot was taken (no record read), and every burst_delta is then "-".
-drop_deltas() {
-	awk -F'\t' -v OFS='\t' -v have_burst="$1" '
-		{
-			key = $3 FS $4
-			if (!(key in seen)) { seen[key] = 1; order[++n] = key }
-			c[$1, key] = $2
-		}
-		END {
-			print "kind", "chain", "pre", "burst", "post", "run_delta", "burst_delta", "rule"
-			for (i = 1; i <= n; i++) {
-				key = order[i]
-				split(key, kr, FS); kind = kr[1]; rule = kr[2]
-				split(rule, w, " "); chain = w[2]
-				pre = ((("pre", key) in c) ? c["pre", key] : "-")
-				bur = ((("burst", key) in c) ? c["burst", key] : "-")
-				post = ((("post", key) in c) ? c["post", key] : "-")
-				rd = "-"; bd = "-"
-				if (post != "-") {
-					rd = post - (pre == "-" ? 0 : pre)
-					if (have_burst) bd = post - (bur == "-" ? 0 : bur)
+# drop_tally BURST: drop_rules lines on stdin, each prefixed with its read's
+# index (0 before the gate, then 1, 2, ... in order) and a tab; prints
+# iptables.tsv (header): kind, chain, first and last counter read, the
+# increase over the run and over the burst, the resets seen, and the rule.
+# An increase between two consecutive reads is the counter's rise, or the
+# new counter when it fell (a rewrite, counted from 0); a rule absent from
+# the previous read counts from 0 (new, or recreated: a reset), except in
+# read 0. BURST is the first read's index once a record was read ("" when
+# none was): an increase belongs to the burst when its earlier read is at
+# or after BURST, and every burst increase is "-" with BURST "".
+drop_tally() {
+	awk -F'\t' -v OFS='\t' -v burst="$1" '
+		function flush(   k, v, inc) {
+			for (k in cnt) {
+				v = cnt[k]
+				if (!(k in seen)) {
+					seen[k] = 1; order[++n] = k; first[k] = v; run[k] = 0; bur[k] = 0; resets[k] = 0
+					inc = (ri == 0 ? 0 : v)
+				} else if (prev_i[k] == ri - 1 && v >= prev_v[k]) {
+					inc = v - prev_v[k]
+				} else {
+					inc = v; resets[k]++
 				}
-				print kind, chain, pre, bur, post, rd, bd, rule
+				run[k] += inc
+				if (burst != "" && ri - 1 >= burst + 0) bur[k] += inc
+				prev_i[k] = ri; prev_v[k] = v
+			}
+			delete cnt
+		}
+		NR == 1 { ri = $1 + 0 }
+		$1 + 0 != ri { flush(); ri = $1 + 0 }
+		{ cnt[$3 FS $4] += $2 }
+		END {
+			if (NR > 0) flush()
+			print "kind", "chain", "first", "last", "run_increase", "burst_increase", "resets", "rule"
+			for (j = 1; j <= n; j++) {
+				k = order[j]
+				split(k, kr, FS); split(kr[2], w, " ")
+				print kr[1], w[2], first[k], prev_v[k], run[k], (burst == "" ? "-" : bur[k]), resets[k], kr[2]
 			}
 		}'
 }
 
 # drop_sum KIND COLUMN: iptables.tsv on stdin; the sum of COLUMN
-# (run_delta or burst_delta) over KIND's rules, or "-" when no rule of
+# (run_increase or burst_increase) over KIND's rules, or "-" when no rule of
 # KIND has a number there.
 drop_sum() {
 	awk -F'\t' -v kind="$1" -v col="$2" '
 		NR == 1 { for (i = 1; i <= NF; i++) if ($i == col) c = i; next }
 		$1 == kind && $c != "-" { s += $c; any = 1 }
 		END { print (any ? s : "-") }'
+}
+
+# another_run I ADDS RESULT: succeeds when the stop rule (header) allows
+# another run after run I, with ADDS mid-burst-add runs so far and RESULT
+# run I's result.
+another_run() {
+	[ "$3" != STALL ] || return 1
+	[ "$try" = 0 ] || return 1
+	[ "$1" -lt "$max_runs" ] || return 1
+	[ "$1" -lt "$min_runs" ] || [ "$2" -lt "$need_adds" ]
 }
 
 # verdict: summary.tsv rows (no header) on stdin; prints the tally and the
@@ -264,13 +303,14 @@ verdict() {
 			runs++
 			if ($4 == "yes") adds++
 			if ($3 == "STALL") { stalls++; if ($4 == "yes") add_stalls++ }
+			if ($3 == "FAIL") fails++
 		}
 		END {
 			v = "INCONCLUSIVE"
 			if (stalls + 0 > 0) v = "STALLED"
 			else if (adds + 0 >= need_adds) v = "MET"
 			if (try) v = "none (-try)"
-			printf "runs %d, mid-burst adds %d, stalls %d (%d in add runs): %s\n", runs, adds, stalls, add_stalls, v
+			printf "runs %d, mid-burst adds %d, stalls %d (%d in add runs), other FAILs %d: %s\n", runs, adds, stalls, add_stalls, fails, v
 		}'
 }
 
@@ -326,12 +366,12 @@ canary() {
 canary_refused_twice() {
 	local deadline=$((SECONDS + $1)) r
 	while :; do
-		r=$(canary)
+		r=$(canary) || return 1
 		[ "$r" = refused ] && break
 		[ "$SECONDS" -lt "$deadline" ] || { say "POST /canary still $r after $1s"; return 1; }
 		sleep 2
 	done
-	r=$(canary)
+	r=$(canary) || return 1
 	[ "$r" = refused ] || { say "POST /canary $r after refused"; return 1; }
 }
 
@@ -516,7 +556,7 @@ live_guard() {
 run_one() {
 	local n=$1 pods_ok=0 rdir pod lip pid t0 gpid rc cur=0 body next result mid=no
 	local stress0 stress1 start_wall="" start_e="" end_e="" stats nread oht longest sfirst slast syn0="" rs0="" syn1="" rs1="" ts c
-	local have_burst=0 cni0 cni1 cni_span unblock warn_err drops_u drops_e drops_eb
+	local burst_read="" reads=0 cni0 cni1 cni_span unblock warn_err drops_u drops_e drops_eb targets
 	rdir="$out/run-$(printf %02d "$n")"
 	mkdir -p "$rdir"
 	live_guard
@@ -531,7 +571,7 @@ run_one() {
 	pod=$(loadgen_pod)
 	lip=$(pod_ip "$sys" "$pod")
 	pid=$(loadgen_pid "$pod")
-	drop_snapshot | sed 's/^/pre\t/' >"$work/drops" || die "run $n: cannot read the node's iptables-save"
+	drop_snapshot | sed 's/^/0\t/' >"$work/drops" || die "run $n: cannot read the node's iptables-save"
 	cni0=$(cni_size) || die "run $n: cannot stat $cni_log on $node"
 	t0=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 	say "run $n: loadgen $pod ($lip, pid $pid), gate starting at $t0"
@@ -560,18 +600,20 @@ run_one() {
 		local procs
 		procs=$(live_procs)
 		[ -z "$procs" ] || echo "VIOLATION $ts: G3: running: $procs" >>"$rdir/state.txt"
-		if [ -s "$rdir/records.tsv" ]; then
-			# The burst has begun: the canary is done, so drops from here on
-			# are the burst's own traffic (header, iptables.tsv).
-			if [ "$have_burst" = 0 ]; then
-				if drop_snapshot | sed 's/^/burst\t/' >>"$work/drops"; then
-					have_burst=1
-					echo "burst snapshot at $ts" >>"$rdir/state.txt"
-				else
-					echo "VIOLATION $ts: cannot read the node's iptables-save for the burst snapshot" >>"$rdir/state.txt"
-					have_burst=2
-				fi
+		# Felix's drop counters, every poll (header, iptables.tsv); a failed
+		# read is skipped and noted.
+		if drop_snapshot | sed "s/^/$((reads + 1))\t/" >>"$work/drops"; then
+			reads=$((reads + 1))
+			# The first read once the burst has begun: the canary is done, so
+			# drops from here on are the burst's own traffic.
+			if [ -z "$burst_read" ] && [ -s "$rdir/records.tsv" ]; then
+				burst_read=$reads
+				echo "burst's first drop-counter read ($burst_read) at $ts" >>"$rdir/state.txt"
 			fi
+		else
+			echo "NOTE $ts: iptables-save on $node failed; read skipped" >>"$rdir/state.txt"
+		fi
+		if [ -s "$rdir/records.tsv" ]; then
 			k -n "$ns" get networkpolicy variant >/dev/null 2>&1 || echo "VIOLATION $ts: $ns/variant missing during the burst" >>"$rdir/state.txt"
 		fi
 		sleep 0.5
@@ -579,7 +621,7 @@ run_one() {
 	rc=0
 	wait "$gpid" || rc=$?
 	gate_pid=""
-	if ! drop_snapshot | sed 's/^/post\t/' >>"$work/drops"; then
+	if ! drop_snapshot | sed "s/^/$((reads + 1))\t/" >>"$work/drops"; then
 		echo "VIOLATION: cannot read the node's iptables-save after the gate" >>"$rdir/state.txt"
 	fi
 	# The tail of the records, unless the gate already DELETEd the target
@@ -588,16 +630,18 @@ run_one() {
 		records_tsv <<<"$body" >>"$rdir/records.tsv"
 		cur=$next
 	done
-	if api_get /targets 2>/dev/null | grep -q "\"id\":\"$id\""; then
+	# Into a variable first: grep -q would SIGPIPE kubectl under pipefail.
+	targets=$(api_get /targets 2>/dev/null || true)
+	if grep -q "\"id\":\"$id\"" <<<"$targets"; then
 		api_delete "/targets/$id?through=$((cur > 0 ? cur - 1 : 0))" >/dev/null 2>&1 || say "run $n: DELETE /targets/$id failed (left in loadgen)"
 	fi
 	if c=$(counters "$pid"); then printf '%s\t%s\t%s\n' "$(now)" "${c% *}" "${c#* }" >>"$rdir/netstat.tsv"; fi
 
 	# Felix's drop counters (header, iptables.tsv).
-	drop_deltas "$([ "$have_burst" = 1 ] && echo 1 || echo 0)" <"$work/drops" >"$rdir/iptables.tsv"
-	drops_u=$(drop_sum unknown_if run_delta <"$rdir/iptables.tsv")
-	drops_e=$(drop_sum end_of_tier run_delta <"$rdir/iptables.tsv")
-	drops_eb=$(drop_sum end_of_tier burst_delta <"$rdir/iptables.tsv")
+	drop_tally "$burst_read" <"$work/drops" >"$rdir/iptables.tsv"
+	drops_u=$(drop_sum unknown_if run_increase <"$rdir/iptables.tsv")
+	drops_e=$(drop_sum end_of_tier run_increase <"$rdir/iptables.tsv")
+	drops_eb=$(drop_sum end_of_tier burst_increase <"$rdir/iptables.tsv")
 	# calico-node's log for the run's span; warnings and worse counted.
 	if k -n kube-system logs ds/calico-node -c calico-node --timestamps --since-time="$t0" >"$rdir/calico-node.log" 2>&1; then
 		warn_err=$(grep -cE '\[(WARNING|ERROR|FATAL|PANIC)\]' "$rdir/calico-node.log" || true)
@@ -793,13 +837,8 @@ main() {
 		run_one "$i"
 		last=$(tail -n 1 "$out/summary.tsv")
 		[ "$(cut -f4 <<<"$last")" != yes ] || adds=$((adds + 1))
-		if [ "$(cut -f3 <<<"$last")" = STALL ]; then
-			say "run $i stalled: the experiment ends (stop rule)"
-			break
-		fi
-		[ "$try" = 0 ] || break
-		[ "$i" -lt "$max_runs" ] || break
-		[ "$i" -lt "$min_runs" ] || [ "$adds" -lt "$need_adds" ] || break
+		[ "$(cut -f3 <<<"$last")" != STALL ] || say "run $i stalled: the experiment ends (stop rule)"
+		another_run "$i" "$adds" "$(cut -f3 <<<"$last")" || break
 	done
 	tail -n +2 "$out/summary.tsv" | verdict | tee "$out/verdict.txt" | sed 's/^/stage5-runs.sh: /'
 }

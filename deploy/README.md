@@ -454,7 +454,11 @@ policy and real canary in place, and stress-ng Running at origin/main's
 first failed assertion or gate fault. Its stop rule is fixed in advance:
 at least 15 runs, more only while fewer than 10 had a mid-burst add, at
 most 25, and the first stall ends it. Runs about 2 minutes each
-(inferred), so 15 to 25 runs take 30 to 50 minutes.
+(inferred), so 15 to 25 runs take 30 to 50 minutes. On exit, Ctrl-C
+included, it stops its gate, deletes its namespace `ek8s-v999997` and
+turns stress-ng off; after SIGKILL or a host crash, kill any leftover
+gate, delete `ek8s-v999997` and scale stress-ng to 0 before any
+orchestrator, c0 or gate run.
 
 ```
 deploy/diag/stage5-runs.sh          # the experiment
@@ -471,8 +475,10 @@ The verdict is in `verdict.txt`: STALLED on any stall, MET with no stall
 in at least 10 mid-burst-add runs, else INCONCLUSIVE. `summary.tsv` has
 one row per run; each `run-NN/` keeps the gate's output, the state
 assertions, records without pairs or evidence, loadgen's SYN and TCP
-retransmit counters, the packet counts of Felix's "Unknown interface" and
-end-of-tier drop rules before the gate, at the burst's start and after
-it, calico-node's raw log lines for the run, and any CNI "Unblocking pod
-creation" line. The script's header has the details.
+retransmit counters, the packets dropped by Felix's "Unknown interface"
+and end-of-tier rules over the run and over the burst (their counters
+read on every poll), calico-node's raw log lines for the run, and any CNI
+"Unblocking pod creation" line. The script's header has the details;
+`diag/stage5-runs_test.sh` tests its stop rule, verdict and counting
+without a cluster.
 PR #70's `stage5-nopolicy.sh`, which this replaces, is in git history.
