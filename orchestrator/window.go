@@ -17,8 +17,8 @@ import (
 // Why a window is excluded from scoring (DESIGN.md sec 10, sec 11), as
 // WindowResult.Excluded lists them. Each is a lowercase token.
 const (
-	ExcludedRestart  = "loadgen-restart"   // loadgen's boot_id changed: its records are gone
-	ExcludedKindnet  = "kindnet-not-ready" // the first look failed; the window did not start
+	ExcludedRestart  = "loadgen-restart" // loadgen's boot_id changed: its records are gone
+	ExcludedCNI      = "cni-not-ready"   // the CNI first look failed; the window did not start
 	ExcludedCanary   = "canary-not-refused"
 	ExcludedRunEnded = "run-not-done" // a target ended cancelled or error
 	ExcludedGap      = "ring-gap"
@@ -234,7 +234,7 @@ type half struct {
 //  1. every batch uploaded under runID (a run consumes its batch, and an
 //     upload replaces a pending one, so each half uploads its own);
 //  2. stress-ng off and gone (baseline) or on and Running (stress);
-//  3. the kindnet first look and the policy canary (polled after a new
+//  3. the CNI first look and the policy canary (polled after a new
 //     boot_id), either of which excludes the half without starting it;
 //  4. the kubelet's CPU counters, the run, polled until no target is
 //     running, and the counters again;
@@ -284,12 +284,12 @@ func (s *Session) runHalf(ctx context.Context, name, runID string, live []string
 	} else if err := s.c.Cluster.StressOff(ctx); err != nil {
 		return nil, err
 	}
-	ready, err := s.c.Cluster.KindnetReady(ctx)
+	ready, err := s.c.Cluster.CNIReady(ctx)
 	if err != nil {
 		return nil, err
 	}
 	if !ready {
-		h.excluded = []string{ExcludedKindnet}
+		h.excluded = []string{ExcludedCNI}
 		return h, nil
 	}
 	refused, err := s.canary(ctx)

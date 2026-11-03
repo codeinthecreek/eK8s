@@ -166,9 +166,11 @@ func checkShape(cfg wire.Config, want loadgenShape) error {
 }
 
 // awaitCanary polls the policy canary until it reads refused, at most
-// p.canaryBound: kindnet enforces a new pod's policy only after a short
-// lag (DESIGN.md sec 11), and loadgen sends nothing to a candidate
-// without it. Any other result when the bound ends is a fault.
+// p.canaryBound: loadgen sends nothing to a candidate without it. Calico
+// fails closed for a pod it has not programmed yet, so refused is
+// expected from the first poll (DESIGN.md sec 11); the poll, kept from
+// kindnet's enforcement lag, retries any other result until the bound.
+// Any other result when the bound ends is a fault.
 func awaitCanary(ctx context.Context, cl *client.Client, p burstParams) error {
 	deadline := time.Now().Add(p.canaryBound)
 	for {

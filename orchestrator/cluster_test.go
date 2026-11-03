@@ -25,13 +25,13 @@ func stubKube(outs ...string) (*Kube, *[][]string) {
 }
 
 const (
-	noPods       = `{"kind":"List","items":[]}`
-	oneRunning   = `{"kind":"List","items":[{"kind":"Pod","metadata":{"name":"s"},"status":{"phase":"Running"}}]}`
-	onePending   = `{"kind":"List","items":[{"kind":"Pod","metadata":{"name":"s"},"status":{"phase":"Pending"}}]}`
-	oneDeleting  = `{"kind":"List","items":[{"kind":"Pod","metadata":{"name":"s","deletionTimestamp":"2026-10-27T00:00:00Z"},"status":{"phase":"Running"}}]}`
-	kindnetReady = `{"kind":"DaemonSet","metadata":{"generation":2},"status":{"observedGeneration":2,"desiredNumberScheduled":1,"updatedNumberScheduled":1,"numberReady":1,"numberAvailable":1}}`
-	oneNodeJSON  = `{"kind":"List","items":[{"metadata":{"name":"ek8s-control-plane"}}]}`
-	metricsText  = "# HELP pod_cpu_usage_seconds_total x\npod_cpu_usage_seconds_total{namespace=\"ek8s-v1\",pod=\"hasher-a\"} 1.5 1700000000000\n"
+	noPods      = `{"kind":"List","items":[]}`
+	oneRunning  = `{"kind":"List","items":[{"kind":"Pod","metadata":{"name":"s"},"status":{"phase":"Running"}}]}`
+	onePending  = `{"kind":"List","items":[{"kind":"Pod","metadata":{"name":"s"},"status":{"phase":"Pending"}}]}`
+	oneDeleting = `{"kind":"List","items":[{"kind":"Pod","metadata":{"name":"s","deletionTimestamp":"2026-10-27T00:00:00Z"},"status":{"phase":"Running"}}]}`
+	calicoReady = `{"kind":"DaemonSet","metadata":{"generation":2},"status":{"observedGeneration":2,"desiredNumberScheduled":1,"updatedNumberScheduled":1,"numberReady":1,"numberAvailable":1}}`
+	oneNodeJSON = `{"kind":"List","items":[{"metadata":{"name":"ek8s-control-plane"}}]}`
+	metricsText = "# HELP pod_cpu_usage_seconds_total x\npod_cpu_usage_seconds_total{namespace=\"ek8s-v1\",pod=\"hasher-a\"} 1.5 1700000000000\n"
 )
 
 func TestStressSettled(t *testing.T) {
@@ -64,16 +64,16 @@ func TestDaemonSetReady(t *testing.T) {
 		}
 		return ok
 	}
-	if !ready(kindnetReady) {
+	if !ready(calicoReady) {
 		t.Error("a Ready DaemonSet reads not Ready")
 	}
 	for _, from := range []string{`"numberReady":1`, `"observedGeneration":2`, `"updatedNumberScheduled":1`, `"numberAvailable":1`} {
 		to := strings.Replace(strings.Replace(from, ":1", ":0", 1), ":2", ":1", 1)
-		if ready(strings.Replace(kindnetReady, from, to, 1)) {
+		if ready(strings.Replace(calicoReady, from, to, 1)) {
 			t.Errorf("with %s: Ready, want not", to)
 		}
 	}
-	zero := strings.NewReplacer(":1,", ":0,", ":1}", ":0}").Replace(kindnetReady)
+	zero := strings.NewReplacer(":1,", ":0,", ":1}", ":0}").Replace(calicoReady)
 	if ready(zero) {
 		t.Error("a DaemonSet with no pod scheduled reads Ready")
 	}
@@ -111,9 +111,9 @@ func TestKubeCalls(t *testing.T) {
 	if err := k2.StressOn(ctx); err != nil {
 		t.Fatalf("StressOn: %v", err)
 	}
-	k3, calls3 := stubKube(kindnetReady)
-	if ok, err := k3.KindnetReady(ctx); !ok || err != nil {
-		t.Fatalf("KindnetReady = %v, %v", ok, err)
+	k3, calls3 := stubKube(calicoReady)
+	if ok, err := k3.CNIReady(ctx); !ok || err != nil {
+		t.Fatalf("CNIReady = %v, %v", ok, err)
 	}
 	k4, calls4 := stubKube(oneNodeJSON, metricsText)
 	for range 2 {
@@ -140,7 +140,7 @@ func TestKubeCalls(t *testing.T) {
 		{"-n", "ek8s-stress", "scale", "deploy/stress-ng", "--replicas=1"},
 		{"get", "pods", "-n", "ek8s-stress", "-l", "app=stress-ng", "-o", "json"},
 		{"get", "pods", "-n", "ek8s-stress", "-l", "app=stress-ng", "-o", "json"},
-		{"get", "daemonset", "kindnet", "-n", "kube-system", "-o", "json"},
+		{"get", "daemonset", "calico-node", "-n", "kube-system", "-o", "json"},
 		{"get", "nodes", "-o", "json"},
 		{"get", "--raw", "/api/v1/nodes/ek8s-control-plane/proxy/metrics/resource"},
 		{"get", "--raw", "/api/v1/nodes/ek8s-control-plane/proxy/metrics/resource"},
@@ -164,7 +164,7 @@ func TestKubeCalls(t *testing.T) {
 
 func TestKubeFaults(t *testing.T) {
 	ctx := t.Context()
-	if _, err := (&Kube{}).KindnetReady(ctx); err == nil || !strings.Contains(err.Error(), "empty kube context") {
+	if _, err := (&Kube{}).CNIReady(ctx); err == nil || !strings.Contains(err.Error(), "empty kube context") {
 		t.Errorf("no context: %v", err)
 	}
 	k, _ := stubKube("ERR")

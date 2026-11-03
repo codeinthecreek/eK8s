@@ -215,7 +215,7 @@ type loopCluster struct{ ev *events }
 
 func (c loopCluster) StressOff(context.Context) error { c.ev.add("stress off"); return nil }
 func (c loopCluster) StressOn(context.Context) error  { c.ev.add("stress on"); return nil }
-func (c loopCluster) KindnetReady(context.Context) (bool, error) {
+func (c loopCluster) CNIReady(context.Context) (bool, error) {
 	return true, nil
 }
 func (c loopCluster) PodCPU(context.Context) (fitness.Sample, error) { return nil, nil }

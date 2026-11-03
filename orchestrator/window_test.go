@@ -154,14 +154,14 @@ func serveVariants(t *testing.T, variants map[string]http.Handler) string {
 
 // fakeCluster is a Cluster with no cluster: each PodCPU call reads one
 // CPU-second more per pod than the last, and gone drops pods. ops logs
-// the stress, kindnet and CPU calls in order, each stress call with the
+// the stress, CNI and CPU calls in order, each stress call with the
 // count reads gives at the time (records reads, in the fixture).
 type fakeCluster struct {
 	mu        sync.Mutex
 	pods      []string // variant ids with one pod each
 	notReady  bool
-	notReadyN int // with notReady unset: the n-th KindnetReady call (from 1) reads not Ready
-	kindnetN  int
+	notReadyN int // with notReady unset: the n-th CNIReady call (from 1) reads not Ready
+	cniN      int
 	cpuCalls  int
 	gone      map[string]bool // ids whose pod is gone from the second sample on
 	stressOff int
@@ -195,12 +195,12 @@ func (c *fakeCluster) stress(on bool) {
 
 func (c *fakeCluster) StressOff(context.Context) error { c.stress(false); return nil }
 func (c *fakeCluster) StressOn(context.Context) error  { c.stress(true); return c.onErr }
-func (c *fakeCluster) KindnetReady(context.Context) (bool, error) {
+func (c *fakeCluster) CNIReady(context.Context) (bool, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.kindnetN++
-	c.ops = append(c.ops, "kindnet")
-	return !c.notReady && c.kindnetN != c.notReadyN, nil
+	c.cniN++
+	c.ops = append(c.ops, "cni")
+	return !c.notReady && c.cniN != c.notReadyN, nil
 }
 func (c *fakeCluster) PodCPU(context.Context) (fitness.Sample, error) {
 	c.mu.Lock()
@@ -414,7 +414,7 @@ func TestWindowScored(t *testing.T) {
 	// Baseline with stress off, then stress on for the stress half's run
 	// only: off again after its last CPU sample, before any of its
 	// records is read.
-	want := []string{"stress off@0", "kindnet", "cpu", "cpu", "stress on@4", "kindnet", "cpu", "cpu", "stress off@4"}
+	want := []string{"stress off@0", "cni", "cpu", "cpu", "stress on@4", "cni", "cpu", "cpu", "stress off@4"}
 	if got := fx.cluster.ops; strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Errorf("cluster calls %q, want %q", got, want)
 	}
@@ -571,15 +571,15 @@ func TestWindowExcludedStillJudged(t *testing.T) {
 }
 
 // TestWindowStressExcluded checks a stress half excluded before it
-// starts (its kindnet first look): the window is excluded, the baseline
+// starts (its CNI first look): the window is excluded, the baseline
 // half's records are still judged, and stress-ng is off again.
 func TestWindowStressExcluded(t *testing.T) {
 	core := hashcore.New()
 	fx := newFixture(t, map[string]http.Handler{"1": gen0(core), "2": noShed(fakeHasher{core})}, "1", "2")
 	fx.cluster.notReadyN = 2
 	res := fx.window()
-	if res.Scored() || strings.Join(res.Excluded, ",") != ExcludedKindnet || strings.Join(res.StressExcluded, ",") != ExcludedKindnet || len(res.BaselineExcluded) != 0 {
-		t.Fatalf("excluded %v (baseline %v, stress %v), want kindnet-not-ready in the stress half", res.Excluded, res.BaselineExcluded, res.StressExcluded)
+	if res.Scored() || strings.Join(res.Excluded, ",") != ExcludedCNI || strings.Join(res.StressExcluded, ",") != ExcludedCNI || len(res.BaselineExcluded) != 0 {
+		t.Fatalf("excluded %v (baseline %v, stress %v), want cni-not-ready in the stress half", res.Excluded, res.BaselineExcluded, res.StressExcluded)
 	}
 	if v := res.Variants["2"]; v.Disqualified != classifier.ReasonVerifyMismatch || v.DisqualifiedHalf != HalfBaseline {
 		t.Errorf("cheat: %+v, want verify_mismatch in the baseline half", v)
@@ -681,8 +681,8 @@ func TestWindowNotStarted(t *testing.T) {
 	core := hashcore.New()
 	fx := newFixture(t, map[string]http.Handler{"1": gen0(core)}, "1")
 	fx.cluster.notReady = true
-	if res := fx.window(); strings.Join(res.Excluded, ",") != ExcludedKindnet || len(res.Variants) != 0 {
-		t.Errorf("kindnet not Ready: %+v", res)
+	if res := fx.window(); strings.Join(res.Excluded, ",") != ExcludedCNI || len(res.Variants) != 0 {
+		t.Errorf("CNI not Ready: %+v", res)
 	}
 	fx.cluster.notReady = false
 
