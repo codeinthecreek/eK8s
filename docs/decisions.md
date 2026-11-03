@@ -849,3 +849,10 @@ max. Earlier entries are not backfilled.
 - Reason: a pod add stalls new connections only with kindnet's policy path in place.
 - Reverse: re-run the experiment; re-ask the owner.
 - Origin: owner
+
+## 2026-11-03 · PR #71 · The reviewer subagent runs on every change that is not docs-only (Markdown only)
+- Decision: CLAUDE.md's Self-review rule and .claude/agents/reviewer.md now trigger on every change that is not docs-only, docs-only meaning only Markdown files change; "Docs-only changes may skip it." is deleted. Shell, YAML and workflow changes, such as the deploy/ scripts that set up or check isolation, now trigger it.
+- Rejected: "any change touching Go code" (left shell, YAML and workflow changes undefined, and this PR is mostly those); an "isolation-relevant" test (a judgement call).
+- Reason: D2 design packet item 6, owner Q7.
+- Reverse: restore the two lines in CLAUDE.md and reviewer.md's description.
+- Origin: owner (Q7)

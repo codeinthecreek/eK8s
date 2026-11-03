@@ -131,18 +131,19 @@ Applies to every session in this repo.
   `docs/handoff.md`, only on request by name ("design packet", "review
   packet", "approval packet", "sync packet since <sha>" or "sync packet
   since #N").
-- Self-review: on any change touching Go code, run the `reviewer`
-  subagent (`.claude/agents/reviewer.md`) once per task, on the final
-  tree after the last step and before opening the PR (and before any
-  review packet), giving it the task
+- Self-review: on every change that is not docs-only (docs-only: only
+  Markdown files change), run the `reviewer` subagent
+  (`.claude/agents/reviewer.md`) once per task, on the final tree after
+  the last step and before opening the PR (and before any review
+  packet), giving it the task
   prompt and the base SHA; steps skip it. On a must-fix finding, fix it in the PR (finding routing above;
   re-run it only if a fix was non-trivial); stop and report it, fixing
   only after approval, when it falls under the escalation list. Record every finding's disposition
   (fixed / declined / deferred) in the PR body, or in the packet's
   `Self-review:` section when there is one (`docs/handoff.md`). Its over-engineering findings are advisory, never
   must-fix; a review packet lists each added guard and its threat under
-  `Added complexity:`. Docs-only changes may skip it. One review per
-  packet, not per edit, to keep usage down.
+  `Added complexity:`. One review per packet, not per edit, to keep
+  usage down.
 
 ## Reply rules
 
