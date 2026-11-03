@@ -70,8 +70,8 @@
 # packet from a pod Felix has not programmed, or forwarded to one) or
 # "End of tier <tier>. Drop if no policies passed packet"
 # (felix/rules/endpoints.go: a packet a programmed pod's policy denies),
-# read before the gate, on every poll while it runs (about every 0.5 s)
-# and after it. A rule is keyed by its chain and text without Felix's
+# read before the gate, on every poll while it runs (about every second,
+# like netstat.tsv) and after it. A rule is keyed by its chain and text without Felix's
 # "cali:<hash>" comment, since the hash changes whenever the rules before
 # it do (a new pod added to a dispatch chain), and Felix's rewrite then
 # starts the rule's counters at 0: a counter lower than the last read is
@@ -375,11 +375,15 @@ canary_refused_twice() {
 	[ "$r" = refused ] || { say "POST /canary $r after refused"; return 1; }
 }
 
-# drop_snapshot: drop_rules of the node's filter table.
+# drop_snapshot: drop_rules of the node's filter table. A read with no
+# such rule fails: the dispatch chains always carry one, and an empty read
+# would make drop_tally count every rule's whole counter again.
 drop_snapshot() {
-	local s
+	local s r
 	s=$(docker exec "$node" iptables-save -c -t filter) || return 1
-	drop_rules <<<"$s"
+	r=$(drop_rules <<<"$s")
+	[ -n "$r" ] || return 1
+	echo "$r"
 }
 
 # cni_size: the byte size of the node's CNI log.

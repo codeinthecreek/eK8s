@@ -222,7 +222,8 @@ ok "(6) start line: mem_limit_bytes=402653184 go_mem_limit=362387866"
 # --- (3) the canary address is the API server's ClusterIP and port, as
 # the kubelet expanded them into the args; the canary reads refused.
 # The CNI starts loadgen only once Felix has programmed its endpoint
-# (policy_setup_timeout_seconds; a timeout fails variant-smoke and CI), and
+# (policy_setup_timeout_seconds; a timeout fails the deploy CI's final
+# step), and
 # the first poll waits for the pod to be Ready, so loadgen's egress policy
 # refuses the canary from the first poll (a pod started without its rules
 # would meet the "Unknown interface" drop, which smoke.sh checks is

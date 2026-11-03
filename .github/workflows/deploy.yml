@@ -81,6 +81,8 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: '1.26.10'
+      # The diag's pure helpers (stop rule, verdict, drop counting); no cluster.
+      - run: deploy/diag/stage5-runs_test.sh
       - name: Install kind and kubectl (checksum-verified)
         run: |
           curl -fsSLo kind "https://github.com/kubernetes-sigs/kind/releases/download/${KIND_VERSION}/kind-linux-amd64"
