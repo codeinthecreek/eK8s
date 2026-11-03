@@ -23,7 +23,7 @@ loadgen-smoke.sh      loadgen smoke test (run after up.sh; deploys loadgen)
 watch.sh <run> [log]  read-only tmux panes for watching a run (pods, top, HPAs,
                       events, node docker stats, attempts.jsonl, the log)
 diag/                 diagnostics, workstation only, never in a run or CI
-                      (stage5-nopolicy.sh: the kindnet-stall experiment)
+                      (stage5-runs.sh: Stage 5 runs that validate D2, Calico)
 ```
 
 ## Cluster
@@ -397,45 +397,40 @@ the next scale-up reads the new values. The pod is Burstable (CPU request
 
 ## Diagnostics
 
-`diag/stage5-nopolicy.sh` asks whether the Stage 5 stall on an HPA pod add
-is kindnet's NetworkPolicy path (docs/decisions.md, 2026-11-02 and
-2026-11-03). It runs real `gate -stage5` bursts on generation 0, stress-ng
-on, alternating ON (the cluster as deployed) and OFF (no NetworkPolicy on
-the burst's path: ek8s-system/loadgen and the diag variant's policy are
-deleted, and loadgen's canary points at 192.0.2.1:443 so the gate's canary
-still reads refused). **OFF removes isolation while it runs**: it refuses to
-start in CI, without `EK8S_DIAG_NOPOLICY=yes-no-isolation`, while a variant
-namespace or an orchestrator, c0 or gate process exists, with local
-changes to the code generation 0 is built from, or on a commit that is not
-on origin/main or PR #70 (it fetches both first, and refuses if it cannot);
-before every gate start it requires stress-ng Running at origin/main's
-`deploy/stress` requests, limits and dose; it restores and re-checks
-the ON state after every OFF run and on exit, and prints
-`POLICY NOT RESTORED` (exit 1) if it cannot. Each run asserts its arm's
-state, and the experiment stops at the first failed assertion or gate
-fault. **SIGKILL or a host crash skips the restore, and nothing else would
-notice** (the orchestrator and the gate check neither the policy nor the
-canary address, and the stand-in canary always reads refused): after any
-unclean end, run `deploy/up.sh` and `deploy/loadgen-up.sh <r>` before any
-orchestrator, c0 or gate run, with the r the experiment used (meta.txt's
-`rate` line; the exit message prints it). Runs about 2 minutes each (inferred), so the full 15 + 15 takes
-about an hour.
+`diag/stage5-runs.sh` asks whether the Stage 5 stall on an HPA pod add,
+which PR #70's experiment put on kindnet's NetworkPolicy path, is gone now
+that Calico enforces the policies (D2; docs/decisions.md, 2026-11-03). It
+runs real `gate -stage5` bursts on generation 0, stress-ng on, against the
+cluster as deployed: it removes no policy and patches nothing in loadgen.
+It refuses to start while a variant namespace or an orchestrator, c0 or
+gate process exists, with local changes under `cmd/service`, `internal/`,
+`gate/`, `loadgen/`, `deploy/`, `go.mod` or `go.sum`, or on a commit that
+is not on origin/main or PR #71 (it fetches both first, and refuses if it
+cannot). Before every gate start it requires calico-node Ready, loadgen's
+policy and real canary in place, and stress-ng Running at origin/main's
+`deploy/stress` requests, limits and dose; the experiment stops at the
+first failed assertion or gate fault. Its stop rule is fixed in advance:
+at least 15 runs, more only while fewer than 10 had a mid-burst add, at
+most 25, and the first stall ends it. Runs about 2 minutes each
+(inferred), so 15 to 25 runs take 30 to 50 minutes.
 
 ```
-EK8S_DIAG_NOPOLICY=yes-no-isolation deploy/diag/stage5-nopolicy.sh             # 15 ON + 15 OFF, alternating
-EK8S_DIAG_NOPOLICY=yes-no-isolation deploy/diag/stage5-nopolicy.sh -runs 1      # one of each, a dry try
-EK8S_DIAG_NOPOLICY=yes-no-isolation deploy/diag/stage5-nopolicy.sh -arm off -runs 1   # one arm only
+deploy/diag/stage5-runs.sh          # the experiment
+deploy/diag/stage5-runs.sh -try     # one run, no verdict: a dry try
 ```
 
 `-rate` is loadgen's r (b = 4 x r), deployed by the script; it defaults to
 the `-rate` argument of the loadgen already deployed (r = 15.5 for the
-owner's 37 Stage 5 runs: docs/decisions.md, PR #65 C0 entry, r = 0.5 x C0),
+owner's Stage 5 runs: docs/decisions.md, PR #65 C0 entry, r = 0.5 x C0),
 and is required when none is;
-`-out` defaults to `~/workspace/scratch/ek8s-runs/diag-nopolicy-<UTC stamp>/`
+`-out` defaults to `~/workspace/scratch/ek8s-runs/diag-runs-<UTC stamp>/`
 (a relative `-out` is taken from the directory you run it from).
-The verdict is in `verdict.txt` (CONFIRMED, NOT-CONFIRMED or INCONCLUSIVE;
-an arm short of its criterion after its runs is INCONCLUSIVE, never
-extended) and one row per run in `summary.tsv`; each `run-NN-<arm>/` keeps
-the gate's output, the state assertions, records without pairs or evidence,
-kindnet's raw log lines and set snapshots, and loadgen's SYN and TCP
-retransmit counters. The script's header has the details.
+The verdict is in `verdict.txt`: STALLED on any stall, MET with no stall
+in at least 10 mid-burst-add runs, else INCONCLUSIVE. `summary.tsv` has
+one row per run; each `run-NN/` keeps the gate's output, the state
+assertions, records without pairs or evidence, loadgen's SYN and TCP
+retransmit counters, the packet counts of Felix's "Unknown interface" and
+end-of-tier drop rules before the gate, at the burst's start and after
+it, calico-node's raw log lines for the run, and any CNI "Unblocking pod
+creation" line. The script's header has the details.
+PR #70's `stage5-nopolicy.sh`, which this replaces, is in git history.
