@@ -130,8 +130,11 @@ jobs:
           k get networkpolicies,limitranges,hpa -A || true
           k -n ek8s-v999999 get endpointslices -o yaml || true
           k -n ek8s-system get services,endpointslices -o wide || true
-          # kindnet enforces the NetworkPolicies: its log around a failure.
-          k -n kube-system logs ds/kindnet --since=10m || true
+          # Calico enforces the NetworkPolicies: calico-node's log around a
+          # failure, and the CNI plugin's own log on the node (pod setup,
+          # including any "Unblocking pod creation" policy-wait timeout).
+          k -n kube-system logs ds/calico-node -c calico-node --since=10m || true
+          docker exec ek8s-control-plane tail -n 200 /var/log/calico/cni/cni.log || true
           k get events -A --sort-by=.lastTimestamp | tail -n 50 || true
       - name: Delete cluster
         if: always()
