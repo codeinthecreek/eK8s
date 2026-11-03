@@ -11,7 +11,9 @@ name: deploy smoke
 # gen 0 deployed, a real burst, host verification), then
 # deploy/orchestrator-smoke.sh (the end-to-end dry run: the orchestrator for
 # 2 generations with a fake claude under bwrap; the records and the
-# cluster checked). It proves the mechanics (pinned
+# cluster checked), then fails on any "Unblocking pod creation" line in
+# Calico's CNI log (a pod started before its policy was programmed, by any
+# smoke). It proves the mechanics (pinned
 # images, kustomizations, metrics-server, stress-ng on and off, the
 # variant bundle, ek8s-system), not the full-size numbers: those need the workstation
 # (docs/STATUS.md, Parked). workflow_dispatch only works once this file is
@@ -102,6 +104,25 @@ jobs:
       - name: End-to-end dry run
         timeout-minutes: 20
         run: deploy/orchestrator-smoke.sh
+      # Calico's CNI plugin logs "Unblocking pod creation" when it started a
+      # pod before Felix reported the pod's policy programmed
+      # (policy_setup_timeout_seconds, deploy/calico). variant-smoke.sh
+      # checks the pods up to its end; this step covers every smoke's pods.
+      # The log rotates only at 100 MB, so one file must hold it all.
+      - name: No pod started before its policy
+        run: |
+          files=$(docker exec ek8s-control-plane ls /var/log/calico/cni)
+          if [ "$files" != cni.log ]; then
+            echo "::error::/var/log/calico/cni holds '$files', want only cni.log (rotated?)"
+            exit 1
+          fi
+          log=$(docker exec ek8s-control-plane cat /var/log/calico/cni/cni.log)
+          [ -n "$log" ] || { echo "::error::the node's CNI log is empty"; exit 1; }
+          if grep -F 'Unblocking pod creation' <<<"$log"; then
+            echo "::error::the CNI started a pod before its policy was programmed (lines above)"
+            exit 1
+          fi
+          echo "no 'Unblocking pod creation' line in $(grep -c . <<<"$log") CNI log lines"
       - name: Dump cluster state
         if: failure()
         run: |
