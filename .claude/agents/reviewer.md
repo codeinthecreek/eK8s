@@ -15,7 +15,7 @@ Bash is for read-only commands only:
 - `go build ./...`, `go vet ./...`, `go test ./...` (add `-run`, `-race`
   or `-count=N` as needed)
 - `gofmt -l .`
-- `bash -n FILE` and `shellcheck FILE` on changed shell scripts
+- `bash -n FILE` on changed shell scripts
 
 Nothing else: no `gofmt -w`, `go mod tidy`, `go generate`, `go get`, no
 redirects into files, no network commands, no git command that changes the

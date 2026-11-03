@@ -32,7 +32,9 @@ patches:
 # plugin then holds a new pod's start for up to 10 s until Felix reports its
 # endpoint programmed (cni-plugin/pkg/k8s/k8s.go); past that it logs
 # "Unblocking pod creation" to /var/log/calico/cni/cni.log and starts the pod
-# anyway, still behind Felix's "Unknown interface" drop (fail-closed). The
+# anyway, still behind Felix's "Unknown interface" drop for what it sends
+# and what is forwarded to it (fail-closed; the node's own traffic to a pod
+# is never policed). The
 # value is a JSON string, so the patch replaces it whole.
 - target:
     kind: ConfigMap
@@ -75,7 +77,8 @@ patches:
             }
           ]
         }
-# calico-node: env merged by name, resources replaced.
+# calico-node: env merged by name; resources merged too (the manifest sets
+# only requests.cpu, so the patch's 100m is the whole request).
 # - CALICO_IPV4POOL_CIDR: kind's default podSubnet, written out in both kind
 #   configs (the manifest's default, 192.168.0.0/16, can collide with a LAN).
 #   Read only when the default pool is first created.

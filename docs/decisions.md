@@ -879,7 +879,7 @@ max. Earlier entries are not backfilled.
 - Origin: Code
 
 ## 2026-11-03 · PR #71 · The policy canary and its post-boot poll stay; a connected canary fails loadgen-smoke at any pod age
-- Decision: the per-half canary stays, unchanged in Go, and so does the poll after a new boot_id: under Calico, connected means its rules are absent altogether. loadgen-smoke.sh (3) fails on any connected from pod age 0, the in-CI proof that Calico is closed from pod start (it was allowed 60 s for kindnet's lag). Trimming the poll is in docs/AFTER-FIRST-RUN.md.
+- Decision: the per-half canary stays, unchanged in Go, and so does the poll after a new boot_id: under Calico, connected means its rules are absent altogether. loadgen-smoke.sh (3) fails on any connected, from its first poll once loadgen is Ready (it was allowed 60 s for kindnet's lag): the policy is enforced as soon as loadgen can be reached. smoke.sh checks Felix's "Unknown interface" DROP rules are installed, the fail-closed path for a pod started without its rules. Trimming the poll is in docs/AFTER-FIRST-RUN.md.
 - Rejected: dropping the canary (Calico's rules can still be missing: the v3.33.0 release note 13425 fixed that failure in nftables mode); trimming the poll now (harmless, and not on the first-run path).
 - Reason: the canary is the only per-half proof that enforcement is on; the stricter smoke catches a fail-open start.
 - Reverse: restore loadgen-smoke.sh (3)'s 60 s allowance.
@@ -901,8 +901,8 @@ max. Earlier entries are not backfilled.
 - Origin: Code
 
 ## 2026-11-03 · PR #71 · The reviewer subagent runs on every change that is not docs-only (Markdown only)
-- Decision: CLAUDE.md's Self-review rule and .claude/agents/reviewer.md now trigger on every change that is not docs-only, docs-only meaning only Markdown files change; "Docs-only changes may skip it." is deleted. Shell, YAML and workflow changes, such as the deploy/ scripts that set up or check isolation, now trigger it.
+- Decision: CLAUDE.md's Self-review rule and .claude/agents/reviewer.md now trigger on every change that is not docs-only, docs-only meaning only Markdown files change; "Docs-only changes may skip it." is deleted. Shell, YAML and workflow changes, such as the deploy/ scripts that set up or check isolation, now trigger it; reviewer.md lets it run `bash -n` on changed scripts (not shellcheck: not a repo tool).
 - Rejected: "any change touching Go code" (left shell, YAML and workflow changes undefined, and this PR is mostly those); an "isolation-relevant" test (a judgement call).
 - Reason: D2 design packet item 6, owner Q7.
-- Reverse: restore the two lines in CLAUDE.md and reviewer.md's description.
+- Reverse: restore the two lines in CLAUDE.md, reviewer.md's description, and drop its `bash -n` line.
 - Origin: owner (Q7)

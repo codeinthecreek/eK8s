@@ -1140,10 +1140,11 @@ or the API server.
 
 **Policy enforcement and the canary.** Calico fails closed for a pod it
 has not programmed: until Felix has written the pod's endpoint chains,
-every packet to or from it is dropped (its "Unknown interface" rule), and
-the CNI holds the pod's start for up to 10 s until Felix reports it
-programmed (a timeout is logged as "Unblocking pod creation", which fails
-the deploy smoke). Every NetworkPolicy is open only when Calico's rules
+every packet the pod sends, and every packet forwarded to it, is dropped
+(its "Unknown interface" rule; only the node's own traffic reaches it,
+unpoliced, as above), and the CNI holds the pod's start for up to 10 s
+until Felix reports it programmed (a timeout is logged as "Unblocking pod
+creation", which fails the deploy smoke). Every NetworkPolicy is open only when Calico's rules
 are absent altogether: Felix has not programmed since the node started,
 or its chains are gone. That includes variant egress denial, a
 containment measure only: fitness integrity does not rely on it, since
@@ -1164,8 +1165,8 @@ allowed during a run. The orchestrator also checks the calico-node
 DaemonSet is Ready, as a cheap first look; Ready alone does not show
 Felix's rules are in place. A canary that connects is not expected at
 any pod age: a loadgen Felix has not programmed yet reads refused, like
-a programmed one, and the deploy smoke fails on any connected from pod
-age 0. After a
+a programmed one, and the deploy smoke fails on any connected, from the
+first poll once loadgen is Ready. After a
 new boot_id the orchestrator still polls the canary until it reads
 refused, bounded, before starting a half (kept from kindnet, which
 enforced a new pod's policy only after a short lag).

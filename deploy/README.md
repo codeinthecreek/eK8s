@@ -67,7 +67,8 @@ CRD bundle is too large for a client-side apply). The patches:
 traffic to the node itself passes only after the pod's own egress policy
 did, and coredns, metrics-server and calico-kube-controllers need the
 node. Calico fails closed: until Felix has programmed a pod, every packet
-to or from it is dropped (the "Unknown interface" rule). Traffic from the
+it sends, and every packet forwarded to it, is dropped (the "Unknown
+interface" rule; smoke.sh checks the rule is in place). Traffic from the
 node to a pod on it is never policed (Felix's rules, static.go), which is
 how the API server's proxy reaches loadgen (ek8s-system below).
 
@@ -241,7 +242,7 @@ refusal paired with a target shown reachable); with the variant at 2 pods
 (HPA `minReplicas` raised in the smoke only), a deleted pod's EndpointSlice entry is `ready=false`,
 `terminating=true` within 2s while the other stays ready; and deleting the
 namespace removes everything. Last, it fails on any `Unblocking pod
-creation` line in the node's CNI log. It needs `ek8s-system` from up.sh and
+creation` line its run added to the node's CNI log. It needs `ek8s-system` from up.sh and
 removes what it created on success; on failure it leaves the variant
 namespace and the smoke pods for inspection. CI runs it after smoke.sh.
 
@@ -461,8 +462,8 @@ gate, delete `ek8s-v999997` and scale stress-ng to 0 before any
 orchestrator, c0 or gate run.
 
 ```
-deploy/diag/stage5-runs.sh          # the experiment
-deploy/diag/stage5-runs.sh -try     # one run, no verdict: a dry try
+deploy/diag/stage5-runs.sh -rate 15.5        # the experiment
+deploy/diag/stage5-runs.sh -rate 15.5 -try   # one run, no verdict: a dry try
 ```
 
 `-rate` is loadgen's r (b = 4 x r), deployed by the script; it defaults to
