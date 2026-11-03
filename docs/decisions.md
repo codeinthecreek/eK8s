@@ -842,3 +842,10 @@ max. Earlier entries are not backfilled.
 - Reason: owner dry run of EK-D1-PIDFIX-20261103; the template path is exact, needs no new tool, and fails on a missing key.
 - Reverse: revert the commit.
 - Origin: Code
+
+## 2026-11-03 · PR #70 · No-policy experiment: the Stage 5 stall is kindnet's policy path; Q2 yes (switch CNI)
+- Decision: recorded. Owner's run diag-nopolicy-20261103T094410Z (workstation; gen 0; r = 15.5, b = 62; stress-ng at main's dose; 15 ON + 15 OFF alternating). ON: 7 stalls in 10 mid-burst-add runs (longest over_hang_timeout run 200-222), 0 in 5 runs without an add. OFF: 0 stalls in 9 mid-burst-add runs, 0 in 6 without. kindnet's "Could not receive message" lines (1-2 per run) appear in all 7 ON stall runs and in 1 of 8 ON passes (run 29, a mid-burst add); none in OFF. TCPSynRetrans delta 0 in every stall run (not SYN drops with client retransmit); RetransSegs > 0 in several ON runs, almost never in OFF (run 6: 1). Exact mechanism unknown. The script's verdict is INCONCLUSIVE only because OFF had 9 mid-burst adds, not the criterion's 10; the owner accepts the result as confirmed: the 10 was set for power at p ~ 0.45, and at ON's observed 7/10, P(0 of 9) ~ 2e-5; Fisher exact on add runs (7/10 vs 0/9), one-sided p ~ 0.002. Q2 (2026-11-02 design packet): yes, switch to Calico (D2), with the F7 (a)-(e) checks as preconditions; Cilium only if Calico fails them.
+- Rejected: topping up OFF runs to reach 10 adds (the margin is not in doubt); keeping kindnet with a detect-and-retry net only (the defect stays in every HPA scale-up).
+- Reason: a pod add stalls new connections only with kindnet's policy path in place.
+- Reverse: re-run the experiment; re-ask the owner.
+- Origin: owner
