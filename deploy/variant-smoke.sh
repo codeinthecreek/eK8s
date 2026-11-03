@@ -10,21 +10,33 @@
 #       Service by DNS (its egress policy admits DNS to kube-dns and TCP
 #       8080 to ek8s.io/role=variant namespaces);
 #   (c) the API server's service proxy reaches the stand-in's control
-#       port (kindnet's root-socket bypass; deploy/ek8s-system/
-#       networkpolicy.yaml);
+#       port: Calico never polices host-to-pod traffic (felix/rules/
+#       static.go:762 at v3.33.0), so the API server, in the node's
+#       network namespace, passes loadgen's no-ingress policy
+#       (deploy/ek8s-system/networkpolicy.yaml);
 #   (d) a pod in the variant namespace and a pod in ek8s-system without
 #       app=loadgen are refused on the control port;
 #   (e) an ek8s-system pod without app=loadgen is refused by the variant;
 #   (f) the stand-in has no other egress: no external address (DNS to an
-#       outside resolver included), no API server;
+#       outside resolver included), no API server, no kubelet on the node
+#       (Calico's DefaultEndpointToHostAction ACCEPT applies only after a
+#       pod's own egress policy);
 #   (g) a pod in the variant namespace has no egress: no external address,
-#       no API server (each target in (f) and (g) first shown reachable
-#       from the ek8s-system pod without app=loadgen, which no policy
-#       selects);
+#       no API server, no kubelet (each target in (f) and (g) first shown
+#       reachable from the ek8s-system pod without app=loadgen, which no
+#       policy selects);
+#   (j) ek8s-stress's deny-all, on a probe pod there that it selects as it
+#       selects stress-ng: no egress (every target of (g), the variant's
+#       Service and kube-dns, each first shown reachable from a pod
+#       allowed it) and no ingress from a pod (the node itself reaches
+#       it: host-to-pod is never policed, as in (c));
 #   (h) with the variant at 2 ready pods, deleting one marks its
 #       EndpointSlice entry ready=false, terminating=true within 2s while
 #       the other stays ready;
-#   (i) deleting the namespace removes everything in it.
+#   (i) deleting the namespace removes everything in it;
+# and, last, that the Calico CNI plugin never gave up waiting for a new
+# pod's policy (no "Unblocking pod creation" line in its log on the node,
+# from any pod since the cluster started; deploy/calico).
 # Exits non-zero on the first failed check. Run from anywhere; needs go,
 # docker, kind and kubectl. On failure it leaves the namespace and the
 # smoke pods as they are for inspection; on success it removes them.
@@ -37,6 +49,8 @@ ctx="kind-$cluster"
 id=999999
 ns="ek8s-v$id"
 sys=ek8s-system
+# deploy/stress
+stress_ns=ek8s-stress
 # deploy/ek8s-system/service.yaml
 ctl_port=9090
 # The curl project's official image, 8.22.0 (published 2026-09-02),
@@ -58,12 +72,15 @@ for tool in go docker kind kubectl; do
 done
 k get nodes >/dev/null || die "cluster unreachable (context $ctx); run deploy/up.sh"
 k get namespace "$sys" >/dev/null 2>&1 || die "namespace $sys missing; run deploy/up.sh"
+k get namespace "$stress_ns" >/dev/null 2>&1 || die "namespace $stress_ns missing; run deploy/up.sh"
 # The stand-in carries app=loadgen: beside a real loadgen, the Service
 # would select both.
 [ -z "$(k -n "$sys" get pods -l app=loadgen -o name)" ] ||
 	die "pods labelled app=loadgen exist in $sys (a loadgen, or a failed earlier run?); delete them first"
 [ -z "$(k -n "$sys" get pods smoke-loadgen smoke-other --ignore-not-found -o name)" ] ||
 	die "smoke pods exist in $sys (a failed earlier run?); delete them first"
+[ -z "$(k -n "$stress_ns" get pods smoke-stress --ignore-not-found -o name)" ] ||
+	die "pod $stress_ns/smoke-stress exists (a failed earlier run?); delete it first"
 ! k get namespace "$ns" >/dev/null 2>&1 ||
 	die "namespace $ns exists (a failed earlier run?); delete it first"
 
@@ -126,14 +143,15 @@ EOF
 curl_pod() {
 	{ pod_spec "$2" "$1" "$3"; echo '    command: [sleep, "3600"]'; } | k apply -f -
 }
-# The stand-in for loadgen: busybox nc on the control port, forking a
+# nc_pod NS NAME LABELS: a pod running busybox nc on 9090, forking a
 # shell per connection that reads the request head and answers 200
 # "ek8s-ctl". Reading the head first matters: closing with request bytes
 # unread would reset the connection.
-{
-	pod_spec smoke-loadgen "$sys" "app: loadgen"
-	# 9090 is $ctl_port; the heredoc is quoted for the shell script.
-	cat <<'EOF'
+nc_pod() {
+	{
+		pod_spec "$2" "$1" "$3"
+		# 9090 is $ctl_port; the heredoc is quoted for the shell script.
+		cat <<'EOF'
     ports:
     - name: control
       containerPort: 9090
@@ -150,12 +168,18 @@ curl_pod() {
       while IFS= read -r l; do case $l in ""|"$(printf '\r')") break;; esac; done
       printf 'HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 9\r\nConnection: close\r\n\r\nek8s-ctl\n'
 EOF
-} | k apply -f -
+	} | k apply -f -
+}
+# The stand-in for loadgen, on the control port.
+nc_pod "$sys" smoke-loadgen "app: loadgen"
 # Same image and pod securityContext, idling, without app=loadgen: no
 # policy selects it.
 curl_pod "$sys" smoke-other "app: smoke-other"
 curl_pod "$ns" smoke-egress "app: egress-probe"
-for p in "$sys/smoke-loadgen" "$sys/smoke-other" "$ns/smoke-egress"; do
+# For (j): ek8s-stress has no LimitRange, so no resources; deny-all
+# selects every pod there.
+nc_pod "$stress_ns" smoke-stress "app: smoke-stress"
+for p in "$sys/smoke-loadgen" "$sys/smoke-other" "$ns/smoke-egress" "$stress_ns/smoke-stress"; do
 	k -n "${p%/*}" wait --for=condition=Ready "pod/${p#*/}" --timeout=120s >/dev/null ||
 		die "curl pod $p not Ready"
 done
@@ -198,7 +222,10 @@ out=$(kexec "$sys" smoke-loadgen -sS --max-time 30 -H 'Content-Type: application
 grep -qF '"hash":"$argon2id$v=19$m=19456,t=2,p=1$' <<<"$out" || die "(b) /hash body: $out"
 ok "(b) app=loadgen in $sys: $svc by DNS, /healthz 200 with the label, /hash 200"
 
-# --- (c) the API server's service proxy reaches the control port. The
+# --- (c) the API server's service proxy reaches the control port. No
+# ingress rule admits it: the API server runs in the node's network
+# namespace, and Calico does not police host-to-pod traffic (felix/rules/
+# static.go:762-766 at v3.33.0; its OUTPUT chain returns for cali+). The
 # EndpointSlice follows the pod's readiness asynchronously: allow it 30s.
 proxy=/api/v1/namespaces/$sys/services/loadgen:control/proxy/
 via_proxy() { [ "$(k get --raw "$proxy" 2>/dev/null)" = ek8s-ctl ]; }
@@ -246,7 +273,12 @@ external=http://1.1.1.1/
 api_ip=$(k -n default get service kubernetes -o jsonpath='{.spec.clusterIP}')
 api_ep=$(k -n default get endpointslices -l kubernetes.io/service-name=kubernetes \
 	-o jsonpath='{.items[0].endpoints[0].addresses[0]}:{.items[0].ports[0].port}')
-targets=("$external" "https://$api_ip:443/version" "https://$api_ep/version")
+# The kubelet, on the node's InternalIP (metrics-server's scrape target).
+# smoke-other's control gets its 401, which curl counts as success.
+node=$(k get nodes -o jsonpath='{.items[0].metadata.name}')
+node_ip=$(k get node "$node" -o jsonpath='{.status.addresses[?(@.type=="InternalIP")].address}')
+[ -n "$node_ip" ] || die "node $node has no InternalIP"
+targets=("$external" "https://$api_ip:443/version" "https://$api_ep/version" "https://$node_ip:10250/healthz")
 for target in "${targets[@]}"; do
 	kexec "$sys" smoke-other -sS -k --max-time 10 -o /dev/null "$target" ||
 		die "control: $target unreachable from $sys/smoke-other, so a refusal would prove nothing"
@@ -271,6 +303,47 @@ for target in "${targets[@]}"; do
 done
 # Frees its 250m (LimitRange) for the second hasher pod in (h).
 k -n "$ns" delete pod smoke-egress --wait=true >/dev/null
+
+# --- (j) ek8s-stress's deny-all (deploy/stress/networkpolicy.yaml). No
+# probe of stress-ng itself (its image has no shell or curl): smoke-stress
+# stands in, selected by the same policy object, which comes first.
+pols=$(k -n "$stress_ns" get networkpolicies -o jsonpath='{.items[*].metadata.name}')
+[ "$pols" = deny-all ] || die "(j) $stress_ns's NetworkPolicies are '$pols', want only deny-all"
+spec=$(k -n "$stress_ns" get networkpolicy deny-all -o jsonpath='{.spec.podSelector}|{.spec.policyTypes}|{.spec.ingress}|{.spec.egress}')
+[ "$spec" = '{}|["Ingress","Egress"]||' ] ||
+	die "(j) deny-all's podSelector|policyTypes|ingress|egress is '$spec', want every pod, both types, no rule"
+# Egress: (g)'s targets, the control done above.
+for target in "${targets[@]}"; do
+	refused "$stress_ns" smoke-stress "$target" -k || die "(j) egress from $stress_ns reached $target"
+	ok "(j) $stress_ns -> $target denied (reachable from $sys/smoke-other)"
+done
+# The variant's Service by ClusterIP: the stand-in reaches it (smoke-other
+# is refused by the variant, (e)).
+vip=$(k -n "$ns" get service hasher -o jsonpath='{.spec.clusterIP}')
+kexec "$sys" smoke-loadgen -sS --max-time 10 -o /dev/null "http://$vip:8080/healthz" ||
+	die "control: http://$vip:8080/healthz unreachable from $sys/smoke-loadgen, so a refusal would prove nothing"
+refused "$stress_ns" smoke-stress "http://$vip:8080/healthz" || die "(j) egress from $stress_ns reached the variant at $vip:8080"
+ok "(j) $stress_ns -> http://$vip:8080/healthz denied (reachable from $sys/smoke-loadgen)"
+# DNS: kube-dns by its ClusterIP, and the outside resolver ((f) did its
+# control).
+dns_ip=$(k -n kube-system get service kube-dns -o jsonpath='{.spec.clusterIP}')
+dns=(timeout 10 nslookup kubernetes.default.svc.cluster.local "$dns_ip")
+kx "$sys" smoke-other "${dns[@]}" >/dev/null 2>&1 ||
+	die "control: $sys/smoke-other cannot resolve via kube-dns at $dns_ip, so a refusal would prove nothing"
+! kx "$stress_ns" smoke-stress "${dns[@]}" >/dev/null 2>&1 || die "(j) $stress_ns resolved via kube-dns at $dns_ip"
+! kx "$stress_ns" smoke-stress "${lookup[@]}" >/dev/null 2>&1 || die "(j) $stress_ns resolved via 1.1.1.1"
+ok "(j) $stress_ns -> DNS at kube-dns $dns_ip and at 1.1.1.1 denied (both work from $sys/smoke-other)"
+# Ingress: the node answers first (host-to-pod is not policed, as in (c);
+# bash's /dev/tcp, from the node's network namespace), then smoke-other,
+# which no egress policy limits, is refused.
+stress_ip=$(k -n "$stress_ns" get pod smoke-stress -o jsonpath='{.status.podIP}')
+[ -n "$stress_ip" ] || die "(j) $stress_ns/smoke-stress has no pod IP"
+reply=$(docker exec "$node" timeout 5 bash -c \
+	'exec 3<>"/dev/tcp/$1/9090" && printf "GET / HTTP/1.0\r\n\r\n" >&3 && cat <&3' _ "$stress_ip") ||
+	die "control: node $node cannot reach $stress_ip:9090, so a refusal would prove nothing"
+[[ $reply == *ek8s-ctl* ]] || die "control: node $node got no ek8s-ctl from $stress_ip:9090: $reply"
+refused "$sys" smoke-other "http://$stress_ip:9090/" || die "(j) $sys/smoke-other reached $stress_ns/smoke-stress"
+ok "(j) $sys/smoke-other -> $stress_ns/smoke-stress:9090 refused (the node itself is answered)"
 
 # --- (h) a deleted pod leaves the Service's endpoints at once, not on the
 # readiness probe (3 x 2s, past cmd/service's 5s drain; DESIGN.md sec 11).
@@ -313,5 +386,17 @@ left=$(k get all,networkpolicies,limitranges,horizontalpodautoscalers -A --no-he
 [ -z "$left" ] || die "(i) left in $ns: $left"
 ok "(i) namespace $ns and its objects are gone"
 
+# --- The CNI plugin's policy wait (policy_setup_timeout_seconds,
+# deploy/calico) never ran out, for any pod since the cluster started: a
+# timeout logs this line and starts the pod before Felix has programmed
+# it. The log must show this run's pods, or it is the wrong file.
+cni_log=/var/log/calico/cni/cni.log
+cni=$(docker exec "$node" cat "$cni_log") || die "cannot read $cni_log on node $node"
+grep -qF "$ns" <<<"$cni" || die "$cni_log on node $node has no line for namespace $ns"
+unblocked=$(grep -F 'Unblocking pod creation' <<<"$cni" || true)
+[ -z "$unblocked" ] || die "the CNI plugin started pods before their policy was programmed: $unblocked"
+ok "$cni_log: no \"Unblocking pod creation\" line"
+
 k -n "$sys" delete pod smoke-loadgen smoke-other --wait=true >/dev/null
+k -n "$stress_ns" delete pod smoke-stress --wait=true >/dev/null
 echo "variant-smoke.sh: all checks passed"
