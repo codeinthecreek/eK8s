@@ -22,6 +22,8 @@ variant-smoke.sh      variant bundle smoke test (run after up.sh)
 loadgen-smoke.sh      loadgen smoke test (run after up.sh; deploys loadgen)
 watch.sh <run> [log]  read-only tmux panes for watching a run (pods, top, HPAs,
                       events, node docker stats, attempts.jsonl, the log)
+diag/                 diagnostics, workstation only, never in a run or CI
+                      (stage5-nopolicy.sh: the kindnet-stall experiment)
 ```
 
 ## Cluster
@@ -392,3 +394,48 @@ the next scale-up reads the new values. The pod is Burstable (CPU request
 2750m, limit 3: the dose stays 3 cores, as in run 2); memory request = limit =
 2Gi, so keep `VM_BYTES` under it. All values are starting guesses
 (DESIGN.md sec 15).
+
+## Diagnostics
+
+`diag/stage5-nopolicy.sh` asks whether the Stage 5 stall on an HPA pod add
+is kindnet's NetworkPolicy path (docs/decisions.md, 2026-11-02 and
+2026-11-03). It runs real `gate -stage5` bursts on generation 0, stress-ng
+on, alternating ON (the cluster as deployed) and OFF (no NetworkPolicy on
+the burst's path: ek8s-system/loadgen and the diag variant's policy are
+deleted, and loadgen's canary points at 192.0.2.1:443 so the gate's canary
+still reads refused). **OFF removes isolation while it runs**: it refuses to
+start in CI, without `EK8S_DIAG_NOPOLICY=yes-no-isolation`, while a variant
+namespace or an orchestrator, c0 or gate process exists, with local
+changes to the code generation 0 is built from, or on a commit that is not
+on origin/main or PR #70 (it fetches both first, and refuses if it cannot);
+before every gate start it requires stress-ng Running at origin/main's
+`deploy/stress` requests, limits and dose; it restores and re-checks
+the ON state after every OFF run and on exit, and prints
+`POLICY NOT RESTORED` (exit 1) if it cannot. Each run asserts its arm's
+state, and the experiment stops at the first failed assertion or gate
+fault. **SIGKILL or a host crash skips the restore, and nothing else would
+notice** (the orchestrator and the gate check neither the policy nor the
+canary address, and the stand-in canary always reads refused): after any
+unclean end, run `deploy/up.sh` and `deploy/loadgen-up.sh <r>` before any
+orchestrator, c0 or gate run, with the r the experiment used (meta.txt's
+`rate` line; the exit message prints it). Runs about 2 minutes each (inferred), so the full 15 + 15 takes
+about an hour.
+
+```
+EK8S_DIAG_NOPOLICY=yes-no-isolation deploy/diag/stage5-nopolicy.sh             # 15 ON + 15 OFF, alternating
+EK8S_DIAG_NOPOLICY=yes-no-isolation deploy/diag/stage5-nopolicy.sh -runs 1      # one of each, a dry try
+EK8S_DIAG_NOPOLICY=yes-no-isolation deploy/diag/stage5-nopolicy.sh -arm off -runs 1   # one arm only
+```
+
+`-rate` is loadgen's r (b = 4 x r), deployed by the script; it defaults to
+the `-rate` argument of the loadgen already deployed (r = 15.5 for the
+owner's 37 Stage 5 runs: docs/decisions.md, PR #65 C0 entry, r = 0.5 x C0),
+and is required when none is;
+`-out` defaults to `~/workspace/scratch/ek8s-runs/diag-nopolicy-<UTC stamp>/`
+(a relative `-out` is taken from the directory you run it from).
+The verdict is in `verdict.txt` (CONFIRMED, NOT-CONFIRMED or INCONCLUSIVE;
+an arm short of its criterion after its runs is INCONCLUSIVE, never
+extended) and one row per run in `summary.tsv`; each `run-NN-<arm>/` keeps
+the gate's output, the state assertions, records without pairs or evidence,
+kindnet's raw log lines and set snapshots, and loadgen's SYN and TCP
+retransmit counters. The script's header has the details.

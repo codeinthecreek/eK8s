@@ -773,29 +773,79 @@ max. Earlier entries are not backfilled.
 - Origin: owner
 
 
-## 2026-10-31 · PR A (r3a-static-cpu) · Run 2 recorded: STOP, load far below capacity
+## 2026-10-31 · PR #69 (r3a-static-cpu) · Run 2 recorded: STOP, load far below capacity (amended by the 2026-11-02 Stage 5 stall entry)
 - Decision: run 2 (r = 15.5, b = 62, -generations 2) is a STOP. First attempt: gen 0 failed its own Stage 5 gate (220 of 1860 over_hang_timeout, from index 1428), 0 turns; by hand gen 0 then passed Stage 5 at full and near-zero stress dose, and run2b passed Stage 5 3 of 3: read as a rare flake at b = 2 x C0 with zero tolerance.
 - run2b: exit 0, 2 generations, 13 turns, 3 windows, 6 halves, 0 excluded. Gen 0 stress half success_rate 1 (no sheds, no failures), p95 40/43/53 ms as live grew 1/2/3, score 0.9930/0.9914/0.9892; gens 1-2 matched gen 0 within noise; window-to-window drift (~0.004) >> spread between variants in one window (~0.0002).
 - Cause: load far below capacity (~0.5 core per variant, idle cores beside the 3-CPU stress dose).
 - Origin: owner
 
-## 2026-11-01 · PR A (r3a-static-cpu) · Harsher environment via load, in two PRs
+## 2026-11-01 · PR #69 (r3a-static-cpu) · Harsher environment via load, in two PRs
 - Decision: PR A (this one): static CPU manager, loadgen exclusive core. PR B: r = C0 = 31, maxRate 31, b decoupled from r (b decided after PR A from about 10 Stage 5 runs of gen 0 at b = 62 on the rebuilt cluster). Then run 3, -generations 2: Go if gen 0 sheds or fails under stress and variants spread more than window drift.
 - Rejected: one PR changing everything (cannot attribute a result to one change).
 - Reason: owner decision after run 2.
 - Reverse: drop cpuManagerPolicy and restore the PR #29 sizing (see the "Static CPU manager, loadgen 1 CPU / 384Mi" entry).
 - Origin: owner
 
-## 2026-11-01 · PR A (r3a-static-cpu) · Static CPU manager, loadgen 1 CPU / 384Mi, stress-ng 2750m request
+## 2026-11-01 · PR #69 (r3a-static-cpu) · Static CPU manager, loadgen 1 CPU / 384Mi, stress-ng 2750m request
 - Decision: cluster.yaml `cpuManagerPolicy: static` (CI keeps none); loadgen requests = limits = cpu 1, memory 384Mi (GOMEMLIMIT 362387866); stress-ng CPU request 2750m, limit "3", memory unchanged. CI size: `EK8S_LOADGEN_CPU_REQUEST=100m`, set once in deploy.yml, read by loadgen-up.sh and passed to the renderer as `-cpu-request` (limit stays 1); stage5-smoke.sh's own patch is gone. CI: Burstable 100m/1, cpuManagerPolicy none; workstation: Guaranteed 1/1, exclusive core (static policy).
 - Rejected: keeping 256Mi (at r = 31 the PR #45/#47 estimates reach the ~230 MiB GOMEMLIMIT, and GC pressure shows as send lag and excluded halves, confounding run 3's Go test); stress-ng limit 2750m (CFS throttling pulses the neighbour every 100 ms and lowers the dose, changing two things versus run 2); the static policy in CI (does not fit a 2-CPU runner); a post-deploy kubectl patch for CI size (a second Recreate rollout, two mechanisms).
 - Reason: the Guaranteed integer CPU takes loadgen out of the shared pool so the neighbour cannot starve the sender; stress-ng stays in the shared pool (non-integer request) and the node budget is 6800m of 7000m.
 - Reverse: remove cpuManagerPolicy and restore 750m / 256Mi and the stress-ng 3 CPU request; reverses the PR #29 sizing entry (docs/decisions-archive.md).
 - Origin: Code
 
-## 2026-11-01 · PR A (r3a-static-cpu) · Smoke check (7) and the CPU request bound
+## 2026-11-01 · PR #69 (r3a-static-cpu) · Smoke check (7) and the CPU request bound
 - Decision: loadgen-smoke.sh check (7) reads the kubelet's cpu_manager_state (docker exec on the node) and, under static, requires one exclusive CPU outside defaultCpuSet and loadgen's Cpus_allowed_list equal to it (ephemeral container, --target=loadgen, process found by comm); under none it prints a skip. The renderer accepts a CPU request of "1" or 1m-1000m only.
 - Rejected: jq for the state file (a new tool for this script; sed/grep/awk suffice); assuming pid 1; an unbounded request (fails at apply, far from the cause).
 - Reason: nothing else proves the static policy took effect.
 - Reverse: delete check (7); restore cpuRequestRE in deploy/loadgen/loadgen.go.
 - Origin: Code
+
+## 2026-11-02 · PR #70 · Stage 5 stalls on an HPA pod add are a harness defect (amends the 2026-10-31 run 2 entry's "rare flake")
+- Decision: recorded. At b = 62, stress on, 10 of 37 gen-0 Stage 5 runs failed on one contiguous ~213-225 over_hang_timeout run (~5 s stall of new connections), only when the HPA's second pod appeared mid-burst; kindnet logged "Could not receive message ... netlink receive: no such file or directory" (controller.go:305) in 5/5 failing runs, 0/7 passing. Run 2's first-attempt Stage 5 failure (220 of 1860 from index 1428) is this defect, not a flake.
+- Cause candidate: kindnet's vendored kube-network-policies (v1.0.1-0.20260528073847-f67f0fb35e2b, kind v0.33.0) deletes and recreates its nftables table on every sync, and deleting a base chain drops every packet waiting in an nfqueue. Changed upstream in v1.1.2 (rules replaced in place, table kept); not yet confirmed as the cause; no kindnetd image carries v1.1.2 (newest kindest/kindnetd tag v20260820-69b56db7, ours).
+- Rejected: lowering b or the gate's tolerance (hides the defect); changing the environment around it (design packet option 3).
+- Reason: zero-tolerance Stage 5 must fail only for the candidate, and the same stall can hit live windows whenever an HPA scales.
+- Reverse: n/a (a finding); the fix is decided after the experiment (Q2).
+- Origin: owner
+
+## 2026-11-03 · PR #70 · Owner answers to the kindnet-stall design packet: Q1 yes, Q2 deferred, Q3 yes, Q4 yes
+- Decision: Q1 yes: run deploy/diag/stage5-nopolicy.sh on the workstation cluster (both policies on the burst's path removed and the canary on 192.0.2.1:443 in its OFF arm, gen 0 only, guards G1-G5). Q2 (switch to Calico v3.33.0, CI parity, reversing the PR #31 "another CNI out of scope" rejection, DESIGN.md sec 11 rewrite) deferred until the experiment's result. Q3 yes: re-measure C0 on any new CNI before PR B. Q4 yes: option 4 now as detection and recording only (D3); its retry and exclusion rules go to docs/AFTER-FIRST-RUN.md.
+- Rejected: Calico now (unconfirmed cause); retry-once and cross-variant exclusion now (fault-vs-fail semantics, S10).
+- Reason: owner's call (2026-11-03, prompt EK-D1-STALL-20261103).
+- Reverse: re-ask the owner.
+- Origin: owner
+
+## 2026-11-03 · PR #70 · deploy/diag/stage5-nopolicy.sh: an alternating ON/OFF experiment in bash, no Go change
+- Decision: one workstation-only script runs real `gate -stage5` bursts on gen 0 at b = 4r, alternating ON (cluster as deployed) and OFF (NetworkPolicies ek8s-system/loadgen and the diag's ek8s-v999997/variant deleted, canary arg patched to 192.0.2.1:443 with a JSON-patch test op), at most 15 runs per arm, never extended. Each run asserts its arm's state (policies, start line canary_addr, POST /canary refused twice, loadgen's and hasher IPs against kindnet's podips-v4 set about every second, records read in every judged run); OFF restores ON after every run and on exit (G5). Per run it keeps loadgen's netns TcpExt TCPSynRetrans and Tcp RetransSegs (/proc/<pid>/net via the node; per-netns counters, kernel snmp_counter.rst and tcp_output.c), the raw kindnet log lines, sync-line times, and records reduced to index, kind, send time, latency, bucket, reason, skipped, fault.
+- Rejected: a build-tag hook in gate/ (a no-isolation path in gate source beside fail-closed code); nstat (not on every host; /proc read directly); raw records on disk (pairs carry passwords and hashes); one ON-to-OFF switch for the whole experiment (time drift confounds the arms).
+- Reason: packet item 3 and owner feedback F2-F6; kindnet queues a connection when either end is policy-selected (vendored controller.go), so both policies must go, and the canary with loadgen's.
+- Reverse: delete deploy/diag/ and its deploy/README.md section.
+- Origin: Code
+
+## 2026-11-03 · PR #70 · Diag review: G4 ancestry, stress-ng asserted per run, r from the deployed loadgen
+- Decision: G4 also refuses unless HEAD is an ancestor of origin/main or of PR #70's head (`git fetch` of both, refs/pull/70/head, first; a failed fetch refuses; the result goes to meta.txt). Before every gate start, both arms: exactly one stress-ng pod, Running and ready, with origin/main's deploy/stress requests, limits and stress-dose data (read by `git show`); after the gate, the same pod, no restart; otherwise a violation, the run not judged; summary.tsv records it. -rate defaults to the deployed loadgen's -rate argument (required with none); the recovery message prints the r used and its source.
+- Rejected: HEAD checks against a named branch (a branch can carry anything); comparing the dose with the working tree's deploy/stress (the checkout may be older than main); a default r in the script (a second copy PR B would have to change).
+- Reason: owner review of #70 (R1-R3, prompt EK-D1-REVIEW-20261103).
+- Reverse: drop g4_ancestry, stress_state and deployed_rate from deploy/diag/stage5-nopolicy.sh.
+- Origin: owner
+
+## 2026-11-03 · PR #70 · Diag second self-review: the restore checks every step; G4 counts untracked and ignored files
+- Decision: restore_on, set_canary, check_on and check_off check each step (the restore runs with errexit off), and wait_set refuses an empty IP; G4's tree check counts untracked and ignored files and covers deploy/ek8s-system, which the restore applies; a pgrep error refuses; stress-ng is restarted once at start so its dose is the checked ConfigMap's; the r and its source are printed 5 s before anything is deployed; the output dir and meta.txt are made before G4, so a refusal is recorded.
+- Rejected: running the restore in its own session (setsid) so a second Ctrl-C cannot kill a kubectl in it (a killed step already ends in POLICY NOT RESTORED); guarding against deliberate workstation tampering (replace refs, skip-worktree, GOFLAGS overlays).
+- Reason: second reviewer pass (owner R4).
+- Reverse: revert the commit.
+- Origin: Code
+
+## 2026-11-03 · PR #70 · Diag: loadgen's host pid read by path (crictl go-template); -rate read only when unique
+- Decision: loadgen_pid reads `crictl inspect -o go-template --template '{{.info.pid}}'` (cri-tools v1.36.0, kind v0.33.0's base) and requires digits, then keeps the /proc/<pid>/comm == loadgen check; deployed_rate prints the -rate argument only when exactly one exists. The other JSON reads were audited and kept (packet P2).
+- Rejected: first-match grep of `"pid"` (hit the nested `"pid": 1` before info.pid on the owner's dry run); a deeper regex on indentation; adding jq or python to the tool check.
+- Reason: owner dry run of EK-D1-PIDFIX-20261103; the template path is exact, needs no new tool, and fails on a missing key.
+- Reverse: revert the commit.
+- Origin: Code
+
+## 2026-11-03 · PR #70 · No-policy experiment: the Stage 5 stall is kindnet's policy path; Q2 yes (switch CNI)
+- Decision: recorded. Owner's run diag-nopolicy-20261103T094410Z (workstation; gen 0; r = 15.5, b = 62; stress-ng at main's dose; 15 ON + 15 OFF alternating). ON: 7 stalls in 10 mid-burst-add runs (longest over_hang_timeout run 200-222), 0 in 5 runs without an add. OFF: 0 stalls in 9 mid-burst-add runs, 0 in 6 without. kindnet's "Could not receive message" lines (1-2 per run) appear in all 7 ON stall runs and in 1 of 8 ON passes (run 29, a mid-burst add); none in OFF. TCPSynRetrans delta 0 in every stall run (not SYN drops with client retransmit); RetransSegs > 0 in several ON runs, almost never in OFF (run 6: 1). Exact mechanism unknown. The script's verdict is INCONCLUSIVE only because OFF had 9 mid-burst adds, not the criterion's 10; the owner accepts the result as confirmed: the 10 was set for power at p ~ 0.45, and at ON's observed 7/10, P(0 of 9) ~ 2e-5; Fisher exact on add runs (7/10 vs 0/9), one-sided p ~ 0.002. Q2 (2026-11-02 design packet): yes, switch to Calico (D2), with the F7 (a)-(e) checks as preconditions; Cilium only if Calico fails them.
+- Rejected: topping up OFF runs to reach 10 adds (the margin is not in doubt); keeping kindnet with a detect-and-retry net only (the defect stays in every HPA scale-up).
+- Reason: a pod add stalls new connections only with kindnet's policy path in place.
+- Reverse: re-run the experiment; re-ask the owner.
+- Origin: owner
