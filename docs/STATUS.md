@@ -4,7 +4,7 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 *(inferred)* are guesses, not read from the repo; correct them.
 
 ## Now
-- D2 in progress: Calico v3.33.0 replaces kindnet as the NetworkPolicy engine (design packet 2026-11-03, owner answers Q1-Q7: Q3 changed to calico-node CPU 100m in deploy/calico for CI and workstation alike, no CI overlay). One PR at top tier in three parts: (1) deploy/calico, kind configs, up.sh, deploy.yml failure dump; (2) smokes and the orchestrator rename (kindnet-not-ready to cni-not-ready); (3) diag adaptation, DESIGN.md sec 11, decisions, CLAUDE.md reviewer trigger (Q7). The PR opens after part 2: part 1 alone breaks orchestrator-smoke.
+- D2 in progress: Calico v3.33.0 replaces kindnet as the NetworkPolicy engine (design packet 2026-11-03, owner answers Q1-Q7: Q3 changed to calico-node CPU 100m in deploy/calico for CI and workstation alike, no CI overlay). One PR at top tier in three parts: (1) deploy/calico, kind configs, up.sh, deploy.yml failure dump; (2) smokes and the orchestrator rename (kindnet-not-ready to cni-not-ready); (3) diag adaptation, DESIGN.md sec 11, decisions, CLAUDE.md reviewer trigger (Q7). Parts 1-2 pushed and the PR open as a draft for the deploy CI; part 3 and the review packet next.
 - D1 (kindnet stall) done: the owner's no-policy experiment (deploy/diag/stage5-nopolicy.sh, run diag-nopolicy-20261103T094410Z) confirmed the stall is kindnet's policy path; Q2 yes, switch to Calico (docs/decisions.md, 2026-11-03, PR #70)
 
 ## Next
