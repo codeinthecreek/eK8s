@@ -835,3 +835,10 @@ max. Earlier entries are not backfilled.
 - Reason: second reviewer pass (owner R4).
 - Reverse: revert the commit.
 - Origin: Code
+
+## 2026-11-03 · PR #70 · Diag: loadgen's host pid read by path (crictl go-template); -rate read only when unique
+- Decision: loadgen_pid reads `crictl inspect -o go-template --template '{{.info.pid}}'` (cri-tools v1.36.0, kind v0.33.0's base) and requires digits, then keeps the /proc/<pid>/comm == loadgen check; deployed_rate prints the -rate argument only when exactly one exists. The other JSON reads were audited and kept (packet P2).
+- Rejected: first-match grep of `"pid"` (hit the nested `"pid": 1` before info.pid on the owner's dry run); a deeper regex on indentation; adding jq or python to the tool check.
+- Reason: owner dry run of EK-D1-PIDFIX-20261103; the template path is exact, needs no new tool, and fails on a missing key.
+- Reverse: revert the commit.
+- Origin: Code

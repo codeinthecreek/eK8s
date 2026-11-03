@@ -318,8 +318,17 @@ loadgen_pid() {
 	cid=$(k -n "$sys" get pod "$1" -o jsonpath='{.status.containerStatuses[?(@.name=="loadgen")].containerID}')
 	cid=${cid#containerd://}
 	[[ $cid =~ ^[0-9a-f]{64}$ ]] || die "loadgen's containerID is not a containerd id: '$cid'"
-	pid=$(docker exec "$node" crictl inspect "$cid" | grep -m1 -oE '"pid": *[0-9]+' | grep -oE '[0-9]+$') ||
-		die "crictl inspect $cid gave no pid"
+	# The top-level info object's pid, by path: the output also holds nested
+	# "pid" keys (the OCI spec's process, the pid namespace) that come
+	# first. -o go-template --template is crictl inspect's own (cri-tools
+	# v1.36.0, the version kind v0.33.0's base image builds, cmd/crictl/
+	# container.go "inspect" flags and util.go outputStatusData: the one
+	# status is the top-level object {status, info}; templates.go
+	# tmplExecuteRawJSON decodes with UseNumber, so a large pid prints as
+	# digits, and sets missingkey=error, so an absent info.pid fails).
+	pid=$(docker exec "$node" crictl inspect -o go-template --template '{{.info.pid}}' "$cid") ||
+		die "crictl inspect $cid gave no info.pid"
+	[[ $pid =~ ^[1-9][0-9]*$ ]] || die "crictl inspect $cid: info.pid is not a pid: '${pid:0:100}'"
 	docker exec "$node" test -r "/proc/$pid/net/netstat" || die "cannot read /proc/$pid/net/netstat on $node"
 	comm=$(docker exec "$node" cat "/proc/$pid/comm") || die "cannot read /proc/$pid/comm on $node"
 	[ "$comm" = loadgen ] || die "pid $pid on $node is '$comm', not loadgen"
@@ -406,8 +415,9 @@ restore_on() {
 
 # deployed_rate: the -rate argument of the loadgen Deployment, if any.
 deployed_rate() {
+	# Exactly one -rate argument (-burst-rate= does not match), else nothing.
 	{ k -n "$sys" get deploy loadgen -o jsonpath='{range .spec.template.spec.containers[0].args[*]}{@}{"\n"}{end}' 2>/dev/null || true; } |
-		sed -n 's/^-rate=//p'
+		awk '/^-rate=/ { n++; v = substr($0, 7) } END { if (n == 1) print v }'
 }
 
 # g4_ancestry: fetches origin/main and PR #$diag_pr's head, then prints
