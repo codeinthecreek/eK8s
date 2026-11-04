@@ -38,12 +38,13 @@ cluster costs roughly 1 core and 1.5-2 GB baseline. Budget the rest
 (~7 cores / ~13-14 GB) across: orchestrator process, load generator,
 stress-ng, metrics-server, and the live variant population.
 
-Node budget (requests, 7000m allocatable; docs/decisions.md, 2026-11-05
-PR B memory-sum entry):
-- CPU: control plane + kube-system 1200m + loadgen 1000m + stress-ng
-  2750m + 4 variants x 1 pod x 250m = 5950m of 7000m, 1050m spare.
-- Memory: loadgen 768Mi + stress-ng 2Gi + 4 variants x 1 pod x 256Mi =
-  3.75Gi, plus the control plane's ~1.5-2 GB, inside ~13-14 GB.
+Node budget (requests on the workstation node, 7000m and 14133956Ki
+allocatable; control plane + kube-system measured on a fresh cluster,
+2026-11-05; docs/decisions.md, 2026-11-05 PR B memory-sum entry):
+- CPU: control plane + kube-system 1050m + loadgen 1000m + stress-ng
+  2750m + 4 variants x 1 pod x 250m = 5800m of 7000m, 1200m spare.
+- Memory: control plane + kube-system 440Mi + loadgen 768Mi + stress-ng
+  2Gi + 4 variants x 1 pod x 256Mi = 4280Mi of 13802Mi, 9522Mi spare.
 
 ## 3. Architecture summary
 
