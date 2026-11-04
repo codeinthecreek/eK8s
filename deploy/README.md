@@ -216,13 +216,15 @@ the end-to-end dry run (`deploy/orchestrator-smoke.sh`: the orchestrator for
 2 generations with a fake claude under bwrap; the records and the cluster
 checked), then a Calico check that fails on any `Unblocking pod creation`
 line in the node's CNI log (a pod started before its policy was
-programmed, by any smoke). It runs on a pull request touching deploy/,
-cmd/service/, internal/wrapper/, loadgen/, internal/classifier/, gate/,
-internal/hashcore/, internal/hostpairs/, loadgen/client/, loadgen/wire/,
-orchestrator/, driver/, lineage/, fitness/ or the workflow itself.
-A draft PR skips it: the run starts when the PR is opened ready, or when it
-leaves draft (`ready_for_review`), and a new push cancels the run in flight.
-There is no push-to-main run. The repo is private, so
+programmed, by any smoke). It has no push or pull_request trigger: run the
+smoke by hand (Actions tab, deploy smoke, Run workflow, on the PR's branch)
+before merging a PR that touches: `deploy/**`, `cmd/service/**`,
+`internal/wrapper/**`, `loadgen/**`, `internal/classifier/**`, `gate/**`,
+`internal/hashcore/**`, `internal/hostpairs/**`, `loadgen/client/**`,
+`loadgen/wire/**`, `orchestrator/**`, `driver/**`, `lineage/**`, `fitness/**`,
+or `.github/workflows/deploy.yml`. The planning chat says in its review when a
+PR warrants a run. A dispatch queues behind a run already in flight on the same
+ref. The repo is private, so
 its ubuntu-latest runner has 2 CPU / 8 GB, too small for the full-size
 reservation and stress dose. On failure it dumps `kubectl get pods -A`,
 `kubectl describe node`, the failing pods' events and Calico's logs. It proves the
