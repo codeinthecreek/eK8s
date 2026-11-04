@@ -17,9 +17,9 @@ name: deploy smoke
 # images, kustomizations, metrics-server, stress-ng on and off, the
 # variant bundle, ek8s-system), not the full-size numbers: those need the workstation
 # (docs/STATUS.md, Parked).
-# It runs only by hand: Actions tab, deploy smoke, Run workflow, on the PR's
-# branch. Dispatch it when the planning chat asks for it, and before merging a
-# PR that touches a path listed in deploy/README.md (CI paragraph).
+# Run it by hand (Actions tab, deploy smoke, Run workflow, on the PR's branch)
+# when the planning chat asks in a review. The paths in deploy/README.md
+# usually warrant a run.
 # workflow_dispatch only works once this file is on the default branch.
 on:
   # No pull_request trigger: the smoke is dispatched by hand (see above).
@@ -28,13 +28,11 @@ on:
 permissions:
   contents: read
 
-# One run per ref (a PR's branch, or main). This workflow has only the
-# dispatch trigger, so cancel-in-progress is off (its expression is false):
-# a dispatch never cancels a run in progress. A dispatch waiting behind one
-# is replaced by a newer dispatch on the same ref (GitHub keeps one pending run).
+# One run per ref; a newer dispatch replaces a pending one. A run in progress
+# is never cancelled.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   smoke:

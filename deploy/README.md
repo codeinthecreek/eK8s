@@ -216,14 +216,15 @@ the end-to-end dry run (`deploy/orchestrator-smoke.sh`: the orchestrator for
 2 generations with a fake claude under bwrap; the records and the cluster
 checked), then a Calico check that fails on any `Unblocking pod creation`
 line in the node's CNI log (a pod started before its policy was
-programmed, by any smoke). It has no push or pull_request trigger: run the
-smoke by hand (Actions tab, deploy smoke, Run workflow, on the PR's branch)
-before merging a PR that touches: `deploy/**`, `cmd/service/**`,
-`internal/wrapper/**`, `loadgen/**`, `internal/classifier/**`, `gate/**`,
-`internal/hashcore/**`, `internal/hostpairs/**`, `loadgen/client/**`,
-`loadgen/wire/**`, `orchestrator/**`, `driver/**`, `lineage/**`, `fitness/**`,
-or `.github/workflows/deploy.yml`. A dispatch never cancels a run in progress;
-a dispatch waiting behind one is replaced by a newer dispatch on the same ref.
+programmed, by any smoke). It has no push or pull_request trigger. Run it by
+hand (Actions tab, deploy smoke, Run workflow, on the PR's branch) when the
+planning chat asks in a review. The paths below usually warrant a run:
+`deploy/**`, `cmd/service/**`, `internal/wrapper/**`, `loadgen/**`,
+`internal/classifier/**`, `gate/**`, `internal/hashcore/**`,
+`internal/hostpairs/**`, `loadgen/client/**`, `loadgen/wire/**`,
+`orchestrator/**`, `driver/**`, `lineage/**`, `fitness/**`, and
+`.github/workflows/deploy.yml`. One run per ref; a newer dispatch replaces a
+pending one, and a run in progress is never cancelled.
 The repo is private, so
 its ubuntu-latest runner has 2 CPU / 8 GB, too small for the full-size
 reservation and stress dose. On failure it dumps `kubectl get pods -A`,
