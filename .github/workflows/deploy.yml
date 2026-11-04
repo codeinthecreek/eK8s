@@ -30,7 +30,8 @@ permissions:
 
 # One run per ref (a PR's branch, or main). This workflow has only the
 # dispatch trigger, so cancel-in-progress is off (its expression is false):
-# a dispatch queues behind the run before it and never cancels it.
+# a dispatch never cancels a run in progress. A dispatch waiting behind one
+# is replaced by a newer dispatch on the same ref (GitHub keeps one pending run).
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}

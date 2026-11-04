@@ -208,7 +208,7 @@ Paths are relative to deploy/. The reserved value must equal the kind
 config's kubeReserved + systemReserved CPU; the stress minimum must sit
 below the stress-ng CPU limit (3 CPU full size, 500m CI size).
 
-CI (`.github/workflows/deploy.yml`) runs, at CI size and in this order:
+The kind smoke (`.github/workflows/deploy.yml`) runs by hand, at CI size and in this order:
 the diag's unit test (`deploy/diag/stage5-runs_test.sh`, no cluster), up.sh,
 smoke.sh, variant-smoke.sh, loadgen-smoke.sh, stage5-smoke.sh (gate Stage 5
 end to end: generation 0 deployed, a real burst, host verification), then
@@ -222,9 +222,9 @@ before merging a PR that touches: `deploy/**`, `cmd/service/**`,
 `internal/wrapper/**`, `loadgen/**`, `internal/classifier/**`, `gate/**`,
 `internal/hashcore/**`, `internal/hostpairs/**`, `loadgen/client/**`,
 `loadgen/wire/**`, `orchestrator/**`, `driver/**`, `lineage/**`, `fitness/**`,
-or `.github/workflows/deploy.yml`. The planning chat says in its review when a
-PR warrants a run. A dispatch queues behind a run already in flight on the same
-ref. The repo is private, so
+or `.github/workflows/deploy.yml`. A dispatch never cancels a run in progress;
+a dispatch waiting behind one is replaced by a newer dispatch on the same ref.
+The repo is private, so
 its ubuntu-latest runner has 2 CPU / 8 GB, too small for the full-size
 reservation and stress dose. On failure it dumps `kubectl get pods -A`,
 `kubectl describe node`, the failing pods' events and Calico's logs. It proves the
