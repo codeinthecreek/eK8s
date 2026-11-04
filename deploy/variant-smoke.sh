@@ -355,8 +355,8 @@ ok "(j) $sys/smoke-other -> $stress_ns/smoke-stress:9090 refused (the node itsel
 
 # --- (h) a deleted pod leaves the Service's endpoints at once, not on the
 # readiness probe (3 x 2s, past cmd/service's 5s drain; DESIGN.md sec 11).
-# HPA minReplicas 2 here only.
-k -n "$ns" patch hpa hasher --type=merge -p '{"spec":{"minReplicas":2}}' >/dev/null
+# HPA min = max = 2 here only (the bundle pins 1/1).
+k -n "$ns" patch hpa hasher --type=merge -p '{"spec":{"minReplicas":2,"maxReplicas":2}}' >/dev/null
 # eps: one line per endpoint, "<pod> <ready> <terminating>" (an absent
 # condition prints empty).
 eps() {

@@ -998,3 +998,10 @@ max. Earlier entries are not backfilled.
 - Rejected: 512Mi with maxRate 38 (owner chose 768Mi to keep the ladder to 48); comparing live + stalled with the whole GOMEMLIMIT as PR #47 did (the owner's rule is half, GOGC=100's headroom); counting every slot of every ring as a /hash record with a pair, a burst in all four rings at once (over-counts).
 - Reverse: set maxRate, maxBurstSends, the 768Mi and the smoke's (2)/(6) values back; a higher maxRate needs this sum redone with a measured loadgen heap.
 - Origin: owner (768Mi, maxRate 50, the half-GOMEMLIMIT rule), Code (the sum)
+
+## 2026-11-05 · PR #77 (inferred) · Variant HPA pinned to minReplicas = maxReplicas = 1 (DESIGN.md sec 11)
+- Decision: deploy/variant/60-hpa.yaml.tmpl keeps the HPA object with maxReplicas 1 (minReplicas was already 1); variant-smoke.sh check (h), which needs two pods, now patches min and max to 2 (the API refuses min 2 over max 1).
+- Rejected: deleting the HPA (a larger change, and an unpin later is one field); a Deployment replicas field (the HPA owns the count).
+- Reason: in the D3b live check (run dir /home/jl/workspace/scratch/ek8s-runs/d3b-live-20261104T211756Z, window w-fb258046f9f62824) the HPA scaled gen 0 from 2 to 1 inside the stress half and deleted hasher-7476775b48-slsgx; fitness.CPUSeconds lost its counter and score() charged the CPU ceiling (stress 0.6982 vs baseline 0.9947, with success_rate 1 and p95 37 ms). Pinning also makes live windows match C0's single-pod basis. The HPA was never part of the genome.
+- Reverse: set maxReplicas back to 2 in the template and goldens, restore the smoke's minReplicas-only patch and the DESIGN.md sec 11 wording.
+- Origin: owner

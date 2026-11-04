@@ -1084,7 +1084,9 @@ namespace, `ek8s-v<id>`. There is no pooled front-facing Service: each
 live variant receives its own dedicated load stream (section 10).
 Readiness probes and HPA still act natively, but within a variant, across
 its own replicas -- they cull the obviously broken and provide elastic
-capacity, they do not rank viable variants against each other. Explicit
+capacity, they do not rank viable variants against each other. For now
+the HPA is pinned at `minReplicas` = `maxReplicas` = 1 (below), so a
+variant has one pod. Explicit
 fitness scoring (section 9) is what does the ranking.
 
 **Namespace lifecycle:**
@@ -1196,9 +1198,8 @@ A window is a baseline half, then a stress half, each a loadgen window
 run of length W with its own `/verify` batch (an upload replaces a
 pending one, so the stress half's batch is uploaded after the baseline
 run). The stress half follows once stress-ng is Running, so each
-variant starts it with whatever replicas its own HPA left after the
-baseline half (HPA scale-down stabilisation), under one rule for every
-variant; only the baseline half starts cold. Each
+variant starts it with its one pod as the baseline half left it, under
+one rule for every variant; only the baseline half starts cold. Each
 half has its own CNI first look, policy canary and kubelet CPU
 samples, taken around its run. Stress-ng goes off again as soon as the
 stress run ends, before its records are read, so the host's
@@ -1263,8 +1264,12 @@ its consequences.
 
 **Live population cap: 3.** A resource/deployment constraint given the
 8-core/16GB workstation, not a statement about genome-pool size (see
-below). HPA `maxReplicas` per variant: 2 (4 variants x 2 replicas during
-probation is the binding case for the section 2 budget).
+below). HPA `minReplicas` = `maxReplicas` = 1 per variant (4 variants x
+1 pod during probation is the binding case for the section 2 budget).
+The HPA object stays, pinned: a scale-down inside a scored half deleted
+a pod whose CPU counter was then lost, and the half was charged the CPU
+ceiling (docs/decisions.md, 2026-11-05 HPA-pin entry); one pod also
+matches C0's single-pod basis. Replica count was never in the genome.
 
 ### Generational process (steady-state, single active mutation at a time)
 
@@ -1316,7 +1321,7 @@ mutation is sequential. A newcomer that loses its own probation window is
 archived having had exactly one live window -- a real, logged outcome
 ("gate-passed but functionally weak"), not a discarded non-event.
 
-Newcomers enter probation at HPA `minReplicas` (cold start), consistent
+Newcomers enter probation on their one pod (cold start), consistent
 with how every other variant enters the pool -- artificially warming a
 newcomer would itself be a source of measurement inconsistency.
 
