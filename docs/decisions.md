@@ -955,3 +955,10 @@ max. Earlier entries are not backfilled.
 - Reason: owner answers Q3, Q4 and B (prompt EK-D3-P2-20261104); a run-dir format addition, logged per CLAUDE.md.
 - Reverse: drop AppendStall and the Loop calls (and gate.Report.Stage5RunID); a stalls.jsonl already written is inert.
 - Origin: Code
+
+## 2026-11-04 · PR #74 (inferred) · cni/: a run-dir directory for calico-node's log
+- Decision: lineage.Run.WriteCNILog(name, log) writes cni/<name>.log and WriteCNIFailed(name, msg) cni/<name>.failed, name by the run-id pattern (nameRE), once each (synced temp file linked into place, ErrExists on a second write, mode 0600; cni/ 0700, made by the first write). A log over MaxCNILog (1048576) keeps its first MaxCNILog bytes, a newline if they lack one, then the line "ek8s: cut at 1048576 bytes\n"; at or under the cap the bytes are kept as read. A .failed holds the error cut to 1024 bytes plus a newline.
+- Rejected: a file capped at 1 MiB in total, marker included (the marker would then not say where the log was cut); making cni/ in Create (lazy, as stalls.jsonl, so an older run dir needs no migration); one file kind holding both (a reader tells a failed read by its suffix).
+- Reason: owner answers Q4 and Q7 (prompt EK-D3-P2-20261104, D3 split entry); a run-dir format addition, logged per CLAUDE.md.
+- Reverse: delete lineage/cni.go and its callers; a cni/ already written is inert.
+- Origin: Code
