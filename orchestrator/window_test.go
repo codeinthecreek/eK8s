@@ -20,6 +20,7 @@ import (
 	"github.com/codeinthecreek/eK8s/fitness"
 	"github.com/codeinthecreek/eK8s/internal/classifier"
 	"github.com/codeinthecreek/eK8s/internal/hashcore"
+	"github.com/codeinthecreek/eK8s/internal/stallrun"
 	"github.com/codeinthecreek/eK8s/internal/wrapper"
 	"github.com/codeinthecreek/eK8s/loadgen"
 	"github.com/codeinthecreek/eK8s/loadgen/client"
@@ -287,10 +288,16 @@ func (r *recorder) setHook(f func(req *http.Request)) {
 
 func newFixture(t *testing.T, variants map[string]http.Handler, live ...string) *fixture {
 	t.Helper()
+	return newFixtureShape(t, testShape, variants, live...)
+}
+
+// newFixtureShape is newFixture with loadgen deployed at shape.
+func newFixtureShape(t *testing.T, shape Shape, variants map[string]http.Handler, live ...string) *fixture {
+	t.Helper()
 	url := serveVariants(t, variants)
 	fx := &fixture{t: t, lg: &swapHandler{}, cluster: &fakeCluster{pods: live}, live: live}
 	fx.cfg = loadgen.Config{
-		Rate: testShape.Rate, Window: time.Duration(testShape.WindowS * float64(time.Second)), BurstRate: testShape.BurstRate,
+		Rate: shape.Rate, Window: time.Duration(shape.WindowS * float64(time.Second)), BurstRate: shape.BurstRate,
 		TargetURL: url + "/v{id}", CanaryAddr: refusingAddr(t),
 	}
 	fx.restartLoadgen()
@@ -305,7 +312,7 @@ func newFixture(t *testing.T, variants map[string]http.Handler, live ...string) 
 		}
 	}
 	s, err := NewSession(t.Context(), SessionConfig{
-		Client: fx.cl, Cluster: fx.cluster, Core: hashcore.New(), Want: testShape, Params: fitness.DefaultParams(),
+		Client: fx.cl, Cluster: fx.cluster, Core: hashcore.New(), Want: shape, Params: fitness.DefaultParams(),
 	})
 	if err != nil {
 		t.Fatalf("NewSession: %v", err)
@@ -410,7 +417,14 @@ func TestWindowScored(t *testing.T) {
 		if f, ok := v.Fitness(); !ok || f != min(v.Baseline.Score, v.Stress.Score) {
 			t.Errorf("variant %s: fitness %v, %v; want the lower half score", id, f, ok)
 		}
+		// 20 records a half at r = 10: threshold ceil(10 x 2 s) = 20.
+		// gen0 answers well inside the hang timeout, so no OHT record.
+		noStall := stallrun.Stats{Records: 20, LongestStartIndex: -1, Threshold: 20}
+		if v.BaselineStall == nil || *v.BaselineStall != noStall || v.StressStall == nil || *v.StressStall != noStall {
+			t.Errorf("variant %s: stall stats %+v, %+v; want %+v in each half", id, v.BaselineStall, v.StressStall, noStall)
+		}
 	}
+	checkSpans(t, res, true)
 	// Baseline with stress off, then stress on for the stress half's run
 	// only: off again after its last CPU sample, before any of its
 	// records is read.
@@ -568,6 +582,10 @@ func TestWindowExcludedStillJudged(t *testing.T) {
 	if res.StressRunID != "" || fx.cluster.stressOn != 0 || len(res.StressExcluded) != 0 {
 		t.Errorf("stress half after an excluded baseline: run %q, stress on %d times, excluded %v", res.StressRunID, fx.cluster.stressOn, res.StressExcluded)
 	}
+	// The baseline half started, so it is recorded, excluded or not,
+	// and for the disqualified variant too; the stress half is not.
+	checkStall(t, res, 20, false)
+	checkSpans(t, res, false)
 }
 
 // TestWindowStressExcluded checks a stress half excluded before it
@@ -590,6 +608,9 @@ func TestWindowStressExcluded(t *testing.T) {
 	if got := fx.cluster.ops[len(fx.cluster.ops)-1]; fx.cluster.stressOn != 1 || !strings.HasPrefix(got, "stress off") {
 		t.Errorf("stress on %d times, last cluster call %q; want once, then off", fx.cluster.stressOn, got)
 	}
+	// The stress half never started: no stall counts, a zero span.
+	checkStall(t, res, 20, false)
+	checkSpans(t, res, false)
 }
 
 // TestWindowStressFaults checks a loadgen restart and a fault inside the
@@ -617,6 +638,9 @@ func TestWindowStressFaults(t *testing.T) {
 		if got := fx.cluster.ops[len(fx.cluster.ops)-1]; !strings.HasPrefix(got, "stress off") {
 			t.Errorf("last cluster call %q, want stress off", got)
 		}
+		// The restart leaves the baseline half's stall counts and span.
+		checkStall(t, res, 20, false)
+		checkSpans(t, res, false)
 	})
 	t.Run("stress on fails", func(t *testing.T) {
 		fx := newFixture(t, map[string]http.Handler{"1": gen0(core)}, "1")
@@ -650,6 +674,8 @@ func TestRunBaseline(t *testing.T) {
 	if fx.cluster.stressOn != 0 || res.StressRunID != "" || fx.cluster.cpuCalls != 2 {
 		t.Errorf("stress on %d times, stress run %q, %d CPU samples; want 0, none, 2", fx.cluster.stressOn, res.StressRunID, fx.cluster.cpuCalls)
 	}
+	checkStall(t, res, 20, false)
+	checkSpans(t, res, false)
 }
 
 func TestWindowCPUUnmeasured(t *testing.T) {
@@ -681,8 +707,8 @@ func TestWindowNotStarted(t *testing.T) {
 	core := hashcore.New()
 	fx := newFixture(t, map[string]http.Handler{"1": gen0(core)}, "1")
 	fx.cluster.notReady = true
-	if res := fx.window(); strings.Join(res.Excluded, ",") != ExcludedCNI || len(res.Variants) != 0 {
-		t.Errorf("CNI not Ready: %+v", res)
+	if res := fx.window(); strings.Join(res.Excluded, ",") != ExcludedCNI || len(res.Variants) != 0 || res.BaselineSpan != (Span{}) || res.StressSpan != (Span{}) {
+		t.Errorf("CNI not Ready: %+v; want no variants and zero spans", res)
 	}
 	fx.cluster.notReady = false
 
@@ -702,8 +728,8 @@ func TestWindowNotStarted(t *testing.T) {
 	}
 	// After a new boot_id the canary is polled, at most canaryBound.
 	fx.s.t.canaryBound = 100 * time.Millisecond
-	if res := fx.window(); strings.Join(res.Excluded, ",") != ExcludedCanary {
-		t.Errorf("canary connected: %+v", res)
+	if res := fx.window(); strings.Join(res.Excluded, ",") != ExcludedCanary || res.BaselineSpan != (Span{}) || res.StressSpan != (Span{}) {
+		t.Errorf("canary connected: %+v; want zero spans", res)
 	}
 	if fx.cluster.cpuCalls != 0 {
 		t.Errorf("%d CPU samples for windows that never started", fx.cluster.cpuCalls)
@@ -905,4 +931,122 @@ func TestWindowGuards(t *testing.T) {
 	if _, err := fx.s.RunWindow(t.Context(), fx.live, fx.batches()); err == nil || !strings.Contains(err.Error(), "CPU counters") {
 		t.Errorf("every variant's CPU unmeasured: %v", err)
 	}
+}
+
+// checkStall checks every variant's stall counts: each half that ran
+// read records records with no OHT record (a half of testShape:
+// threshold 20); the stress half's nil unless stress.
+func checkStall(t *testing.T, res WindowResult, records int, stress bool) {
+	t.Helper()
+	if len(res.Variants) == 0 {
+		t.Fatal("no variant results")
+	}
+	want := stallrun.Stats{Records: records, LongestStartIndex: -1, Threshold: 20}
+	for id, v := range res.Variants {
+		if v.BaselineStall == nil || *v.BaselineStall != want {
+			t.Errorf("variant %s: baseline stall %+v, want %+v", id, v.BaselineStall, want)
+		}
+		switch {
+		case stress && (v.StressStall == nil || *v.StressStall != want):
+			t.Errorf("variant %s: stress stall %+v, want %+v", id, v.StressStall, want)
+		case !stress && v.StressStall != nil:
+			t.Errorf("variant %s: stress stall %+v for a stress half that never started, want nil", id, *v.StressStall)
+		}
+	}
+}
+
+// checkSpans checks the halves' spans: the baseline half's set and
+// ordered, and the stress half's, when stress, set and after it
+// (baseline start < baseline end <= stress start < stress end), else
+// zero.
+func checkSpans(t *testing.T, res WindowResult, stress bool) {
+	t.Helper()
+	b, st := res.BaselineSpan, res.StressSpan
+	if b.Start.IsZero() || !b.Start.Before(b.End) {
+		t.Errorf("baseline span %v to %v, want set and ordered", b.Start, b.End)
+	}
+	switch {
+	case stress && (st.Start.Before(b.End) || !st.Start.Before(st.End)):
+		t.Errorf("spans: baseline %v to %v, stress %v to %v; want the stress half's set, ordered and after the baseline's", b.Start, b.End, st.Start, st.End)
+	case !stress && st != (Span{}):
+		t.Errorf("stress span %v to %v for a stress half that never started, want zero", st.Start, st.End)
+	}
+}
+
+// stallShape is a window of 8 sends at 2/s: threshold ceil(2 x 2 s) = 4,
+// so a half can hold a stall run (4 OHT records) and then recovery.
+var stallShape = Shape{Rate: 2, WindowS: 4, BurstRate: 4}
+
+// staller serves the first hang of every sends requests past the hang
+// timeout, with a bare 503, and the rest with h: each half of stallShape
+// then holds an OHT run at indices 0 to hang-1, then recovery.
+func staller(h http.Handler, sends, hang int) http.Handler {
+	var n atomic.Int64
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if int(n.Add(1)-1)%sends < hang {
+			time.Sleep(classifier.HangTimeout + 300*time.Millisecond)
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		h.ServeHTTP(w, r)
+	})
+}
+
+// TestWindowStall checks that a window whose records hold a stall run
+// in each half, in one of two live variants, records it per half and
+// is scored and excluded as before stall recording (D3 is recording
+// only): outcome holds only what a window decides, and want is the
+// same outcome on main before this change (a2557be), where the test
+// ran without the stall and span checks.
+func TestWindowStall(t *testing.T) {
+	core := hashcore.New()
+	fx := newFixtureShape(t, stallShape, map[string]http.Handler{"1": noShed(core), "2": staller(noShed(core), 8, 4)}, "1", "2")
+	res := fx.window()
+
+	streak := Streak{n: HaltAfter - 1}
+	halt := streak.Add(res)
+	outcome := fmt.Sprintf("scored %v excluded %q baseline %q stress %q halt %v streak %d", res.Scored(), res.Excluded, res.BaselineExcluded, res.StressExcluded, halt, streak.n)
+	for _, id := range []string{"1", "2"} {
+		v := res.Variants[id]
+		f, ok := v.Fitness()
+		outcome += fmt.Sprintf("; %s records %d disqualified %q baseline %v stress %v fitness %v lower half %v",
+			id, v.Records, v.Disqualified, v.Baseline != nil, v.Stress != nil, ok,
+			v.Baseline != nil && v.Stress != nil && f == min(v.Baseline.Score, v.Stress.Score))
+		for _, h := range []*HalfScore{v.Baseline, v.Stress} {
+			if h != nil {
+				// Not Failures or Successes: which sends are negatives,
+				// left out of both, is loadgen's random draw.
+				outcome += fmt.Sprintf(" [%d records, %d shed, cpu unmeasured %q]", h.Requests+h.Negatives, h.Sheds, h.CPUUnmeasured)
+			}
+		}
+	}
+	const want = `scored true excluded [] baseline [] stress [] halt false streak 0` +
+		`; 1 records 16 disqualified "" baseline true stress true fitness true lower half true [8 records, 0 shed, cpu unmeasured ""] [8 records, 0 shed, cpu unmeasured ""]` +
+		`; 2 records 16 disqualified "" baseline true stress true fitness true lower half true [8 records, 0 shed, cpu unmeasured ""] [8 records, 0 shed, cpu unmeasured ""]`
+	if outcome != want {
+		t.Errorf("outcome\n got  %s\n want %s", outcome, want)
+	}
+
+	stats := map[string]stallrun.Stats{
+		"1": {Records: 8, LongestStartIndex: -1, Threshold: 4},
+		"2": {Records: 8, OHT: 4, StallRuns: 1, Longest: 4, LongestStartIndex: 0, Threshold: 4},
+	}
+	for id, want := range stats {
+		v := res.Variants[id]
+		for _, got := range []*stallrun.Stats{v.BaselineStall, v.StressStall} {
+			if got == nil {
+				t.Errorf("variant %s: a half's stall stats nil, want %+v", id, want)
+				continue
+			}
+			g := *got
+			g.LongestStartWall = time.Time{} // loadgen's clock: checked apart
+			if g != want {
+				t.Errorf("variant %s: stall stats %+v, want %+v (start wall aside)", id, g, want)
+			}
+		}
+		if id == "2" && (v.BaselineStall.LongestStartWall.IsZero() || v.StressStall.LongestStartWall.IsZero()) {
+			t.Errorf("variant 2: a stall run with a zero start wall: %v, %v", v.BaselineStall.LongestStartWall, v.StressStall.LongestStartWall)
+		}
+	}
+	checkSpans(t, res, true)
 }
