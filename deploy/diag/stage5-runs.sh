@@ -295,6 +295,13 @@ drop_sum() {
 		END { print (any ? s : "-") }'
 }
 
+# drops_result U EB UNBLOCK: PASS for a gate-pass run whose Unknown-interface
+# count, in-burst end-of-tier count and CNI Unblocking count are all 0, else
+# DROPS; a count that is "-" (could not be read) is not 0.
+drops_result() {
+	if [ "$1" = 0 ] && [ "$2" = 0 ] && [ "$3" = 0 ]; then echo PASS; else echo DROPS; fi
+}
+
 # another_run I ADDS RESULT: succeeds when the stop rule (header) allows
 # another run after run I, with ADDS mid-burst-add runs so far and RESULT
 # run I's result; a result other than PASS ends the set.
@@ -704,7 +711,7 @@ run_one() {
 	# (Unknown interface; end of tier in the burst) or a CNI "Unblocking pod
 	# creation" is not a PASS. A counter that could not be read ("-") is not
 	# shown to be 0.
-	if [ "$result" = PASS ] && { [ "$drops_u" != 0 ] || [ "$drops_eb" != 0 ] || [ "$unblock" != 0 ]; }; then result=DROPS; fi
+	[ "$result" != PASS ] || result=$(drops_result "$drops_u" "$drops_eb" "$unblock")
 	if [ "$result" != FAULT ] && [ "$nread" -eq 0 ]; then
 		echo "VIOLATION: the gate judged the burst (exit $rc) but no record was read, so the burst-time checks never ran" >>"$rdir/state.txt"
 	fi

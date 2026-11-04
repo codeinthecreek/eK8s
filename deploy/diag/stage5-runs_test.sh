@@ -36,6 +36,15 @@ try=1
 check "another_run with -try" no "$(yes_no another_run 1 0 PASS)"
 try=0
 
+# --- drops_result: PASS only with all three counts 0; "-" is not 0.
+check "drops_result all 0" PASS "$(drops_result 0 0 0)"
+check "drops_result unknown interface" DROPS "$(drops_result 1 0 0)"
+check "drops_result end of tier in the burst" DROPS "$(drops_result 0 2 0)"
+check "drops_result Unblocking" DROPS "$(drops_result 0 0 1)"
+check "drops_result unread unknown interface" DROPS "$(drops_result - 0 0)"
+check "drops_result unread burst count" DROPS "$(drops_result 0 - 0)"
+check "drops_result unread Unblocking" DROPS "$(drops_result 0 0 -)"
+
 # --- verdict: summary.tsv rows (run gate_rc result mid_burst_add ...).
 rows() { # rows N ADDS [RESULT_OF_LAST]
 	local i
