@@ -15,10 +15,48 @@ import (
 	"github.com/codeinthecreek/eK8s/driver"
 )
 
-// cniClock is the fixed host clock these tests give the loop.
+// cniClock is where the host clock these tests give the loop starts.
 var cniClock = time.Date(2026, 11, 4, 5, 6, 7, 800, time.UTC)
 
-func fixedClock() time.Time { return cniClock }
+// tickClock is a host clock that moves on a second at every reading and
+// logs each reading as "clock <t>", so a test can tell which reading a
+// CNI read's since was.
+func tickClock(ev *events) func() time.Time {
+	n := 0
+	return func() time.Time {
+		t := cniClock.Add(time.Duration(n) * time.Second)
+		n++
+		ev.add("clock %s", t.Format(time.RFC3339Nano))
+		return t
+	}
+}
+
+// sinceLastClockBefore counts the "cni <since>" events that follow an
+// event starting with trigger (clock readings between them aside), and
+// fails the test unless each one's since is the last clock reading
+// before that trigger.
+func sinceLastClockBefore(t *testing.T, ev []string, trigger string) int {
+	t.Helper()
+	n := 0
+	for i, e := range ev {
+		if !strings.HasPrefix(e, "cni ") {
+			continue
+		}
+		j := i - 1
+		for j >= 0 && strings.HasPrefix(ev[j], "clock ") {
+			j--
+		}
+		if j < 0 || !strings.HasPrefix(ev[j], trigger) {
+			continue
+		}
+		n++
+		k := lastPrefix(ev[:j], "clock ")
+		if k < 0 || strings.TrimPrefix(ev[k], "clock ") != strings.TrimPrefix(e, "cni ") {
+			t.Errorf("event %d %q after %q: since is not the last clock reading before it (%q)", i, e, ev[j], ev[max(k, 0)])
+		}
+	}
+	return n
+}
 
 // cniFiles lists the run's cni/ directory, sorted; nil when it is absent.
 func cniFiles(t *testing.T, fx *loopFixture) []string {
@@ -46,14 +84,6 @@ func cniFile(t *testing.T, fx *loopFixture, name string) string {
 	return string(b)
 }
 
-// after reports whether an event b comes after the first event a.
-func after(ev []string, a, b string) bool {
-	i := slices.Index(ev, a)
-	return i >= 0 && slices.Contains(ev[i+1:], b)
-}
-
-var cniAtClock = "cni " + cniClock.Format(time.RFC3339Nano)
-
 // TestLoopCNIBurst: a Stage 5 burst that was read, on a pass, a
 // failure or a fault after it, is archived as cni/<run_id>.log from the
 // host time just before Stage 5, and before a fault halts the run; a
@@ -79,7 +109,7 @@ func TestLoopCNIBurst(t *testing.T) {
 			if tc.set != nil {
 				tc.set["1"] = true
 			}
-			reason, err := fx.startAt(t, context.Background(), fixedClock)
+			reason, err := fx.startAt(t, context.Background(), tickClock(fx.ev))
 			if reason != tc.stop || (err != nil) != (tc.stop == StopFault) {
 				t.Fatalf("Run = %q, %v; want %q", reason, err, tc.stop)
 			}
@@ -90,17 +120,11 @@ func TestLoopCNIBurst(t *testing.T) {
 				t.Errorf("burst log = %q, want the read's bytes", got)
 			}
 			ev := fx.ev.all()
-			reads := 0
-			for i, e := range ev {
-				if strings.HasPrefix(e, "cni ") {
-					reads++
-					if e != cniAtClock || !strings.HasPrefix(ev[i-1], "stage5 ") {
-						t.Errorf("event %d %q after %q, want %q right after Stage 5", i, e, ev[i-1], cniAtClock)
-					}
-				}
+			if n := strings.Count(strings.Join(ev, "\n"), "\ncni "); n != len(tc.files) {
+				t.Errorf("%d reads, want %d: %q", n, len(tc.files), ev)
 			}
-			if reads != len(tc.files) {
-				t.Errorf("%d reads, want %d: %q", reads, len(tc.files), ev)
+			if n := sinceLastClockBefore(t, ev, "stage5 "); n != len(tc.files) {
+				t.Errorf("%d reads right after Stage 5 from the clock reading before it, want %d: %q", n, len(tc.files), ev)
 			}
 		})
 	}
@@ -115,13 +139,23 @@ func TestLoopCNIWindow(t *testing.T) {
 		fx := newLoopFixture(t, 0, nil)
 		fx.win.score = map[string]float64{"0": 0.5}
 		fx.win.window = func(n int, live []string) WindowResult { return stallWindow(n, live, fx.win.score) }
+		var linesAtRead []int // stalls.jsonl's lines at each read
+		fx.cni.onRead = func() {
+			b, _ := os.ReadFile(filepath.Join(fx.run.Dir(), "stalls.jsonl"))
+			linesAtRead = append(linesAtRead, bytes.Count(b, []byte("\n")))
+		}
 		if reason, err := fx.start(t); err != nil || reason != StopGenerations {
 			t.Fatalf("Run = %q, %v", reason, err)
+		}
+		// The burst's line, then the window's two half lines, are in
+		// before each read.
+		if want := []int{1, 3}; !slices.Equal(linesAtRead, want) {
+			t.Errorf("stalls.jsonl lines at each read %v, want %v", linesAtRead, want)
 		}
 		if got, want := cniFiles(t, fx), []string{"gate-0-ek8s-0123456789abcdef.log", "w-1.log"}; !slices.Equal(got, want) {
 			t.Fatalf("cni/ = %q, want %q", got, want)
 		}
-		if !after(fx.ev.all(), "window 0", "cni "+spanT0.UTC().Format(time.RFC3339Nano)) {
+		if ev := fx.ev.all(); lastPrefix(ev, "cni ") < slices.Index(ev, "window 0") || ev[lastPrefix(ev, "cni ")] != "cni "+spanT0.UTC().Format(time.RFC3339Nano) {
 			t.Errorf("no read from the baseline half's start after the window: %q", fx.ev.all())
 		}
 	})
@@ -160,19 +194,25 @@ func TestLoopCNIWindowFault(t *testing.T) {
 	fx := newLoopFixture(t, 0, nil)
 	fx.win.score = map[string]float64{"0": 0.5}
 	fx.win.fault = func(int) error { return errors.New("loadgen gone") }
-	reason, err := fx.startAt(t, context.Background(), fixedClock)
+	reason, err := fx.startAt(t, context.Background(), tickClock(fx.ev))
 	if reason != StopFault || err == nil || !strings.Contains(err.Error(), "loadgen gone") {
 		t.Fatalf("Run = %q, %v; want the window fault", reason, err)
 	}
-	name := fmt.Sprintf("fault-%d.log", cniClock.Unix())
+	ev := fx.ev.all()
+	if n := sinceLastClockBefore(t, ev, "window 0"); n != 1 {
+		t.Fatalf("%d reads right after the window from the clock reading before it, want 1: %q", n, ev)
+	}
+	// The read's since names the file.
+	since, err := time.Parse(time.RFC3339Nano, strings.TrimPrefix(ev[lastPrefix(ev, "cni ")], "cni "))
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := fmt.Sprintf("fault-%d.log", since.Unix())
 	if got, want := cniFiles(t, fx), []string{name, "gate-0-ek8s-0123456789abcdef.log"}; !slices.Equal(got, want) {
 		t.Fatalf("cni/ = %q, want %q", got, want)
 	}
 	if got := cniFile(t, fx, name); got != string(fx.cni.out) {
 		t.Errorf("%s = %q", name, got)
-	}
-	if ev := fx.ev.all(); !after(ev, "window 0", cniAtClock) {
-		t.Errorf("no read from the window's start after its fault: %q", ev)
 	}
 }
 
@@ -254,14 +294,14 @@ func TestLoopCNIInterrupted(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	fx.win.fault = func(int) error { cancel(); return context.Canceled }
-	reason, err := fx.startAt(t, ctx, fixedClock)
+	reason, err := fx.startAt(t, ctx, nil)
 	if reason != StopInterrupted || !errors.Is(err, context.Canceled) {
 		t.Fatalf("Run = %q, %v; want interrupted", reason, err)
 	}
 	if got, want := cniFiles(t, fx), []string{"gate-0-ek8s-0123456789abcdef.log"}; !slices.Equal(got, want) {
 		t.Errorf("cni/ = %q, want only the burst's %q", got, want)
 	}
-	if ev := fx.ev.all(); after(ev, "window 0", cniAtClock) {
+	if ev := fx.ev.all(); lastPrefix(ev, "cni ") > slices.Index(ev, "window 0") {
 		t.Errorf("a read after the interrupt: %q", ev)
 	}
 }

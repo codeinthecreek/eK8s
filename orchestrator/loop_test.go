@@ -241,15 +241,20 @@ type loopCluster struct {
 	cni *fakeCNI
 }
 
-// fakeCNI answers each CNILog call with out, or err when set.
+// fakeCNI answers each CNILog call with out, or err when set, after
+// calling onRead when set.
 type fakeCNI struct {
-	out []byte
-	err error
+	out    []byte
+	err    error
+	onRead func()
 }
 
 // CNILog logs "cni <since>", since in UTC.
 func (c loopCluster) CNILog(_ context.Context, since time.Time) ([]byte, error) {
 	c.ev.add("cni %s", since.UTC().Format(time.RFC3339Nano))
+	if c.cni.onRead != nil {
+		c.cni.onRead()
+	}
 	if c.cni.err != nil {
 		return nil, c.cni.err
 	}
