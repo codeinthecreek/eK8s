@@ -913,3 +913,17 @@ max. Earlier entries are not backfilled.
 - Reason: a SYN dropped to a new pod for less than the hang timeout never reads as a stall, so zero stalls alone could pass a run whose pod was denied.
 - Reverse: drop the DROPS branch in run_one and the notpass test in verdict, and restore the stall-only stop rule in another_run (deploy/diag/stage5-runs.sh).
 - Origin: owner
+
+## 2026-11-04 · PR (this) · D2 validation: Calico removes the Stage 5 stall (rule B MET)
+- Decision: the owner's run (main 5c4e5fb, pinned clocks, gen 0 image ek8s-wrapper:cf1338c176f5, r = 15.5, b = 62, stress-ng at origin/main's dose): -try (diag-runs-20261104T013254Z) PASS; full set (diag-runs-20261104T013447Z) "runs 15, mid-burst adds 13, stalls 0 (0 in add runs), other FAILs 0, DROPS 0: MET"; every run over_hang_timeout, syn_retrans, unknown_if_drops, end_of_tier_drops_burst, cni_unblocking all 0. Against kindnet's 7/10 stalls in add runs (PR #70): Fisher exact p about 5e-4; 0/13 bounds Calico's stall rate at about 21% (95%). Also: up.sh re-run on the existing cluster exit 0, calico-node UID and restarts unchanged; calico-node idle 25m CPU, 122Mi; iptables-legacy holds no cali- rules (Calico is in the nft tables, which stage5-runs.sh reads). Closes #71 packet (b)'s three unverified assumptions. D3 follows (Cilium, Q2, is not needed).
+- Rejected: none (a measurement).
+- Reason: the set met the fixed stop rule and rule B (2026-11-04, PR #71).
+- Reverse: n/a; a later stall reopens D2.
+- Origin: owner
+
+## 2026-11-04 · PR (this) · The C0 re-measure moves into PR B (option B)
+- Decision: committed maxRate is 19 and maxBurstSends 3000 (loadgen/config.go), so c0 on main cannot reach C0 = 31; PR #65's 31 came from an uncommitted, reverted patch (maxRate 40, maxBurstSends 4800). Order: D3; PR B part 1 raises maxRate and maxBurstSends to cover a ladder past 31; the owner runs c0 on merged main, clocks pinned; PR B part 2 sets r = the measured C0, maxRate to match, b decoupled from r (from the gen-0 Stage 5 runs); run 3.
+- Rejected: re-creating the local patch (uncommitted, unreviewed numbers behind a committed result); c0 on main up to 19 (cannot show C0 above its cap).
+- Reason: a measurement must run on committed code.
+- Reverse: STATUS Next reorder; raise the limits in a PR of its own.
+- Origin: owner
