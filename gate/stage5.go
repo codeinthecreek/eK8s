@@ -94,8 +94,9 @@ var openControl = func(ctx context.Context, kubeCtx string) (*client.Client, fun
 // Stage5 leaves what it made: on a pass the namespace, its pod and the
 // loadgen target are the variant's from now on (DESIGN.md sec 11), and
 // r.BurstHashes holds the burst's recorded hashes. Once the burst's
-// records are read, r.Stage5Stall holds their stall counts, on a pass or
-// a failure; they never change a Result. On a
+// records are read, r.Stage5Stall holds their stall counts and
+// r.Stage5RunID the burst's run_id, on a pass, a failure or a later
+// fault; they never change a Result. On a
 // candidate failure it has already DELETEd the loadgen target, after
 // reading the records; deleting the namespace is the caller's.
 func Stage5(ctx context.Context, cfg Stage5Config, r *Report) error {

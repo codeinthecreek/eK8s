@@ -312,6 +312,15 @@ func TestStage5Faults(t *testing.T) {
 			if len(r.Results) != 0 {
 				t.Errorf("results %q with a fault, want none", summary(r))
 			}
+			// A fault after the burst was read keeps its counts: the
+			// orchestrator records them before it halts.
+			afterBurst := tc.name == "restart_on_a_notready_node" || tc.name == "container_status_unknown"
+			if afterBurst != (r.Stage5Stall != nil) || afterBurst != stage5RunIDRE.MatchString(r.Stage5RunID) {
+				t.Errorf("Stage5Stall %+v, Stage5RunID %q; want set: %v", r.Stage5Stall, r.Stage5RunID, afterBurst)
+			}
+			if afterBurst && r.Stage5Stall.Records != 30 {
+				t.Errorf("Stage5Stall.Records %d, want 30", r.Stage5Stall.Records)
+			}
 		})
 	}
 }
