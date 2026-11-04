@@ -198,3 +198,60 @@ func TestLoopStallFault(t *testing.T) {
 		t.Errorf("stalls.jsonl lines %q, want the last for generation 1's burst", keys)
 	}
 }
+
+// TestLoopStallsUnscored: a window that is not scored still writes the
+// lines of every half that ran: an excluded window both halves', and a
+// window restarted in its stress half the baseline half's, before the
+// run halts on the restart.
+func TestLoopStallsUnscored(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		window func(fx *loopFixture, n int, live []string) WindowResult
+		stop   string
+		want   []string
+	}{
+		{"excluded", func(fx *loopFixture, n int, live []string) WindowResult {
+			res := stallWindow(n, live, fx.win.score)
+			if n == 1 {
+				res.Excluded, res.StressExcluded = []string{"stress-shed"}, []string{"stress-shed"}
+			}
+			return res
+		}, StopGenerations, []string{
+			"burst gate-0-ek8s-0123456789abcdef  0",
+			"baseline w-1 w-1 0", "stress w-1s w-1 0", // excluded, recorded
+			"baseline w-2 w-2 0", "stress w-2s w-2 0",
+		}},
+		{"restart_in_stress", func(fx *loopFixture, n int, live []string) WindowResult {
+			res := stallWindow(n, live, fx.win.score)
+			// The stress half met a new boot_id: the baseline half was
+			// judged, the stress half has no counts.
+			fx.win.restarted = true
+			res.Excluded, res.StressRunID, res.StressSpan = []string{ExcludedRestart}, "", Span{}
+			for id, vr := range res.Variants {
+				vr.StressStall, vr.Baseline, vr.Stress = nil, nil, nil
+				res.Variants[id] = vr
+			}
+			return res
+		}, StopRestart, []string{
+			"burst gate-0-ek8s-0123456789abcdef  0",
+			"baseline w-1 w-1 0",
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fx := newLoopFixture(t, 0, nil)
+			fx.win.score = map[string]float64{"0": 0.5}
+			fx.win.window = func(n int, live []string) WindowResult { return tc.window(fx, n, live) }
+			reason, err := fx.start(t)
+			if err != nil || reason != tc.stop {
+				t.Fatalf("Run = %q, %v; want %q", reason, err, tc.stop)
+			}
+			var keys []string
+			for _, s := range readStallLines(t, fx.run) {
+				keys = append(keys, stallKey(s))
+			}
+			if !slices.Equal(keys, tc.want) {
+				t.Errorf("stalls.jsonl lines\n%s\nwant\n%s", strings.Join(keys, "\n"), strings.Join(tc.want, "\n"))
+			}
+		})
+	}
+}
