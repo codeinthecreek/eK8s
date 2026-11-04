@@ -30,6 +30,7 @@ const (
 	version      = 1
 	runFile      = "run.json"
 	attemptsFile = "attempts.jsonl"
+	stallsFile   = "stalls.jsonl"
 	genomesDir   = "genomes"
 	transcripts  = "transcripts"
 	digestFile   = "sha256"
@@ -115,7 +116,7 @@ func Open(dir string) (*Run, error) {
 		return nil, fmt.Errorf("lineage: %s is not a version %d run directory", runFile, version)
 	}
 	r := &Run{dir: dir}
-	if err := r.checkTail(); err != nil {
+	if err := r.checkTail(attemptsFile, false); err != nil {
 		return nil, err
 	}
 	return r, nil

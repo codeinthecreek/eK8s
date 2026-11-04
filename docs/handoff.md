@@ -14,6 +14,9 @@ autonomous").
   text of the reply, pasted in full, and its "main" is origin/main.
 - Output exactly one code block fenced with FOUR backticks, and nothing
   outside it, so it is a single copy on an iPad.
+- Every diff in a packet is pasted verbatim from the git command's
+  output, never retyped or reassembled; if it is too long, split it into
+  several verbatim parts, each labelled with its own command.
 - ASCII only. Transliterate any non-ASCII in quoted repo text (e.g. a
   middle dot to `-`) and say so in one line of the packet.
 - First line, one header line: packet type, branch, HEAD short SHA, main,

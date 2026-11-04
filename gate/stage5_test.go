@@ -8,11 +8,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/codeinthecreek/eK8s/internal/hashcore"
+	"github.com/codeinthecreek/eK8s/internal/stallrun"
 	"github.com/codeinthecreek/eK8s/loadgen/client"
 	"github.com/codeinthecreek/eK8s/loadgen/wire"
 )
@@ -110,6 +113,9 @@ func summary(r Report) string {
 
 var readyList = list(testDeploy, readyP1)
 
+// stage5RunIDRE is the burst's run_id for variant 7.
+var stage5RunIDRE = regexp.MustCompile(`^gate-7-ek8s-[0-9a-f]{16}$`)
+
 func TestStage5Pass(t *testing.T) {
 	fx := newStage5(t, []string{nodesOK, stressRunning, "", readyList, readyList}, nil)
 	r, err := fx.run(t)
@@ -118,6 +124,18 @@ func TestStage5Pass(t *testing.T) {
 	}
 	if got, want := summary(r), "pod-health pass, responses pass, hash-verify pass"; got != want {
 		t.Errorf("results %q, want %q", got, want)
+	}
+	// The Results are main's, before Stage5Stall, and its counts are zero.
+	wantResults := []Result{{5, "pod-health", true, ""}, {5, "responses", true, ""}, {5, "hash-verify", true, ""}}
+	if !slices.Equal(r.Results, wantResults) {
+		t.Errorf("Results %+v, want %+v", r.Results, wantResults)
+	}
+	wantStall := stallrun.Stats{Records: 30, LongestStartIndex: -1, Threshold: 60}
+	if r.Stage5Stall == nil || *r.Stage5Stall != wantStall {
+		t.Errorf("Stage5Stall %+v, want %+v", r.Stage5Stall, wantStall)
+	}
+	if !stage5RunIDRE.MatchString(r.Stage5RunID) {
+		t.Errorf("Stage5RunID %q, want gate-7-ek8s- and 16 hex", r.Stage5RunID)
 	}
 	if got := readFile(t, filepath.Join(fx.kind, "argv")); !strings.HasPrefix(got, "load\ndocker-image\nek8s-wrapper:0123456789ab\n--name\nx\n") {
 		t.Errorf("kind argv %q", got)
@@ -181,7 +199,7 @@ func TestStage5CandidateFailures(t *testing.T) {
 		kouts   []string
 		records func(target, run string, n int) []wire.Record
 		want    string
-		deleted bool
+		deleted bool // also: the burst was read, so Stage5Stall is set
 	}{
 		{"never_ready", []string{nodesOK, stressRunning, "", list(testDeploy, restartP1), nodesOK}, nil, "deploy-ready FAIL", false},
 		{"restarted_under_load", []string{nodesOK, stressRunning, "", readyList, list(testDeploy, restartP1), nodesOK}, nil, "pod-health FAIL", true},
@@ -210,7 +228,57 @@ func TestStage5CandidateFailures(t *testing.T) {
 			if tc.deleted != (len(fx.f.deletes) == 1 && fx.f.deletes[0] == "7:29") {
 				t.Errorf("deletes %v, want one 7:29: %v", fx.f.deletes, tc.deleted)
 			}
+			if tc.deleted != (r.Stage5Stall != nil) {
+				t.Errorf("Stage5Stall %+v, want set: %v", r.Stage5Stall, tc.deleted)
+			}
+			if tc.deleted != stage5RunIDRE.MatchString(r.Stage5RunID) {
+				t.Errorf("Stage5RunID %q, want set: %v", r.Stage5RunID, tc.deleted)
+			}
+			if r.Stage5Stall != nil && r.Stage5Stall.Records != 30 {
+				t.Errorf("Stage5Stall.Records %d, want 30", r.Stage5Stall.Records)
+			}
 		})
+	}
+}
+
+// TestStage5Stall runs a burst at b = 62 (threshold 124) whose first 124
+// indices are OHT and the rest successes, in a scrambled order: one stall
+// run, recorded, and the same "responses" FAIL Results as without stall
+// recording (detection only, docs/decisions.md 2026-11-02 Q4).
+func TestStage5Stall(t *testing.T) {
+	stallWall0 := time.Date(2026, 11, 4, 13, 0, 0, 0, time.FixedZone("UTC+1", 3600))
+	fx := newStage5(t, []string{nodesOK, stressRunning, "", readyList, readyList}, nil)
+	fx.cfg.BurstRate, fx.f.cfg.BurstRate, fx.f.cfg.BurstSends = 62, 62, 130
+	fx.f.records = func(target, run string, n int) []wire.Record {
+		recs := cleanRecords(target, run, n) // 130 is coprime to 7: every index once
+		for i := range recs {
+			recs[i].IntendedWall = stallWall0.Add(time.Duration(recs[i].Index) * time.Second / 62)
+			if recs[i].Index < 124 {
+				recs[i].Bucket, recs[i].Reason = "failed", "over_hang_timeout"
+			}
+		}
+		return recs
+	}
+	r, err := fx.run(t)
+	if err != nil {
+		t.Fatalf("Stage5: %v", err)
+	}
+	wantResults := []Result{
+		{5, "pod-health", true, ""},
+		{5, "responses", false, "burst: 124 of 130 responses failed (over_hang_timeout 124); indices 0, 1, 2, 3, 4, 5, 6, 7, ..."},
+	}
+	if !slices.Equal(r.Results, wantResults) {
+		t.Errorf("Results %+v, want %+v", r.Results, wantResults)
+	}
+	wantStall := stallrun.Stats{
+		Records: 130, OHT: 124, StallRuns: 1, Longest: 124,
+		LongestStartIndex: 0, LongestStartWall: stallWall0.UTC(), Threshold: 124,
+	}
+	if r.Stage5Stall == nil || *r.Stage5Stall != wantStall {
+		t.Errorf("Stage5Stall %+v, want %+v", r.Stage5Stall, wantStall)
+	}
+	if len(fx.f.deletes) != 1 || fx.f.deletes[0] != "7:129" {
+		t.Errorf("deletes %v, want one 7:129", fx.f.deletes)
 	}
 }
 
@@ -243,6 +311,15 @@ func TestStage5Faults(t *testing.T) {
 			}
 			if len(r.Results) != 0 {
 				t.Errorf("results %q with a fault, want none", summary(r))
+			}
+			// A fault after the burst was read keeps its counts: the
+			// orchestrator records them before it halts.
+			afterBurst := tc.name == "restart_on_a_notready_node" || tc.name == "container_status_unknown"
+			if afterBurst != (r.Stage5Stall != nil) || afterBurst != stage5RunIDRE.MatchString(r.Stage5RunID) {
+				t.Errorf("Stage5Stall %+v, Stage5RunID %q; want set: %v", r.Stage5Stall, r.Stage5RunID, afterBurst)
+			}
+			if afterBurst && r.Stage5Stall.Records != 30 {
+				t.Errorf("Stage5Stall.Records %d, want 30", r.Stage5Stall.Records)
 			}
 		})
 	}

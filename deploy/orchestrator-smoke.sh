@@ -21,7 +21,10 @@
 #   (d) the cluster agrees with the records: a variant namespace exists for
 #       exactly the variants recorded as currently live, and none for a
 #       culled or gate-failed one;
-#   (e) run.json records allow_unpinned true and a host_clock object.
+#   (e) run.json records allow_unpinned true and a host_clock object;
+#   (f) stalls.jsonl exists, every line is JSON, and it holds at least
+#       one burst line and one baseline line (counts not checked: D3a
+#       records them only).
 # The orchestrator gets -allow-unpinned: the CI runner cannot pin its clocks.
 # Not covered: a cull (the population cap is 3, and 4 live variants do not
 # fit the CI node), so (d) shows only that live and recorded agree. If
@@ -144,6 +147,19 @@ jq -e '[.[] | select(.fitness != null) | .fitness |
 		.score != ([.baseline.score, .stress.score] | min))] | length == 0' <<<"$last" >/dev/null ||
 	die "a scored attempt lacks a scored stress or baseline half, or its score is not the lower: $(jq -c '[.[] | .fitness]' <<<"$last" | cut -c1-600)"
 ok "attempts.jsonl: $n generations, one scored mutation, one stage 1 failure, both halves scored"
+
+stalls="$run/stalls.jsonl"
+[ -f "$stalls" ] || die "no stalls.jsonl in the run directory"
+[ "$(tail -c1 "$stalls" | od -An -c | tr -d ' ')" = '\n' ] || die "stalls.jsonl is empty or ends in a torn line"
+while IFS= read -r line; do
+	[ -n "$line" ] && jq . <<<"$line" >/dev/null 2>&1 ||
+		die "stalls.jsonl line is not JSON: $(cut -c1-300 <<<"$line")"
+done <"$stalls"
+for kind in burst baseline; do
+	jq -e --arg k "$kind" 'select(.kind == $k)' "$stalls" >/dev/null ||
+		die "stalls.jsonl holds no $kind line: $(cut -c1-600 "$stalls")"
+done
+ok "stalls.jsonl: $(wc -l <"$stalls") lines, burst and baseline among them"
 
 for id in $(jq -r '.[] | select(.gate.passed) | .generation_id' <<<"$last"); do
 	[ -d "$run/genomes/$id" ] || die "no archived genome for passed generation $id"

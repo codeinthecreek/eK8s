@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"math"
 	"os"
 	"path/filepath"
@@ -189,7 +190,7 @@ func (r *Run) AppendAttempt(a Attempt) error {
 	defer r.mu.Unlock()
 	// A failed earlier append (a full disk) may have left a torn line,
 	// which this one would corrupt too.
-	if err := r.checkTail(); err != nil {
+	if err := r.checkTail(attemptsFile, false); err != nil {
 		return err
 	}
 	f, err := os.OpenFile(filepath.Join(r.dir, attemptsFile), os.O_WRONLY|os.O_APPEND, 0)
@@ -244,10 +245,13 @@ func (r *Run) Attempts() ([]Attempt, error) {
 	return out, nil
 }
 
-// checkTail errors if attempts.jsonl is not empty and does not end in a
-// newline.
-func (r *Run) checkTail() error {
-	f, err := os.Open(filepath.Join(r.dir, attemptsFile))
+// checkTail errors if the JSONL file name is not empty and does not end
+// in a newline. A missing file is an error unless missingOK.
+func (r *Run) checkTail(name string, missingOK bool) error {
+	f, err := os.Open(filepath.Join(r.dir, name))
+	if missingOK && errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
 	if err != nil {
 		return fmt.Errorf("lineage: %w", err)
 	}
@@ -264,7 +268,7 @@ func (r *Run) checkTail() error {
 		return fmt.Errorf("lineage: %w", err)
 	}
 	if last[0] != '\n' {
-		return fmt.Errorf("lineage: %s ends in a torn line; fix it by hand", attemptsFile)
+		return fmt.Errorf("lineage: %s ends in a torn line; fix it by hand", name)
 	}
 	return nil
 }

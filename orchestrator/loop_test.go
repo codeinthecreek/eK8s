@@ -17,6 +17,7 @@ import (
 	"github.com/codeinthecreek/eK8s/fitness"
 	"github.com/codeinthecreek/eK8s/gate"
 	"github.com/codeinthecreek/eK8s/internal/classifier"
+	"github.com/codeinthecreek/eK8s/internal/stallrun"
 	"github.com/codeinthecreek/eK8s/lineage"
 )
 
@@ -143,6 +144,13 @@ func (g fakeGate) Local(_ context.Context, dir string) (gate.Report, error) {
 
 func (g fakeGate) Stage5(_ context.Context, id, image string, r *gate.Report) error {
 	g.ev.add("stage5 %s %s", id, image)
+	// The burst's records are read before any Stage 5 check, so its
+	// counts are set on a pass, a failure, and a fault after the burst.
+	r.Stage5Stall = &stallrun.Stats{Records: 30, OHT: 2, TailRun: 2, Longest: 2, LongestStartIndex: 28, LongestStartWall: burstWall, Threshold: 60}
+	r.Stage5RunID = "gate-" + id + "-ek8s-0123456789abcdef"
+	if faultStage5[id] {
+		return errors.New("stress-ng pod gone")
+	}
 	if failStage5[id] {
 		r.Results = append(r.Results, gate.Result{Stage: 5, Check: "hash-verify", Detail: "candidate text"})
 		return nil
@@ -152,9 +160,13 @@ func (g fakeGate) Stage5(_ context.Context, id, image string, r *gate.Report) er
 	return nil
 }
 
-// failStage5 names the variant ids Stage 5 fails; tests set it before
-// they run and never in parallel.
-var failStage5 = map[string]bool{}
+// failStage5 names the variant ids Stage 5 fails, faultStage5 those it
+// faults on after the burst; tests set them before they run and never
+// in parallel.
+var failStage5, faultStage5 = map[string]bool{}, map[string]bool{}
+
+// burstWall is the fake burst's longest OHT run's start.
+var burstWall = time.Date(2026, 11, 4, 3, 0, 0, 0, time.UTC)
 
 // fakeMutator answers call n (from 1) with mut(n).
 type fakeMutator struct {
@@ -255,7 +267,7 @@ func newLoopFixture(t *testing.T, gens int, mut func(n int, parent map[string][]
 		Params: fitness.DefaultParams(), Gen0: gen0Files, Generations: gens, TurnCeiling: 1000,
 		ScratchDir: t.TempDir(), Rand: rand.New(rand.NewPCG(1, 2)),
 	}
-	t.Cleanup(func() { clear(failStage5) })
+	t.Cleanup(func() { clear(failStage5); clear(faultStage5) })
 	return fx
 }
 

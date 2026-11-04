@@ -10,6 +10,7 @@ import (
 	"github.com/codeinthecreek/eK8s/deploy/variant"
 	"github.com/codeinthecreek/eK8s/fitness"
 	"github.com/codeinthecreek/eK8s/internal/classifier"
+	"github.com/codeinthecreek/eK8s/internal/stallrun"
 	"github.com/codeinthecreek/eK8s/loadgen/client"
 	"github.com/codeinthecreek/eK8s/loadgen/wire"
 )
@@ -61,7 +62,17 @@ type WindowResult struct {
 	// after a loadgen restart, whose records are gone, and when the
 	// window never started.
 	Variants map[string]VariantResult
+	// BaselineSpan and StressSpan are each half's host time; zero for a
+	// half that never started, and StressSpan zero after a loadgen
+	// restart in the stress half. Recording only (docs/decisions.md,
+	// 2026-11-04 D1-D7): nothing that decides a score, an exclusion, a
+	// streak, a cull or a halt reads them.
+	BaselineSpan, StressSpan Span
 }
+
+// Span is one half's host time: Start just before its first upload, End
+// just after its last records are read.
+type Span struct{ Start, End time.Time }
 
 // Scored reports whether the window was scored.
 func (w WindowResult) Scored() bool { return len(w.Excluded) == 0 }
@@ -83,6 +94,14 @@ type VariantResult struct {
 	// window is excluded or the variant disqualified, and Stress nil from
 	// RunBaseline.
 	Baseline, Stress *HalfScore
+	// BaselineStall and StressStall are each half's stall counts for the
+	// variant (stallrun.Detect over its records of that half, at r); nil
+	// for a half that never started, and StressStall nil after a loadgen
+	// restart in the stress half. They are set whether or not the window
+	// is scored or the variant disqualified. Recording only
+	// (docs/decisions.md, 2026-11-04 D1-D7): nothing that decides a
+	// score, an exclusion, a streak, a cull or a halt reads them.
+	BaselineStall, StressStall *stallrun.Stats
 }
 
 // HalfScore is one half's score for one variant.
@@ -171,7 +190,7 @@ func (s *Session) window(ctx context.Context, live []string, batches []Batch, ha
 	if err != nil {
 		return restart(err)
 	}
-	res.BaselineExcluded = base.excluded
+	res.BaselineExcluded, res.BaselineSpan = base.excluded, base.span
 	ran := []*half{base}
 	if halves == HalvesPerWindow && len(base.excluded) == 0 {
 		res.StressRunID = newRunID()
@@ -189,7 +208,7 @@ func (s *Session) window(ctx context.Context, live []string, batches []Batch, ha
 		if err != nil {
 			return WindowResult{}, err
 		}
-		res.StressExcluded = st.excluded
+		res.StressExcluded, res.StressSpan = st.excluded, st.span
 		ran = append(ran, st)
 	}
 	for _, h := range ran {
@@ -224,6 +243,7 @@ type half struct {
 	batches  []Batch // batches[i] for live[i]
 	excluded []string
 	started  bool // the run started, and every record of it was read
+	span     Span // set when started
 	recs     map[string][]wire.Record
 	cpu0     fitness.Sample
 	cpu1     fitness.Sample
@@ -248,6 +268,7 @@ type half struct {
 // every return. An error is a fault or a loadgen restart.
 func (s *Session) runHalf(ctx context.Context, name, runID string, live []string, batches []Batch) (h *half, err error) {
 	h = &half{name: name, batches: batches, recs: make(map[string][]wire.Record, len(live))}
+	start := time.Now()
 	for i, id := range live {
 		up, err := s.c.Client.PutPairs(ctx, id, runID, batches[i].upload())
 		if err != nil {
@@ -334,6 +355,7 @@ func (s *Session) runHalf(ctx context.Context, name, runID string, live []string
 			h.excluded = appendOnce(h.excluded, ExcludedGap)
 		}
 	}
+	h.span = Span{Start: start, End: time.Now()}
 	h.excluded = append(h.excluded, s.loadgenExclusions(h.recs)...)
 	slices.Sort(h.excluded)
 	h.started = true
@@ -346,7 +368,8 @@ func (s *Session) runHalf(ctx context.Context, name, runID string, live []string
 // baseline first, against its salt history and each half's batch truth.
 // Claims in a half of which the host confirms none are a fault, as they
 // were for a window of one run: loadgen and the host disagree about the
-// same bytes (docs/decisions.md, PR #58 host-confirmation entry).
+// same bytes (docs/decisions.md, PR #58 host-confirmation entry). It
+// also records each variant's stall counts for each half (VariantResult).
 func (s *Session) judge(ctx context.Context, res *WindowResult, live []string, ran []*half) error {
 	key := func(h *half, id string) string { return h.name + "/" + id }
 	recs := make(map[string][]wire.Record, len(live)*len(ran))
@@ -370,6 +393,12 @@ func (s *Session) judge(ctx context.Context, res *WindowResult, live []string, r
 					id, h.name, errUnconfirmed, v.Claims, v.Unconfirmed)
 			}
 			vr.Records += len(h.recs[id])
+			stall := stallrun.Detect(h.recs[id], s.cfg.Rate)
+			if h.name == HalfStress {
+				vr.StressStall = &stall
+			} else {
+				vr.BaselineStall = &stall
+			}
 			if v.Reason != classifier.ReasonNone && vr.Disqualified == classifier.ReasonNone {
 				vr.Disqualified, vr.DisqualifiedHalf, vr.DisqualifiedIndex = v.Reason, h.name, v.Index
 			}
