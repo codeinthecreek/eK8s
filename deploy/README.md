@@ -18,6 +18,7 @@ ek8s-system/          namespace ek8s-system: loadgen's control Service and
 loadgen/              loadgen's Deployment: template + Go renderer (cmd/render)
 variant/              the per-variant bundle: templates + Go renderer
 up.sh                 create the cluster (if absent) and apply the above
+down.sh               delete the cluster (exit 0 if there is none)
 loadgen-up.sh <r>     build loadgen's image, load it and apply its Deployment
 smoke.sh              infra smoke test (run after up.sh)
 variant-smoke.sh      variant bundle smoke test (run after up.sh)
@@ -159,12 +160,33 @@ fails under the restriction with "loopback: Failed RTM_NEWADDR".
 deploy/up.sh      # create cluster ek8s if absent; apply Calico; load stress-ng; apply infra
 deploy/smoke.sh   # Calico, node reservation, metrics-server, stress-ng on and off
 deploy/loadgen-up.sh 2   # build and deploy loadgen at r = 2 (see loadgen below)
-kind delete cluster --name ek8s   # tear down
+deploy/down.sh    # delete cluster ek8s (exit 0 with a message if absent)
 ```
 
 `up.sh` is safe to re-run; each run resets stress-ng to off.
 `up.sh` is setup only: because it resets stress-ng to off, never run it
 during an orchestrator run.
+
+### Fresh-cluster check order
+
+On a fresh cluster, in this order (the owner's workstation, pinned clocks
+for the diag step):
+
+```
+deploy/down.sh
+deploy/up.sh
+deploy/smoke.sh
+deploy/variant-smoke.sh      # refuses while a loadgen pod exists
+deploy/loadgen-smoke.sh
+deploy/stage5-smoke.sh
+deploy/diag/stage5-runs.sh -rate R -try   # deploys loadgen itself; then without -try
+```
+
+Never run `loadgen-up.sh` before the smokes: variant-smoke.sh refuses
+while loadgen pods exist, and each loadgen smoke deploys and removes its
+own. `stage5-runs.sh` deploys loadgen at its `-rate` and leaves it. Each
+smoke deletes what it created and waits for it to be gone, so a smoke run
+after another finds nothing of the earlier one.
 
 ### Parameters and CI size
 
