@@ -89,7 +89,7 @@ type config struct {
 
 func main() {
 	var c config
-	ladder := flag.String("ladder", "6,9,12,15,18,19", "rates to walk upward, comma-separated integers, strictly increasing")
+	ladder := flag.String("ladder", "8,16,24,28,32,36,40,44,48", "rates to walk upward, comma-separated integers, strictly increasing")
 	flag.StringVar(&c.image, "image", "", "generation 0's image, ek8s-wrapper:<12 hex>, already kind-loaded (not built here)")
 	flag.StringVar(&c.id, "id", "900001", "the variant id; its namespace is ek8s-v<id>")
 	flag.IntVar(&c.confirm, "confirm", 2, "extra windows at the last passing rate, all of which must pass")

@@ -34,7 +34,7 @@ func TestConfigValidateAccepts(t *testing.T) {
 		"IPv6 target":           func(c *Config) { c.TargetURL = "http://[fd00::1]:8080/v{id}" },
 		"IPv6 canary":           func(c *Config) { c.CanaryAddr = "[fd00::1]:443" },
 		"smallest burst":        func(c *Config) { c.BurstRate = 0.15 }, // n = round(4.5) = 5
-		"largest burst":         func(c *Config) { c.BurstRate = 100 },  // n = 3,000
+		"largest burst":         func(c *Config) { c.BurstRate = 200 },  // n = 6,000
 		"one-send window":       func(c *Config) { c.Rate, c.Window = 1, time.Second },
 		"fractional burst rate": func(c *Config) { c.BurstRate = 0.5 }, // n = 15
 		"test burst duration":   func(c *Config) { c.BurstRate, c.burstDuration = 200, 100*time.Millisecond },
@@ -66,7 +66,7 @@ func TestConfigValidateRefuses(t *testing.T) {
 		"burst rate Inf":     func(c *Config) { c.BurstRate = math.Inf(1) },
 		"burst n = 4":        func(c *Config) { c.BurstRate = 0.149 },  // round(4.47)
 		"burst n = 0":        func(c *Config) { c.BurstRate = 0.01 },   // round(0.3)
-		"burst n = 3,001":    func(c *Config) { c.BurstRate = 100.02 }, // round(3000.6)
+		"burst n = 6,001":    func(c *Config) { c.BurstRate = 200.02 }, // round(6000.6)
 		"burst rate huge":    func(c *Config) { c.BurstRate = 1e300 },
 		"burst duration neg": func(c *Config) { c.burstDuration = -time.Second },
 		"ring over max":      func(c *Config) { c.Rate, c.Window, c.maxRate = maxRecords, time.Second, maxRecords },
@@ -261,12 +261,12 @@ func TestConfigCounts(t *testing.T) {
 		t.Errorf("BurstSends at D = 10s = %d, %v; want 80, nil", n, err)
 	}
 	c.burstDuration = 0
-	c.BurstRate = 100
+	c.BurstRate = 200
 	if n, err := c.BurstSends(); err != nil || n != maxBurstSends {
-		t.Errorf("BurstSends at b = 100 = %d, %v; want %d, nil", n, err, maxBurstSends)
+		t.Errorf("BurstSends at b = 200 = %d, %v; want %d, nil", n, err, maxBurstSends)
 	}
-	if p, err := c.BurstPairs(); err != nil || p != 1396 {
-		t.Errorf("BurstPairs at b = 100 = %d, %v; want 1396, nil", p, err)
+	if p, err := c.BurstPairs(); err != nil || p != 2792 {
+		t.Errorf("BurstPairs at b = 200 = %d, %v; want 2792, nil", p, err)
 	}
 
 	bad := validConfig()
@@ -280,7 +280,7 @@ func TestConfigCounts(t *testing.T) {
 	if _, err := bad.RingCapacity(); err == nil {
 		t.Error("RingCapacity at rate 0: nil error")
 	}
-	for _, b := range []float64{0.149, 100.02, 0, math.NaN()} {
+	for _, b := range []float64{0.149, 200.02, 0, math.NaN()} {
 		bad = validConfig()
 		bad.BurstRate = b
 		if _, err := bad.BurstSends(); err == nil {

@@ -16,7 +16,7 @@
 #       proxy: config, a target, an upload, a window run started, refused
 #       deletion while busy, cancelled, its records read, the target
 #       deleted, the canary; every body's boot_id is /config's;
-# then, redeployed at r = 19 (a new pod, so a new boot_id),
+# then, redeployed at r = 50, maxRate (a new pod, so a new boot_id),
 #   (2) the largest upload loadgen takes, max(window_pairs, burst_pairs)
 #       pairs of the largest size, is accepted.
 # Exits non-zero on the first failed check, after printing the loadgen
@@ -211,13 +211,13 @@ static)
 *) die "(7) cpuManagerPolicy \"$policy\" is neither static nor none: $state" ;;
 esac
 
-# --- (6) the start line's memory limit (384Mi) and GOMEMLIMIT (90%).
+# --- (6) the start line's memory limit (768Mi) and GOMEMLIMIT (90%).
 logs=$(k -n "$sys" logs "$pod" -c loadgen) || die "(6) cannot read $pod's log"
 start=$(grep -m1 'msg="loadgen starting"' <<<"$logs") || die "(6) no start line in $pod's log"
-for w in mem_limit_bytes=402653184 go_mem_limit=362387866; do
+for w in mem_limit_bytes=805306368 go_mem_limit=724775732; do
 	[[ " $start " == *" $w "* ]] || die "(6) start line lacks $w: $start"
 done
-ok "(6) start line: mem_limit_bytes=402653184 go_mem_limit=362387866"
+ok "(6) start line: mem_limit_bytes=805306368 go_mem_limit=724775732"
 
 # --- (3) the canary address is the API server's ClusterIP and port, as
 # the kubelet expanded them into the args; the canary reads refused.
@@ -365,15 +365,15 @@ body=$(api_post /canary) || die "(1) POST /canary failed"
 want "(1) POST /canary" "$body" "{\"boot_id\":\"$boot\",\"result\":\"refused\"}"
 ok "(1) run $run cancelled; read $n records; DELETE /targets/$id?through=$through: 200; POST /canary: refused"
 
-# --- (2) r = 19: the largest upload, max(window_pairs, burst_pairs)
+# --- (2) r = 50 (maxRate): the largest upload, max(window_pairs, burst_pairs)
 # pairs of the largest size, under the cap loadgen derives from them.
-deploy/loadgen-up.sh 19 || die "(2) loadgen at r=19 not Ready"
+deploy/loadgen-up.sh 50 || die "(2) loadgen at r=50 not Ready"
 pod=$(loadgen_pod)
 cfg=$(config)
 old_boot=$boot
 boot=$(boot_of "$cfg")
 [ "$boot" != "$old_boot" ] || die "(2) boot_id unchanged after the redeploy: $boot"
-want "(2) GET /config" "$(grep -o '"r":[^,]*,"window_s":[^,]*,"burst_rate":[^,]*,' <<<"$cfg")" '"r":19,"window_s":300,"burst_rate":76,'
+want "(2) GET /config" "$(grep -o '"r":[^,]*,"window_s":[^,]*,"burst_rate":[^,]*,' <<<"$cfg")" '"r":50,"window_s":300,"burst_rate":200,'
 window_pairs=$(int window_pairs "$cfg")
 burst_pairs=$(int burst_pairs "$cfg")
 most=$((window_pairs > burst_pairs ? window_pairs : burst_pairs))
@@ -389,6 +389,6 @@ else
 fi
 body=$(api_put "/targets/$id/pairs/smoke-largest" "$work/largest.json") || die "(2) upload of $size bytes failed"
 want "(2) PUT /targets/$id/pairs/smoke-largest" "$body" "{\"boot_id\":\"$boot\",\"count\":$most}"
-ok "(2) $sys/$pod at r=19: uploaded $most pairs, $size bytes"
+ok "(2) $sys/$pod at r=50: uploaded $most pairs, $size bytes"
 
 echo "loadgen-smoke.sh: all checks passed"

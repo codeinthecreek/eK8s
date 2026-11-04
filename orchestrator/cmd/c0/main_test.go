@@ -55,14 +55,14 @@ func TestParseLadder(t *testing.T) {
 }
 
 // TestCheckRates: loadgen's own validation refuses a rate over its
-// maxRate (19), so the ladder default passes and 20 does not.
+// maxRate (50), so the ladder default passes and 51 does not.
 func TestCheckRates(t *testing.T) {
-	if err := checkRates([]int{6, 9, 12, 15, 18, 19}); err != nil {
+	if err := checkRates([]int{8, 16, 24, 28, 32, 36, 40, 44, 48}); err != nil {
 		t.Errorf("default ladder: %v", err)
 	}
-	err := checkRates([]int{6, 20})
-	if err == nil || !strings.Contains(err.Error(), "20") {
-		t.Errorf("ladder over maxRate: %v, want an error naming 20", err)
+	err := checkRates([]int{6, 51})
+	if err == nil || !strings.Contains(err.Error(), "51") {
+		t.Errorf("ladder over maxRate: %v, want an error naming 51", err)
 	}
 }
 

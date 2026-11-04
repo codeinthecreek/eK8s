@@ -15,15 +15,18 @@ import (
 // starting guess (DESIGN.md sec 15).
 const burstDuration = 30 * time.Second
 
-// maxBurstSends is the largest Stage 5 burst n loadgen accepts. The
-// PR #43 no-cap memory sum (docs/decisions.md) holds for a burst of at
-// most 3,000 records; a larger n needs that sum redone first.
-const maxBurstSends = 3000
+// maxBurstSends is the largest Stage 5 burst n loadgen accepts:
+// 4 x maxRate x 30 s, the burst at b = 4r. The PR B memory sum
+// (docs/decisions.md, 2026-11-05) holds for a burst of at most 6,000
+// records; a larger n needs that sum redone first.
+const maxBurstSends = 6000
 
-// maxRate is the largest r loadgen accepts. The PR #45 W entry's memory
-// sum (docs/decisions.md) holds, with 4 targets at W = 5 min, for r of
-// at most 19; a larger r needs loadgen's heap measured first.
-const maxRate = 19
+// maxRate is the largest r loadgen accepts. The PR B memory sum
+// (docs/decisions.md, 2026-11-05) holds, with 4 targets at W = 5 min,
+// n = 4r x 30 s and a 768Mi limit, for r of at most 50: its live heap
+// plus worst-case stalled requests stays within half of GOMEMLIMIT.
+// A larger r needs that sum redone first.
+const maxRate = 50
 
 // pairTailEpsilon bounds the chance that one stream runs out of /verify
 // pairs in one window (see WindowPairs). A starting guess (DESIGN.md

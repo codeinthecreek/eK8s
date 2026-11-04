@@ -38,6 +38,13 @@ cluster costs roughly 1 core and 1.5-2 GB baseline. Budget the rest
 (~7 cores / ~13-14 GB) across: orchestrator process, load generator,
 stress-ng, metrics-server, and the live variant population.
 
+Node budget (requests, 7000m allocatable; docs/decisions.md, 2026-11-05
+PR B memory-sum entry):
+- CPU: control plane + kube-system 1200m + loadgen 1000m + stress-ng
+  2750m + 4 variants x 1 pod x 250m = 5950m of 7000m, 1050m spare.
+- Memory: loadgen 768Mi + stress-ng 2Gi + 4 variants x 1 pod x 256Mi =
+  3.75Gi, plus the control plane's ~1.5-2 GB, inside ~13-14 GB.
+
 ## 3. Architecture summary
 
 - **Substrate:** Kubernetes, single-node kind cluster.
@@ -902,10 +909,10 @@ workstation Argon2 benchmark; the CI smoke run uses `r` = 2.
 **The burst shape** is frozen per run like `r`: its rate b is set by the
 start-up flag `-burst-rate` (b = 2 x C0 = 4r, section 15), its duration D
 is the fixed 30 s, and its size is n = round(b x D). The ring's largest
-burst is n (below). Start-up refuses n > 3,000, because the memory sum
-(docs/decisions.md, PR #43 no-cap entry) covers no more. Start-up also
-refuses r > 19 (maxRate), from the memory sum (docs/decisions.md, PR #45
-W entry).
+burst is n (below). Start-up refuses n > 6,000 (maxBurstSends, 4 x
+maxRate x 30 s) and r > 50 (maxRate), because the memory sum at a 768Mi
+limit covers no more (docs/decisions.md, 2026-11-05 PR B memory-sum
+entry).
 
 **Schedule.** One scheduler goroutine per target. Send i is intended at
 start + i/`r`, computed from the index and never from a running sleep, so
@@ -981,7 +988,7 @@ halts the first run (docs/decisions.md, PR #58 host-confirmation entry).
 
 **Runs in the cluster**, as one long-lived Deployment in namespace
 `ek8s-system` serving every variant's stream and every Stage 5 burst.
-Guaranteed QoS, 1 CPU / 384Mi: on the workstation cluster the static
+Guaranteed QoS, 1 CPU / 768Mi: on the workstation cluster the static
 CPU manager (`cpuManagerPolicy: static`, deploy/kind/cluster.yaml) gives
 it an exclusive core. The CI-size cluster keeps the default policy (a
 2-CPU runner cannot fit a whole loadgen core) and lowers only loadgen's
@@ -1582,7 +1589,7 @@ with the reason and the total usage of every mutation call.
   stagnation soft/hard thresholds, usage ceiling, per-variant stream rate
   `r` and the 0.5 x C0 factor, the 50/48/2 request mix and the
   match:mismatch split, the Stage 5 negative share (5%), loadgen's
-  1 CPU / 384Mi sizing (exclusive core under the static CPU manager), the
+  1 CPU / 768Mi sizing (exclusive core under the static CPU manager), the
   lag thresholds (p99 10 ms, any 100 ms), 3 consecutive excluded
   windows, readiness-probe timings, K = 3 fully verified scored windows per
   variant, the `/hash` repeat share (1%), the `/hash` password floor (16
@@ -1591,7 +1598,7 @@ with the reason and the total usage of every mutation call.
   hashes per window), the Stage 5 burst factor (2 x C0) and duration (D =
   30 s), the 200 ms run start lead, the 1e-9 bound on a stream running out
   of `/verify` pairs, the 10 s shutdown bound, loadgen's 15 s grace
-  period, the window length W (5 min), maxRate (19, from the memory sum,
+  period, the window length W (5 min), maxRate (50, from the memory sum,
   pending a workstation heap measurement), and the control API
   server's 2-minute read and write timeouts) are all explicitly
   starting guesses pending real telemetry, not derived values -- expect to

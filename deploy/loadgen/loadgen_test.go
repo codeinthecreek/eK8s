@@ -97,9 +97,9 @@ func TestRenderRefusals(t *testing.T) {
 		{"rate zero", "0", "must both be positive"},
 		{"rate negative", "-1", "must both be positive"},
 		{"rate NaN", "NaN", "want 1 to"},
-		{"rate Inf", "+Inf", "over the 19 the memory sum covers"},
-		{"rate over maxRate", "20", "loadgen: rate 20 over the 19 the memory sum covers"},
-		{"rate just over maxRate", "19.000000000000004", "over the 19 the memory sum covers"},
+		{"rate Inf", "+Inf", "over the 50 the memory sum covers"},
+		{"rate over maxRate", "51", "loadgen: rate 51 over the 50 the memory sum covers"},
+		{"rate just over maxRate", "50.00000000000001", "over the 50 the memory sum covers"},
 
 		{"image other repo", "busybox:0123456789ab", "ek8s-loadgen:<12 lowercase hex>"},
 		{"image wrapper repo", "ek8s-wrapper:0123456789ab", "ek8s-loadgen:<12 lowercase hex>"},
@@ -189,9 +189,9 @@ func TestRenderManifest(t *testing.T) {
 			t.Errorf("manifest lacks exactly one %q", want)
 		}
 	}
-	// Guaranteed at the workstation size: 1 CPU and 384Mi, requests =
+	// Guaranteed at the workstation size: 1 CPU and 768Mi, requests =
 	// limits, so an exclusive core under the static CPU manager.
-	for _, want := range []string{"cpu: 1\n", "memory: 384Mi\n"} {
+	for _, want := range []string{"cpu: 1\n", "memory: 768Mi\n"} {
 		if n := strings.Count(s, want); n != 2 {
 			t.Errorf("manifest has %d %q, want 2 (request and limit)", n, want)
 		}

@@ -990,3 +990,11 @@ max. Earlier entries are not backfilled.
 - Reason: owner decision, 2026-11-04. deploy.yml was 202 of 342 Actions minutes in the first 4 days of November (17 runs) and ran on almost every code PR; the owner wants CI kept small. The smoke scripts are unchanged.
 - Reverse: restore the pull_request trigger, its paths and the job `if` from the PR #75 version (`git show 49b0e00:.github/workflows/deploy.yml`) and undo the deploy/README.md paragraph.
 - Origin: owner
+
+## 2026-11-05 · PR #77 (inferred) · PR B memory sum: loadgen 768Mi, maxRate 50, maxBurstSends 6000 (amends the PR #45 W and PR #47 header-cap entries' sums; DESIGN.md sec 2, 10, 15)
+- Decision: loadgen memory request = limit 768Mi (GOMEMLIMIT 724775732 = limit - limit/10), maxRate 50, maxBurstSends 6000 (4 x 50 x 30), c0 default ladder 8,16,24,28,32,36,40,44,48. At 512Mi (owner option B) the sum failed at r 50 (272.19 MiB vs GOMEMLIMIT/2 230.40) and passed only to r 38; the owner then chose 768Mi.
+- Sum (4 targets, W 300 s, n = 120r, today's mem_test.go figures): salts 4 x 750k x 25.36 B; ring slots 4 x (rW + n) x 193 B; record pairs 0.51 x (4rW + n) x 857 B; /verify batches 4 x P(rW) x 739.4 B (measured, 16-1024 char passwords, plus the Stream copy); burst 0.49n x 739.4 B + n x 700 B; evidence 5 x 8 x 5703 B; live = sum x 117/102.94 (PR #45 transients); stalled = 28r in flight (4 targets or one burst at 4r, never both: Stage 5 is in gaps, sec 11) x 80 KiB (PR #47). Gate: live <= GOMEMLIMIT/2 and live + stalled <= GOMEMLIMIT/2.
+- Result at r 50, 768Mi: live 162.81 MiB <= 345.60 PASS; live + stalled 162.81 + 109.38 = 272.19 MiB <= 345.60 PASS. At r 19 the model gives 99.82 MiB benchmarked, PR #45 had 102.94. Node budget with the HPA pin: CPU 5950m of 7000m, memory 3.75Gi of requests plus the control plane (DESIGN.md sec 2).
+- Rejected: 512Mi with maxRate 38 (owner chose 768Mi to keep the ladder to 48); comparing live + stalled with the whole GOMEMLIMIT as PR #47 did (the owner's rule is half, GOGC=100's headroom); counting every slot of every ring as a /hash record with a pair, a burst in all four rings at once (over-counts).
+- Reverse: set maxRate, maxBurstSends, the 768Mi and the smoke's (2)/(6) values back; a higher maxRate needs this sum redone with a measured loadgen heap.
+- Origin: owner (768Mi, maxRate 50, the half-GOMEMLIMIT rule), Code (the sum)
