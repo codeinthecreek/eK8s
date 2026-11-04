@@ -16,50 +16,26 @@ name: deploy smoke
 # smoke). It proves the mechanics (pinned
 # images, kustomizations, metrics-server, stress-ng on and off, the
 # variant bundle, ek8s-system), not the full-size numbers: those need the workstation
-# (docs/STATUS.md, Parked). workflow_dispatch only works once this file is
-# on the default branch.
+# (docs/STATUS.md, Parked).
+# Run it by hand (Actions tab, deploy smoke, Run workflow, on the PR's branch)
+# when the planning chat asks in a review. The paths in deploy/README.md
+# usually warrant a run.
+# workflow_dispatch only works once this file is on the default branch.
 on:
-  # Draft PRs skip the job (jobs.smoke.if); ready_for_review starts the run
-  # when the owner-approved PR leaves draft.
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
-    paths:
-      - 'deploy/**'
-      # variant-smoke.sh deploys generation 0's image built from these.
-      - 'cmd/service/**'
-      - 'internal/wrapper/**'
-      # loadgen-smoke.sh builds loadgen's image from these.
-      - 'loadgen/**'
-      - 'internal/classifier/**'
-      # stage5-smoke.sh runs gate Stage 5 from these.
-      - 'gate/**'
-      - 'internal/hashcore/**'
-      - 'internal/hostpairs/**'
-      - 'loadgen/client/**'
-      - 'loadgen/wire/**'
-      # orchestrator-smoke.sh runs the orchestrator, driver and fake claude.
-      - 'orchestrator/**'
-      - 'driver/**'
-      - 'lineage/**'
-      - 'fitness/**'
-      - '.github/workflows/deploy.yml'
+  # No pull_request trigger: the smoke is dispatched by hand (see above).
   workflow_dispatch:
 
 permissions:
   contents: read
 
-# One run per PR (the ref for dispatch); a new push to a PR cancels its run
-# in flight. Only pull_request runs are cancelled: a dispatch never cancels
-# another dispatch (it queues behind it).
+# One run per ref; a newer dispatch replaces a pending one. A run in progress
+# is never cancelled.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   smoke:
-    # workflow_dispatch has no pull_request context and always runs; a PR
-    # runs only once it is not a draft.
-    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     timeout-minutes: 50
     env:

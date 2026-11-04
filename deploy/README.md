@@ -208,7 +208,7 @@ Paths are relative to deploy/. The reserved value must equal the kind
 config's kubeReserved + systemReserved CPU; the stress minimum must sit
 below the stress-ng CPU limit (3 CPU full size, 500m CI size).
 
-CI (`.github/workflows/deploy.yml`) runs, at CI size and in this order:
+The kind smoke (`.github/workflows/deploy.yml`) runs by hand, at CI size and in this order:
 the diag's unit test (`deploy/diag/stage5-runs_test.sh`, no cluster), up.sh,
 smoke.sh, variant-smoke.sh, loadgen-smoke.sh, stage5-smoke.sh (gate Stage 5
 end to end: generation 0 deployed, a real burst, host verification), then
@@ -216,13 +216,16 @@ the end-to-end dry run (`deploy/orchestrator-smoke.sh`: the orchestrator for
 2 generations with a fake claude under bwrap; the records and the cluster
 checked), then a Calico check that fails on any `Unblocking pod creation`
 line in the node's CNI log (a pod started before its policy was
-programmed, by any smoke). It runs on a pull request touching deploy/,
-cmd/service/, internal/wrapper/, loadgen/, internal/classifier/, gate/,
-internal/hashcore/, internal/hostpairs/, loadgen/client/, loadgen/wire/,
-orchestrator/, driver/, lineage/, fitness/ or the workflow itself.
-A draft PR skips it: the run starts when the PR is opened ready, or when it
-leaves draft (`ready_for_review`), and a new push cancels the run in flight.
-There is no push-to-main run. The repo is private, so
+programmed, by any smoke). It has no push or pull_request trigger. Run it by
+hand (Actions tab, deploy smoke, Run workflow, on the PR's branch) when the
+planning chat asks in a review. The paths below usually warrant a run:
+`deploy/**`, `cmd/service/**`, `internal/wrapper/**`, `loadgen/**`,
+`internal/classifier/**`, `gate/**`, `internal/hashcore/**`,
+`internal/hostpairs/**`, `loadgen/client/**`, `loadgen/wire/**`,
+`orchestrator/**`, `driver/**`, `lineage/**`, `fitness/**`, and
+`.github/workflows/deploy.yml`. One run per ref; a newer dispatch replaces a
+pending one, and a run in progress is never cancelled.
+The repo is private, so
 its ubuntu-latest runner has 2 CPU / 8 GB, too small for the full-size
 reservation and stress dose. On failure it dumps `kubectl get pods -A`,
 `kubectl describe node`, the failing pods' events and Calico's logs. It proves the
