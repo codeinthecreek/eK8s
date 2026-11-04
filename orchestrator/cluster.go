@@ -12,12 +12,14 @@ import (
 	"time"
 
 	"github.com/codeinthecreek/eK8s/fitness"
+	"github.com/codeinthecreek/eK8s/lineage"
 )
 
-// Cluster is what a window needs of the kind cluster besides loadgen:
-// the stress-ng switch, the CNI first look, the kubelet's CPU
-// counters and namespace deletion. Every error is a fault of the
-// cluster, never a variant's. Kube is the implementation; tests fake it.
+// Cluster is what a window and the Loop need of the kind cluster
+// besides loadgen: the stress-ng switch, the CNI first look, the
+// kubelet's CPU counters, namespace deletion and the CNI's log. Every
+// error but CNILog's is a fault of the cluster, never a variant's;
+// CNILog's is recorded only. Kube is the implementation; tests fake it.
 type Cluster interface {
 	// StressOff scales stress-ng to 0 and returns once no stress-ng pod
 	// is left, terminating ones included: a window starts only once they
@@ -37,6 +39,11 @@ type Cluster interface {
 	// DeleteNamespace deletes namespace ns and waits until it is gone;
 	// a namespace already gone is no error.
 	DeleteNamespace(ctx context.Context, ns string) error
+	// CNILog reads the CNI's (calico-node's) log from since, for the
+	// run-dir archive (lineage.Run.WriteCNILog); the Loop calls it, and
+	// its error is recorded, never a fault (docs/decisions.md,
+	// 2026-11-04, Q4).
+	CNILog(ctx context.Context, since time.Time) ([]byte, error)
 }
 
 // Names Kube reads from deploy/stress and deploy/calico.
@@ -46,6 +53,7 @@ const (
 	stressSelector   = "app=stress-ng"
 	cniNS            = "kube-system"
 	cniDaemonSet     = "calico-node" // the CNI's DaemonSet (checked against Calico v3.33.0's manifest)
+	cniContainer     = "calico-node" // its container whose log D3b archives (the same manifest)
 )
 
 // Kube timings: kubectlRequestTimeout bounds each API request of a
@@ -68,14 +76,23 @@ type Kube struct {
 	// since kubectl would fall back to the kubeconfig's current context.
 	Context string
 
-	// run runs kubectl with args and returns its trimmed stdout; nil
+	// run runs kubectl with args and returns its stdout as written; nil
 	// means runKubectl. Tests replace it.
 	run func(ctx context.Context, args ...string) (string, error)
 
 	node string // the one node's name, read once
 }
 
+// kubectl runs kubectl with args against k.Context and returns its
+// stdout with surrounding white space trimmed.
 func (k *Kube) kubectl(ctx context.Context, args ...string) (string, error) {
+	out, err := k.kubectlRaw(ctx, args...)
+	return strings.TrimSpace(out), err
+}
+
+// kubectlRaw is kubectl without the trim: stdout byte for byte, for a
+// log whose length and last byte matter (CNILog).
+func (k *Kube) kubectlRaw(ctx context.Context, args ...string) (string, error) {
 	if k.Context == "" {
 		return "", errors.New("orchestrator: kubectl: empty kube context")
 	}
@@ -93,7 +110,7 @@ func (k *Kube) kubectl(ctx context.Context, args ...string) (string, error) {
 // as gate's toolWaitDelay does.
 const kubectlWaitDelay = 5 * time.Second
 
-// runKubectl runs kubectl with args and returns its trimmed stdout; a
+// runKubectl runs kubectl with args and returns its stdout as written; a
 // failed run's error carries the trimmed stderr, unless ctx ended.
 func runKubectl(ctx context.Context, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "kubectl", args...)
@@ -110,7 +127,7 @@ func runKubectl(ctx context.Context, args ...string) (string, error) {
 		}
 		return "", fmt.Errorf("%s: %w: %s", label, err, strings.TrimSpace(stderr.String()))
 	}
-	return strings.TrimSpace(stdout.String()), nil
+	return stdout.String(), nil
 }
 
 func (k *Kube) StressOff(ctx context.Context) error {
@@ -209,6 +226,33 @@ func daemonSetReady(b []byte) (bool, error) {
 	n := s.DesiredNumberScheduled
 	return n > 0 && s.ObservedGeneration >= d.Metadata.Generation &&
 		s.UpdatedNumberScheduled == n && s.NumberReady == n && s.NumberAvailable == n, nil
+}
+
+// CNILog reads the log of calico-node's container in its DaemonSet
+// (the cluster's one node) with kubelet timestamps, from since floored
+// to the second less one second, asking for at most 2 x
+// lineage.MaxCNILog bytes: a read past the cap is how
+// lineage.Run.WriteCNILog knows to mark a cut, and the API's limitBytes
+// may return slightly more or slightly less than asked, so the margin is
+// wide enough that a short read of a longer log still passes the cap.
+// The bytes are kubectl's stdout untrimmed. A zero since is refused (it
+// would ask for the whole log).
+func (k *Kube) CNILog(ctx context.Context, since time.Time) ([]byte, error) {
+	if since.IsZero() {
+		return nil, errors.New("orchestrator: cni log: zero since")
+	}
+	out, err := k.kubectlRaw(ctx, "-n", cniNS, "logs", "ds/"+cniDaemonSet, "-c", cniContainer, "--timestamps",
+		"--since-time="+cniLogSince(since), fmt.Sprintf("--limit-bytes=%d", 2*lineage.MaxCNILog))
+	if err != nil {
+		return nil, fmt.Errorf("orchestrator: cni log: %w", err)
+	}
+	return []byte(out), nil
+}
+
+// cniLogSince is since for kubectl logs --since-time: RFC 3339 UTC,
+// floored to the second, less one second.
+func cniLogSince(t time.Time) string {
+	return t.UTC().Truncate(time.Second).Add(-time.Second).Format(time.RFC3339)
 }
 
 func (k *Kube) PodCPU(ctx context.Context) (fitness.Sample, error) {

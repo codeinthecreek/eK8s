@@ -217,6 +217,7 @@ func (c *fakeCluster) PodCPU(context.Context) (fitness.Sample, error) {
 	}
 	return s, nil
 }
+func (c *fakeCluster) CNILog(context.Context, time.Time) ([]byte, error) { return nil, nil }
 func (c *fakeCluster) DeleteNamespace(_ context.Context, ns string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()

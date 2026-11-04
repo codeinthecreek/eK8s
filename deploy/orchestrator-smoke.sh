@@ -24,7 +24,11 @@
 #   (e) run.json records allow_unpinned true and a host_clock object;
 #   (f) stalls.jsonl exists, every line is JSON, and it holds at least
 #       one burst line and one baseline line (counts not checked: D3a
-#       records them only).
+#       records them only);
+#   (g) every burst line's run_id and every distinct window_run_id in
+#       stalls.jsonl has a cni/<id>.log (calico-node's log, read through
+#       the real kubectl against Calico; empty allowed, since calico-node
+#       may log nothing in a short span), not a .failed.
 # The orchestrator gets -allow-unpinned: the CI runner cannot pin its clocks.
 # Not covered: a cull (the population cap is 3, and 4 live variants do not
 # fit the CI node), so (d) shows only that live and recorded agree. If
@@ -160,6 +164,14 @@ for kind in burst baseline; do
 		die "stalls.jsonl holds no $kind line: $(cut -c1-600 "$stalls")"
 done
 ok "stalls.jsonl: $(wc -l <"$stalls") lines, burst and baseline among them"
+
+ids=$(jq -r 'if .kind == "burst" then .run_id else .window_run_id end' "$stalls" | sort -u)
+for id in $ids; do
+	f="$run/cni/$id"
+	[ ! -e "$f.failed" ] || die "calico-node's log for $id was not read: $(cut -c1-300 "$f.failed")"
+	[ -f "$f.log" ] || die "no cni/$id.log for stalls.jsonl's $id"
+done
+ok "cni/: a calico-node log (empty allowed) for each of $(wc -w <<<"$ids") bursts and windows"
 
 for id in $(jq -r '.[] | select(.gate.passed) | .generation_id' <<<"$last"); do
 	[ -d "$run/genomes/$id" ] || die "no archived genome for passed generation $id"

@@ -935,23 +935,44 @@ max. Earlier entries are not backfilled.
 - Reverse: restore the --wait=false delete in cleanup() (deploy/stage5-smoke.sh).
 - Origin: Code
 
-## 2026-11-04 · PR #73 (inferred) · D3 is split into D3a (stall counts) and D3b (the calico-node log archive)
+## 2026-11-04 · PR #73 · D3 is split into D3a (stall counts) and D3b (the calico-node log archive)
 - Decision: D3a records the stall counts in the gate and the orchestrator, written to a new run-dir file stalls.jsonl; attempts.jsonl (DESIGN.md sec 14) is unchanged, no DESIGN.md edit (Q1 definitions D1-D7, Q3, Q5 c0 out of D3, Q6 only the longest run's start). A failed read or write of stalls.jsonl or a log file is a stderr line (for logs also a .failed file), never a fault, exclusion or halt (Q4). D3b archives calico-node's log for every gate Stage 5 burst too (Q2), each file capped at 1 MiB with a cut marker line (Q7); per window it is read once, from the baseline half's start, after the window returns, into one file, untrimmed, stalls.jsonl carrying each half's start and end (B); on a window fault the same read runs before the halt (C).
 - Rejected: one D3 PR (counts and archive in one review); per-half log files trimmed by timestamp; a recording failure that faults or excludes.
 - Reason: owner answers to the D3 plan (prompt EK-D3-P2-20261104); D3 is detection and recording only (Q4, 2026-11-02), so recording must never change a verdict.
 - Reverse: STATUS Now/Next; a later entry overrides any answer.
 - Origin: owner
 
-## 2026-11-04 · PR #73 (inferred) · internal/stallrun: stall-run definitions D1-D7
+## 2026-11-04 · PR #73 · internal/stallrun: stall-run definitions D1-D7
 - Decision: internal/stallrun.Detect(recs, rate) counts one (loadgen run, target)'s records: D1 an OHT record is Bucket failed with Reason over_hang_timeout, any other record (another reason, success, graceful_shed, Skipped, Fault) breaks a run; D2 ordered by Index (a copy; window records arrive by Seq), a missing index ends a run; D3 an OHT run is maximal at consecutive indices, length 1 included; D4 a stall run is an OHT run of >= Threshold(rate) = ceil(rate x HangTimeout) (31 at 15.5, 124 at 62; at least 1) with a recovery record at a later index, a recovery record being a classified response (not Skipped, not a Fault) that is not OHT (R38: a Skipped or Fault record means loadgen got no answer); D5 TailRun is the last OHT run's length when no recovery record has a higher index, else 0, and the tail is never a stall; D6 the longest run (tail included, ties to the earliest), its start Index and IntendedWall (UTC), else 0, -1, zero time; D7 Stats holds records, OHT, stall runs, tail, longest, start and threshold.
 - Rejected: a missing index bridged as OHT (would join two runs across a send loadgen did not record); any later non-OHT record as recovery, Skipped and Fault included (a wedged candidate followed by skipped sends would count as a stall); a threshold from the planned send interval rounded down (a run shorter than one hang timeout of sends would count); per-target filtering inside Detect (the caller passes one target's records).
 - Reason: owner Q1 on the D3 plan (prompt EK-D3-P2-20261104); one package so a gate burst and a window half count by the same rules; stdlib, loadgen/wire and internal/classifier only, outside Stage 1's import allowlist.
 - Reverse: remove its callers (gate.Report.Stage5Stall, orchestrator VariantResult.BaselineStall/StressStall, the stalls.jsonl writes), then delete internal/stallrun.
 - Origin: Code (approved by the owner as Q1)
 
-## 2026-11-04 · PR #73 (inferred) · stalls.jsonl: a run-dir file for the stall counts
+## 2026-11-04 · PR #73 · stalls.jsonl: a run-dir file for the stall counts
 - Decision: lineage.Run.AppendStall appends one JSON line per (loadgen run, target) to stalls.jsonl, as AppendAttempt does (mode 0600, synced, refused after a torn tail), the file made by the first append: kind burst | baseline | stress, run_id, window_run_id (halves only), generation_id, the stallrun.Stats fields in snake_case, span_start and span_end for halves (RFC 3339 UTC; these and longest_start_wall omitted when zero); validation is ids by lineage's patterns, the kind, counts >= 0, longest_start_index >= -1. The Loop writes the burst line once Stage 5 returns with Stage5Stall set (pass, fail or fault, before any halt; gate.Report.Stage5RunID names the run) and one line per variant per half that ran once RunWindow returns. A failed write is one log line on the run's stderr. Nothing in the run reads the file.
 - Rejected: the counts in attempts.jsonl (owner Q3; BuildPrompt reads it); a reader, or a torn-tail check in Open (nothing reads the file in D3a); making the file in Create (lazily made, so a run dir opened from before D3a appends without a migration).
 - Reason: owner answers Q3, Q4 and B (prompt EK-D3-P2-20261104); a run-dir format addition, logged per CLAUDE.md.
 - Reverse: drop AppendStall and the Loop calls (and gate.Report.Stage5RunID); a stalls.jsonl already written is inert.
+- Origin: Code
+
+## 2026-11-04 · PR #74 (inferred) · cni/: a run-dir directory for calico-node's log
+- Decision: lineage.Run.WriteCNILog(name, log) writes cni/<name>.log and WriteCNIFailed(name, msg) cni/<name>.failed, name by the run-id pattern (nameRE), once each (synced temp file linked into place, ErrExists on a second write, mode 0600; cni/ 0700, made by the first write). A log over MaxCNILog (1048576) keeps its first MaxCNILog bytes, a newline if they lack one, then the line "ek8s: cut at 1048576 bytes\n"; at or under the cap the bytes are kept as read. A .failed holds the error cut to 1024 bytes plus a newline.
+- Rejected: a file capped at 1 MiB in total, marker included (the marker would then not say where the log was cut); making cni/ in Create (lazy, as stalls.jsonl, so an older run dir needs no migration); one file kind holding both (a reader tells a failed read by its suffix).
+- Reason: owner answers Q4 and Q7 (prompt EK-D3-P2-20261104, D3 split entry); a run-dir format addition, logged per CLAUDE.md.
+- Reverse: delete lineage/cni.go and its callers; a cni/ already written is inert.
+- Origin: Code
+
+## 2026-11-04 · PR #74 (inferred) · Kube.CNILog reads calico-node's log through an untrimmed kubectl path
+- Decision: Kube.CNILog runs `kubectl -n kube-system logs ds/calico-node -c calico-node --timestamps --since-time=<since> --limit-bytes=<2 x lineage.MaxCNILog>` (since: RFC 3339 UTC, floored to the second, minus 1 s; a zero since refused; twice the cap since the API's limitBytes may return slightly more or less than asked, so a read of cap+1 could come back short and a longer log go unmarked) through Kube.kubectlRaw, which is Kube.kubectl's checks and flags without the TrimSpace; kubectl now trims what kubectlRaw returns, and runKubectl and the run hook return stdout as written. It is a Cluster method; the Loop calls it (next entry).
+- Rejected: --limit-bytes=cap+1 (limitBytes is approximate, R45); reading through the trimming kubectl (a byte past the cap that is white space would be trimmed away and the cut go unmarked, and "the bytes as read" would lose the final newline); client-go (a dependency).
+- Reason: owner prompt EK-D3B-P1 (Q7's read past the cap), the 2 x cap from review feedback R45; the trim moves up one call, so every other Kube read sees the same trimmed string as before.
+- Reverse: delete CNILog and cniLogSince, fold kubectlRaw back into kubectl with runKubectl trimming again.
+- Origin: Code
+
+## 2026-11-04 · PR #74 (inferred) · The Loop archives calico-node's log per burst, per window and on a window fault
+- Decision: Loop.archiveCNI(ctx, name, since) calls Cluster.CNILog (added to the interface) and writes cni/<name>.log, or cni/<name>.failed with the read's error; either failure is one log line, never a fault, exclusion or halt; no read once ctx has ended. Stage 5: since = l.now() just before Gate.Stage5, name Stage5RunID, when it is set (pass, fail, fault), before any halt. Window: since BaselineSpan.Start when set, name res.RunID, after windowStalls and before the restart check. Window fault: since = l.now() just before RunWindow, name fault-<unix seconds> (matches lineage's run-id pattern; loadgen ids start w- or gate-; a fault halts the run, so one per run), before the error returns.
+- Rejected: a separate optional LoopConfig field for the read (a nil would silently skip the archive; Kube already is the Cluster); a .failed on a failed write (the write is what failed); a fault name from the window's run id (RunWindow returns none with its error).
+- Reason: owner answers Q2, Q4, B and C (D3 split entry; prompt EK-D3B-P2-20261104); deploy/orchestrator-smoke.sh (g) checks every stalls.jsonl burst run_id and window_run_id has a cni/<id>.log (empty allowed: calico-node may log nothing in a short span) and no .failed.
+- Reverse: delete archiveCNI, faultLogName and their three calls, CNILog from Cluster, and smoke check (g).
 - Origin: Code
