@@ -964,8 +964,8 @@ max. Earlier entries are not backfilled.
 - Origin: Code
 
 ## 2026-11-04 · PR #74 (inferred) · Kube.CNILog reads calico-node's log through an untrimmed kubectl path
-- Decision: Kube.CNILog runs `kubectl -n kube-system logs ds/calico-node -c calico-node --timestamps --since-time=<since> --limit-bytes=<lineage.MaxCNILog+1>` (since: RFC 3339 UTC, floored to the second, minus 1 s; a zero since refused) through Kube.kubectlRaw, which is Kube.kubectl's checks and flags without the TrimSpace; kubectl now trims what kubectlRaw returns, and runKubectl and the run hook return stdout as written. Not yet in the Cluster interface; nothing calls it until D3b's wiring.
-- Rejected: reading through the trimming kubectl (a byte cap+1 that is white space would be trimmed away and the cut go unmarked, and "the bytes as read" would lose the final newline); client-go (a dependency).
-- Reason: owner prompt EK-D3B-P1 (Q7's cap+1 read); the trim moves up one call, so every other Kube read sees the same trimmed string as before.
+- Decision: Kube.CNILog runs `kubectl -n kube-system logs ds/calico-node -c calico-node --timestamps --since-time=<since> --limit-bytes=<2 x lineage.MaxCNILog>` (since: RFC 3339 UTC, floored to the second, minus 1 s; a zero since refused; twice the cap since the API's limitBytes may return slightly more or less than asked, so a read of cap+1 could come back short and a longer log go unmarked) through Kube.kubectlRaw, which is Kube.kubectl's checks and flags without the TrimSpace; kubectl now trims what kubectlRaw returns, and runKubectl and the run hook return stdout as written. Not yet in the Cluster interface; nothing calls it until D3b's wiring.
+- Rejected: --limit-bytes=cap+1 (limitBytes is approximate, R45); reading through the trimming kubectl (a byte past the cap that is white space would be trimmed away and the cut go unmarked, and "the bytes as read" would lose the final newline); client-go (a dependency).
+- Reason: owner prompt EK-D3B-P1 (Q7's read past the cap), the 2 x cap from review feedback R45; the trim moves up one call, so every other Kube read sees the same trimmed string as before.
 - Reverse: delete CNILog and cniLogSince, fold kubectlRaw back into kubectl with runKubectl trimming again.
 - Origin: Code

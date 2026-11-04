@@ -224,16 +224,19 @@ func daemonSetReady(b []byte) (bool, error) {
 
 // CNILog reads the log of calico-node's container in its DaemonSet
 // (the cluster's one node) with kubelet timestamps, from since floored
-// to the second less one second, at most lineage.MaxCNILog+1 bytes: a
-// read one byte past the cap is how lineage.Run.WriteCNILog knows to
-// mark a cut. The bytes are kubectl's stdout untrimmed. A zero since
-// is refused (it would ask for the whole log).
+// to the second less one second, asking for at most 2 x
+// lineage.MaxCNILog bytes: a read past the cap is how
+// lineage.Run.WriteCNILog knows to mark a cut, and the API's limitBytes
+// may return slightly more or slightly less than asked, so the margin is
+// wide enough that a short read of a longer log still passes the cap.
+// The bytes are kubectl's stdout untrimmed. A zero since is refused (it
+// would ask for the whole log).
 func (k *Kube) CNILog(ctx context.Context, since time.Time) ([]byte, error) {
 	if since.IsZero() {
 		return nil, errors.New("orchestrator: cni log: zero since")
 	}
 	out, err := k.kubectlRaw(ctx, "-n", cniNS, "logs", "ds/"+cniDaemonSet, "-c", cniContainer, "--timestamps",
-		"--since-time="+cniLogSince(since), fmt.Sprintf("--limit-bytes=%d", lineage.MaxCNILog+1))
+		"--since-time="+cniLogSince(since), fmt.Sprintf("--limit-bytes=%d", 2*lineage.MaxCNILog))
 	if err != nil {
 		return nil, fmt.Errorf("orchestrator: cni log: %w", err)
 	}

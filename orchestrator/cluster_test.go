@@ -204,7 +204,7 @@ func TestCNILogArgs(t *testing.T) {
 		t.Fatalf("CNILog = %q, %v; want %q", got, err, out)
 	}
 	want := []string{"-n", "kube-system", "logs", "ds/calico-node", "-c", "calico-node", "--timestamps",
-		"--since-time=2026-11-04T07:59:59Z", "--limit-bytes=1048577",
+		"--since-time=2026-11-04T07:59:59Z", "--limit-bytes=2097152",
 		"--request-timeout", "30s", "--context", "kind-x"}
 	if len(*calls) != 1 || !slices.Equal((*calls)[0], want) {
 		t.Fatalf("kubectl calls %q, want [%q]", *calls, want)

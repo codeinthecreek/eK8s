@@ -25,9 +25,9 @@ const cniCutMarker = "ek8s: cut at 1048576 bytes\n"
 // WriteCNILog stores log, the CNI's log bytes as read, as cni/<name>.log,
 // once. A log longer than MaxCNILog keeps its first MaxCNILog bytes and
 // then ends with the line "ek8s: cut at 1048576 bytes" (after a newline
-// when the kept bytes do not end in one), so a reader of at most
-// MaxCNILog+1 bytes tells the writer whether anything was cut. name is a
-// run id (the Stage 5 burst's or the window's loadgen run_id).
+// when the kept bytes do not end in one), so a reader that asks for more
+// than MaxCNILog bytes tells the writer whether anything was cut. name
+// is a run id (the Stage 5 burst's or the window's loadgen run_id).
 func (r *Run) WriteCNILog(name string, log []byte) error {
 	if !nameRE.MatchString(name) {
 		return fmt.Errorf("lineage: cni log name %q is not a run id", name)
