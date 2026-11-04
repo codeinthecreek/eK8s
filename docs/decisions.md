@@ -984,7 +984,7 @@ max. Earlier entries are not backfilled.
 - Reverse: drop `types`, the job `if`, the concurrency block, and restore ci.yml's `push: branches: [main]` with the same paths.
 - Origin: owner
 
-## 2026-11-04 · PR #76 (inferred) · deploy smoke runs by hand only (amends the PR #75 entry, deploy.yml part; ci.yml unchanged)
+## 2026-11-04 · PR #76 · deploy smoke runs by hand only (amends the PR #75 entry, deploy.yml part; ci.yml unchanged)
 - Decision: deploy.yml's only trigger is workflow_dispatch. The pull_request trigger, its types and path list, and the job's draft `if` are removed; the path list stays as documentation in deploy/README.md (CI paragraph), with the instruction to dispatch the smoke by hand before merging a PR that touches it. The concurrency block is simplified to group per ref (`${{ github.workflow }}-${{ github.ref }}`) with cancel-in-progress false: a newer dispatch replaces a pending one, and a run in progress is never cancelled. The path list is "usually warrant a run", not a mandatory rule; the planning chat asks for a run in review.
 - Rejected: per-step path selection inside deploy.yml (small saving, extra logic); a self-hosted runner (no spare host now; revisit if minutes are still too high).
 - Reason: owner decision, 2026-11-04. deploy.yml was 202 of 342 Actions minutes in the first 4 days of November (17 runs) and ran on almost every code PR; the owner wants CI kept small. The smoke scripts are unchanged.
