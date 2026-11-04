@@ -20,11 +20,12 @@ on:
 permissions:
   contents: read
 
-# One run per PR (the ref for schedule and dispatch); a new push cancels the
-# run in flight.
+# One run per PR (the ref for schedule and dispatch); a new push to a PR
+# cancels its run in flight. Only pull_request runs are cancelled: a dispatch
+# never cancels the weekly run or another dispatch (it queues behind it).
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   check:
