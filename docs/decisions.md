@@ -956,21 +956,21 @@ max. Earlier entries are not backfilled.
 - Reverse: drop AppendStall and the Loop calls (and gate.Report.Stage5RunID); a stalls.jsonl already written is inert.
 - Origin: Code
 
-## 2026-11-04 · PR #74 (inferred) · cni/: a run-dir directory for calico-node's log
+## 2026-11-04 · PR #74 · cni/: a run-dir directory for calico-node's log
 - Decision: lineage.Run.WriteCNILog(name, log) writes cni/<name>.log and WriteCNIFailed(name, msg) cni/<name>.failed, name by the run-id pattern (nameRE), once each (synced temp file linked into place, ErrExists on a second write, mode 0600; cni/ 0700, made by the first write). A log over MaxCNILog (1048576) keeps its first MaxCNILog bytes, a newline if they lack one, then the line "ek8s: cut at 1048576 bytes\n"; at or under the cap the bytes are kept as read. A .failed holds the error cut to 1024 bytes plus a newline.
 - Rejected: a file capped at 1 MiB in total, marker included (the marker would then not say where the log was cut); making cni/ in Create (lazy, as stalls.jsonl, so an older run dir needs no migration); one file kind holding both (a reader tells a failed read by its suffix).
 - Reason: owner answers Q4 and Q7 (prompt EK-D3-P2-20261104, D3 split entry); a run-dir format addition, logged per CLAUDE.md.
 - Reverse: delete lineage/cni.go and its callers; a cni/ already written is inert.
 - Origin: Code
 
-## 2026-11-04 · PR #74 (inferred) · Kube.CNILog reads calico-node's log through an untrimmed kubectl path
+## 2026-11-04 · PR #74 · Kube.CNILog reads calico-node's log through an untrimmed kubectl path
 - Decision: Kube.CNILog runs `kubectl -n kube-system logs ds/calico-node -c calico-node --timestamps --since-time=<since> --limit-bytes=<2 x lineage.MaxCNILog>` (since: RFC 3339 UTC, floored to the second, minus 1 s; a zero since refused; twice the cap since the API's limitBytes may return slightly more or less than asked, so a read of cap+1 could come back short and a longer log go unmarked) through Kube.kubectlRaw, which is Kube.kubectl's checks and flags without the TrimSpace; kubectl now trims what kubectlRaw returns, and runKubectl and the run hook return stdout as written. It is a Cluster method; the Loop calls it (next entry).
 - Rejected: --limit-bytes=cap+1 (limitBytes is approximate, R45); reading through the trimming kubectl (a byte past the cap that is white space would be trimmed away and the cut go unmarked, and "the bytes as read" would lose the final newline); client-go (a dependency).
 - Reason: owner prompt EK-D3B-P1 (Q7's read past the cap), the 2 x cap from review feedback R45; the trim moves up one call, so every other Kube read sees the same trimmed string as before.
 - Reverse: delete CNILog and cniLogSince, fold kubectlRaw back into kubectl with runKubectl trimming again.
 - Origin: Code
 
-## 2026-11-04 · PR #74 (inferred) · The Loop archives calico-node's log per burst, per window and on a window fault
+## 2026-11-04 · PR #74 · The Loop archives calico-node's log per burst, per window and on a window fault
 - Decision: Loop.archiveCNI(ctx, name, since) calls Cluster.CNILog (added to the interface) and writes cni/<name>.log, or cni/<name>.failed with the read's error; either failure is one log line, never a fault, exclusion or halt; no read once ctx has ended. Stage 5: since = l.now() just before Gate.Stage5, name Stage5RunID, when it is set (pass, fail, fault), before any halt. Window: since BaselineSpan.Start when set, name res.RunID, after windowStalls and before the restart check. Window fault: since = l.now() just before RunWindow, name fault-<unix seconds> (matches lineage's run-id pattern; loadgen ids start w- or gate-; a fault halts the run, so one per run), before the error returns.
 - Rejected: a separate optional LoopConfig field for the read (a nil would silently skip the archive; Kube already is the Cluster); a .failed on a failed write (the write is what failed); a fault name from the window's run id (RunWindow returns none with its error).
 - Reason: owner answers Q2, Q4, B and C (D3 split entry; prompt EK-D3B-P2-20261104); deploy/orchestrator-smoke.sh (g) checks every stalls.jsonl burst run_id and window_run_id has a cni/<id>.log (empty allowed: calico-node may log nothing in a short span) and no .failed.
