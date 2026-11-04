@@ -95,7 +95,9 @@
 # Result of a run: PASS only if the gate exits 0, the Unknown-interface
 # drop count and the in-burst end-of-tier drop count (the end-of-tier count
 # over the whole run includes the canary's denied dial and is only
-# recorded) are 0, and the CNI's "Unblocking pod creation" count is 0 (a
+# recorded; in a clean set end_of_tier_drops reads 1 per run, that denied
+# dial before the burst, the expected baseline, which shows the counter
+# reads the right table) are 0, and the CNI's "Unblocking pod creation" count is 0 (a
 # counter that could not be read is not 0). Otherwise STALL (above), FAIL
 # (any other gate exit 1), FAULT (any other exit; ends the experiment), or
 # DROPS (the gate passed, a counter above is nonzero). A run that is not

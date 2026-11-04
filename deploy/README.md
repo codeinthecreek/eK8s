@@ -503,7 +503,10 @@ DROPS (the gate passed, a counter is nonzero). The verdict is in
 PASS; else MET only with at least 15 runs, at least 10 of them with a
 mid-burst add; else INCONCLUSIVE (docs/decisions.md, 2026-11-04). The
 end-of-tier count over the whole run includes the canary's denied dial and
-is only recorded. `summary.tsv` has
+is only recorded: in a clean set it reads 1 per run, the gate's canary
+dial denied by loadgen's egress policy before the burst, which is the
+expected baseline and shows the counter reads the right table (the
+in-burst count, `end_of_tier_drops_burst`, is 0). `summary.tsv` has
 one row per run; each `run-NN/` keeps the gate's output, the state
 assertions, records without pairs or evidence, loadgen's SYN and TCP
 retransmit counters, the packets dropped by Felix's "Unknown interface"
