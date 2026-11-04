@@ -941,3 +941,10 @@ max. Earlier entries are not backfilled.
 - Reason: owner answers to the D3 plan (prompt EK-D3-P2-20261104); D3 is detection and recording only (Q4, 2026-11-02), so recording must never change a verdict.
 - Reverse: STATUS Now/Next; a later entry overrides any answer.
 - Origin: owner
+
+## 2026-11-04 · PR #73 (inferred) · internal/stallrun: stall-run definitions D1-D7
+- Decision: internal/stallrun.Detect(recs, rate) counts one (loadgen run, target)'s records: D1 an OHT record is Bucket failed with Reason over_hang_timeout, any other record (another reason, success, graceful_shed, Skipped, Fault) breaks a run; D2 ordered by Index (a copy; window records arrive by Seq), a missing index ends a run; D3 an OHT run is maximal at consecutive indices, length 1 included; D4 a stall run is an OHT run of >= Threshold(rate) = ceil(rate x HangTimeout) (31 at 15.5, 124 at 62; at least 1) with a non-OHT record at a later index; D5 the tail run reaches the last index and is never a stall; D6 the longest run (tail included, ties to the earliest), its start Index and IntendedWall (UTC), else 0, -1, zero time; D7 Stats holds records, OHT, stall runs, tail, longest, start and threshold.
+- Rejected: a missing index bridged as OHT (would join two runs across a send loadgen did not record); a threshold from the planned send interval rounded down (a run shorter than one hang timeout of sends would count); per-target filtering inside Detect (the caller passes one target's records).
+- Reason: owner Q1 on the D3 plan (prompt EK-D3-P2-20261104); one package so a gate burst and a window half count by the same rules; stdlib, loadgen/wire and internal/classifier only, outside Stage 1's import allowlist.
+- Reverse: delete internal/stallrun (nothing imports it yet).
+- Origin: Code (approved by the owner as Q1)
