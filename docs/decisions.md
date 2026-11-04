@@ -929,7 +929,7 @@ max. Earlier entries are not backfilled.
 - Origin: owner
 
 ## 2026-11-04 · PR #72 · stage5-smoke.sh waits for its namespace to be gone and fails closed
-- Decision: cleanup() deletes the namespace with --wait=true --timeout=180s, then reads it back with get --ignore-not-found -o name; a failed delete, an unreadable namespace or a leftover one each fail the smoke (status 1 if it was 0). deploy/down.sh and the README check order were specified by the task prompt.
+- Decision: cleanup() deletes the namespace with --wait=true --timeout=180s, then reads it back with get --ignore-not-found -o name; a failed delete, an unreadable namespace or a leftover one each fail the smoke (status 1 if it was 0).
 - Rejected: --wait=false (PASS with ek8s-v999998 Terminating, so G3 refused the next run); treating a failed get as gone (fail-open when the API is unreachable).
 - Reason: a smoke must leave nothing the next step refuses on, and an unknown state is not a pass.
 - Reverse: restore the --wait=false delete in cleanup() (deploy/stage5-smoke.sh).

@@ -186,7 +186,10 @@ Never run `loadgen-up.sh` before the smokes: variant-smoke.sh refuses
 while loadgen pods exist, and each loadgen smoke deploys and removes its
 own. `stage5-runs.sh` deploys loadgen at its `-rate` and leaves it. Each
 smoke deletes what it created and waits for it to be gone, so a smoke run
-after another finds nothing of the earlier one.
+after another finds nothing of the earlier one. `stage5-runs.sh` leaves
+loadgen deployed, so the smokes refuse afterwards until it is deleted
+(`kubectl -n ek8s-system delete deploy/loadgen`, then wait for its pods
+to go) or the cluster is recreated with `down.sh` and `up.sh`.
 
 ### Parameters and CI size
 
