@@ -35,6 +35,9 @@ type Report struct {
 	// detection and recording only (docs/decisions.md, 2026-11-02 Q4):
 	// never a Result, never in a Detail, and Passed ignores it.
 	Stage5Stall *stallrun.Stats
+	// Stage5RunID is the Stage 5 burst's loadgen run_id, set with
+	// Stage5Stall, so a recorded count names its run.
+	Stage5RunID string
 }
 
 // Passed reports whether every check ran and passed.

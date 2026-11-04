@@ -150,8 +150,9 @@ func Stage5(ctx context.Context, cfg Stage5Config, r *Report) error {
 		return nil
 	}
 
+	runID := "gate-" + cfg.ID + "-" + label
 	res, err := runBurst(ctx, cl, burstParams{
-		Target: cfg.ID, RunID: "gate-" + cfg.ID + "-" + label,
+		Target: cfg.ID, RunID: runID,
 		Want: loadgenShape{Rate: cfg.Rate, WindowS: cfg.WindowS, BurstRate: cfg.BurstRate},
 		Core: cfg.Core, Workers: cfg.Workers,
 	})
@@ -159,7 +160,7 @@ func Stage5(ctx context.Context, cfg Stage5Config, r *Report) error {
 		return err
 	}
 	stall := stallrun.Detect(res.Records, cfg.BurstRate)
-	r.Stage5Stall = &stall
+	r.Stage5Stall, r.Stage5RunID = &stall, runID
 
 	var health string
 	if err := cfg.step(ctx, "pod-health", func(c context.Context) (err error) {

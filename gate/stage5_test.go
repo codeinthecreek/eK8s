@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -112,6 +113,9 @@ func summary(r Report) string {
 
 var readyList = list(testDeploy, readyP1)
 
+// stage5RunIDRE is the burst's run_id for variant 7.
+var stage5RunIDRE = regexp.MustCompile(`^gate-7-ek8s-[0-9a-f]{16}$`)
+
 func TestStage5Pass(t *testing.T) {
 	fx := newStage5(t, []string{nodesOK, stressRunning, "", readyList, readyList}, nil)
 	r, err := fx.run(t)
@@ -129,6 +133,9 @@ func TestStage5Pass(t *testing.T) {
 	wantStall := stallrun.Stats{Records: 30, LongestStartIndex: -1, Threshold: 60}
 	if r.Stage5Stall == nil || *r.Stage5Stall != wantStall {
 		t.Errorf("Stage5Stall %+v, want %+v", r.Stage5Stall, wantStall)
+	}
+	if !stage5RunIDRE.MatchString(r.Stage5RunID) {
+		t.Errorf("Stage5RunID %q, want gate-7-ek8s- and 16 hex", r.Stage5RunID)
 	}
 	if got := readFile(t, filepath.Join(fx.kind, "argv")); !strings.HasPrefix(got, "load\ndocker-image\nek8s-wrapper:0123456789ab\n--name\nx\n") {
 		t.Errorf("kind argv %q", got)
@@ -223,6 +230,9 @@ func TestStage5CandidateFailures(t *testing.T) {
 			}
 			if tc.deleted != (r.Stage5Stall != nil) {
 				t.Errorf("Stage5Stall %+v, want set: %v", r.Stage5Stall, tc.deleted)
+			}
+			if tc.deleted != stage5RunIDRE.MatchString(r.Stage5RunID) {
+				t.Errorf("Stage5RunID %q, want set: %v", r.Stage5RunID, tc.deleted)
 			}
 			if r.Stage5Stall != nil && r.Stage5Stall.Records != 30 {
 				t.Errorf("Stage5Stall.Records %d, want 30", r.Stage5Stall.Records)
