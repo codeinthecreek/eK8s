@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"math/rand/v2"
 	"os"
 	"path/filepath"
@@ -17,6 +18,7 @@ import (
 	"github.com/codeinthecreek/eK8s/fitness"
 	"github.com/codeinthecreek/eK8s/gate"
 	"github.com/codeinthecreek/eK8s/internal/classifier"
+	"github.com/codeinthecreek/eK8s/internal/stallrun"
 	"github.com/codeinthecreek/eK8s/lineage"
 )
 
@@ -322,8 +324,14 @@ func (l *Loop) gateCandidate(ctx context.Context, id string, files map[string][]
 		return false, rep, err
 	}
 	l.logf("generation %s: gate stage 5", id)
-	if err := l.c.Gate.Stage5(ctx, id, rep.Image, &rep); err != nil {
-		return false, rep, fmt.Errorf("orchestrator: gate fault, generation %s: %w", id, err)
+	serr := l.c.Gate.Stage5(ctx, id, rep.Image, &rep)
+	// Recorded whenever the burst was read, pass, fail or fault, and
+	// before a fault halts the run; it decides nothing.
+	if rep.Stage5Stall != nil {
+		l.appendStall(stallLine(lineage.StallBurst, rep.Stage5RunID, "", id, rep.Stage5Stall, Span{}))
+	}
+	if serr != nil {
+		return false, rep, fmt.Errorf("orchestrator: gate fault, generation %s: %w", id, serr)
 	}
 	// Off again at once, so neither the next host pairs nor the next
 	// gate run shares the host with stress-ng, and the next window's
@@ -400,6 +408,7 @@ func (l *Loop) probation(ctx context.Context, newcomer string, batches []Batch) 
 		if err != nil {
 			return "", err
 		}
+		l.windowStalls(res)
 		batches = nil
 		if l.c.Windows.Restarted() {
 			return StopRestart, nil
@@ -485,6 +494,43 @@ func (l *Loop) judge(ctx context.Context, res WindowResult) error {
 		}
 	}
 	return nil
+}
+
+// windowStalls records each half's stall counts for every variant in
+// res, one line per (half, variant) that ran, baseline half first. It is
+// recording only: nothing in the loop reads the lines or the counts.
+func (l *Loop) windowStalls(res WindowResult) {
+	ids := slices.SortedFunc(maps.Keys(res.Variants), cmpID)
+	for _, id := range ids {
+		if st := res.Variants[id].BaselineStall; st != nil {
+			l.appendStall(stallLine(lineage.StallBaseline, res.RunID, res.RunID, id, st, res.BaselineSpan))
+		}
+	}
+	for _, id := range ids {
+		if st := res.Variants[id].StressStall; st != nil {
+			l.appendStall(stallLine(lineage.StallStress, res.StressRunID, res.RunID, id, st, res.StressSpan))
+		}
+	}
+}
+
+// appendStall appends s to stalls.jsonl. A failed write is one log line
+// (the run's stderr) and never a fault, an exclusion or a halt
+// (docs/decisions.md, 2026-11-04, the owner's answer Q4).
+func (l *Loop) appendStall(s lineage.Stall) {
+	if err := l.c.Run.AppendStall(s); err != nil {
+		l.logf("stalls: %s %s %s not recorded: %v", s.Kind, s.RunID, s.GenerationID, err)
+	}
+}
+
+// stallLine is one stalls.jsonl line: st's counts for target id in
+// loadgen run runID, of window windowRunID ("" for a burst), over span.
+func stallLine(kind, runID, windowRunID, id string, st *stallrun.Stats, span Span) lineage.Stall {
+	return lineage.Stall{
+		Kind: kind, RunID: runID, WindowRunID: windowRunID, GenerationID: id,
+		Records: st.Records, OHT: st.OHT, StallRuns: st.StallRuns, TailRun: st.TailRun,
+		Longest: st.Longest, LongestStartIndex: st.LongestStartIndex, LongestStartWall: st.LongestStartWall,
+		Threshold: st.Threshold, SpanStart: span.Start, SpanEnd: span.End,
+	}
 }
 
 // cull retires a live variant (Session.Drop) and records a, its updated
