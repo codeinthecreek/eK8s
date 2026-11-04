@@ -977,7 +977,7 @@ max. Earlier entries are not backfilled.
 - Reverse: delete archiveCNI, faultLogName and their three calls, CNILog from Cluster, and smoke check (g).
 - Origin: Code
 
-## 2026-11-04 · PR #75 (inferred) · CI minutes: draft PRs skip ci.yml and deploy.yml, one run per PR, no push-to-main run (amends the PR #12 CI-trigger entry)
+## 2026-11-04 · PR #75 · CI minutes: draft PRs skip ci.yml and deploy.yml, one run per PR, no push-to-main run (amends the PR #12 CI-trigger entry)
 - Decision: both workflows run on pull_request types opened, synchronize, reopened, ready_for_review; the job is skipped while the PR is a draft (`github.event_name != 'pull_request' || !github.event.pull_request.draft`, so schedule and dispatch still run); concurrency group `workflow-(PR number or ref)`, cancel-in-progress only for pull_request events (`github.event_name == 'pull_request'`), so a dispatch never cancels the weekly or another non-PR run; ci.yml drops its push-to-main trigger. Path filters unchanged. Code opens every PR as a draft and marks it ready only after the owner approves.
 - Rejected: running tests once with -race only (the plain build compiles the !race files in gate and internal/classifier/testvectors, so it tests different code); faster orchestrator tests now (shared pre-generated batches; deferred, docs/AFTER-FIRST-RUN.md).
 - Reason: 342 min in the first 4 days of the month (deploy.yml 202 min / 17 runs, ci.yml 140 min / 13), about 2,500 a month projected; every push to an open PR ran both workflows. The PR #12 entry recorded no required checks on main (2026-10-01, not re-checked); a skipped job counts as passing under branch protection either way; CI no longer re-runs on main after a merge.
