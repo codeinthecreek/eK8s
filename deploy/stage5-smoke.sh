@@ -12,8 +12,13 @@
 #       pod_cpu_usage_seconds_total for the candidate's pod (the counter
 #       fitness/ reads, DESIGN.md sec 9).
 # Exits non-zero on the first failed check. On exit it switches stress-ng
-# off and deletes the candidate's namespace and the loadgen Deployment
-# (its targets with it), so that a smoke run after this one finds neither.
+# off and deletes the loadgen Deployment (its targets with it) and the
+# candidate's namespace, and waits until the namespace is gone (it
+# terminates for a while, its pod has a grace period): stage5-runs.sh's G3
+# refuses while ek8s-v999998 exists, even terminating. A namespace that is
+# not gone in 180 s fails the smoke. A smoke run after this one finds
+# neither. The final line "stage5-smoke.sh: all checks passed" comes only
+# after that.
 # Refuses to start if a pod labelled app=loadgen or the namespace exists.
 # Run from anywhere; needs go, docker, kind and kubectl.
 set -euo pipefail
@@ -51,9 +56,27 @@ cleanup() {
 		k -n "$sys" logs deploy/loadgen --tail=40 2>&1 || true
 	fi
 	k -n ek8s-stress scale deploy/stress-ng --replicas=0 >/dev/null 2>&1 || true
-	k delete namespace "$ns" --ignore-not-found --wait=false >/dev/null 2>&1 || true
 	k -n "$sys" delete deploy/loadgen --ignore-not-found --wait=true >/dev/null 2>&1 || true
+	# --wait=true returns once the namespace object is gone, not when the
+	# delete is accepted (the earlier --wait=false let the script report PASS
+	# with ek8s-v999998 still Terminating).
+	# Three outcomes, each a failure: the delete fails or times out; the
+	# namespace cannot be read afterwards (API unreachable: not "gone"); or
+	# it is still listed. The get is an if condition so that its failure
+	# does not end this trap under set -e before rm -rf and the exit.
+	left=
+	if ! k delete namespace "$ns" --ignore-not-found --wait=true --timeout=180s >/dev/null 2>&1; then
+		echo "stage5-smoke.sh: FAIL: namespace $ns is not gone after 180s" >&2
+		[ "$status" -ne 0 ] || status=1
+	elif ! left=$(k get namespace "$ns" --ignore-not-found -o name 2>/dev/null); then
+		echo "stage5-smoke.sh: FAIL: cannot read namespace $ns" >&2
+		[ "$status" -ne 0 ] || status=1
+	elif [ -n "$left" ]; then
+		echo "stage5-smoke.sh: FAIL: namespace $ns is not gone after 180s" >&2
+		[ "$status" -ne 0 ] || status=1
+	fi
 	rm -rf "$work"
+	[ "$status" -ne 0 ] || echo "stage5-smoke.sh: all checks passed"
 	exit "$status"
 }
 trap cleanup EXIT
