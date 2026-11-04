@@ -1,5 +1,7 @@
 package gate
 
+import "github.com/codeinthecreek/eK8s/internal/stallrun"
+
 // Result is the outcome of one gate check. Checks within a stage are
 // logged distinctly (DESIGN.md sec 7), so each gets its own Result.
 type Result struct {
@@ -25,6 +27,14 @@ type Report struct {
 	// window hash that replays a burst salt is confirmed on the host
 	// (orchestrator.Session.Adopt). They are the candidate's output.
 	BurstHashes []string
+
+	// Stage5Stall is what internal/stallrun finds in the Stage 5 burst's
+	// records at the burst rate b, set as soon as the burst's records are
+	// read, before pod-health, so a burst that failed pod-health or
+	// "responses" carries it too; nil when no burst was read. It is
+	// detection and recording only (docs/decisions.md, 2026-11-02 Q4):
+	// never a Result, never in a Detail, and Passed ignores it.
+	Stage5Stall *stallrun.Stats
 }
 
 // Passed reports whether every check ran and passed.

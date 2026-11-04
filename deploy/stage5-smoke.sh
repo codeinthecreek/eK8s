@@ -4,7 +4,8 @@
 # on and runs `gate -stage5` on it (one burst of 240 sends at b = 8 over
 # 30 s, every hash verified on the host) and checks
 #   (a) the gate exits 0 and prints PASS for pod-health, responses and
-#       hash-verify;
+#       hash-verify, and its stall line with stall-runs 0, tail 0 and
+#       longest 0 (recording only: the line never changes the verdict);
 #   (b) the candidate's Deployment is still Ready in ek8s-v<id> (a pass
 #       leaves the variant where it is, DESIGN.md sec 11);
 #   (c) loadgen still holds the candidate as a target;
@@ -111,6 +112,9 @@ for check in pod-health responses hash-verify; do
 	grep -Eq "^stage 5 $check +PASS$" "$work/gate.out" || die "no PASS line for $check"
 done
 ok "gate Stage 5 passed: pod-health, responses, hash-verify"
+grep -Eq '^stall: records [0-9]+ oht [0-9]+ stall-runs 0 tail 0 longest 0 start-index -?[0-9]+ start-wall [^ ]+ threshold [0-9]+$' "$work/gate.out" ||
+	die "no stall line with stall-runs 0, tail 0, longest 0"
+ok "the burst has no stall run, tail run or OHT run"
 
 # At least one, not exactly one: the burst can push the HPA (70% of the
 # CPU request) to scale up, and a second Ready replica is no failure.

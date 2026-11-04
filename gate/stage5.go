@@ -11,6 +11,7 @@ import (
 
 	"github.com/codeinthecreek/eK8s/deploy/variant"
 	"github.com/codeinthecreek/eK8s/internal/hashcore"
+	"github.com/codeinthecreek/eK8s/internal/stallrun"
 	"github.com/codeinthecreek/eK8s/loadgen/client"
 )
 
@@ -92,7 +93,9 @@ var openControl = func(ctx context.Context, kubeCtx string) (*client.Client, fun
 //
 // Stage5 leaves what it made: on a pass the namespace, its pod and the
 // loadgen target are the variant's from now on (DESIGN.md sec 11), and
-// r.BurstHashes holds the burst's recorded hashes. On a
+// r.BurstHashes holds the burst's recorded hashes. Once the burst's
+// records are read, r.Stage5Stall holds their stall counts, on a pass or
+// a failure; they never change a Result. On a
 // candidate failure it has already DELETEd the loadgen target, after
 // reading the records; deleting the namespace is the caller's.
 func Stage5(ctx context.Context, cfg Stage5Config, r *Report) error {
@@ -155,6 +158,8 @@ func Stage5(ctx context.Context, cfg Stage5Config, r *Report) error {
 	if err != nil {
 		return err
 	}
+	stall := stallrun.Detect(res.Records, cfg.BurstRate)
+	r.Stage5Stall = &stall
 
 	var health string
 	if err := cfg.step(ctx, "pod-health", func(c context.Context) (err error) {

@@ -16,6 +16,14 @@
 // where Stage 5 leaves them (DESIGN.md sec 11); deploy/stage5-smoke.sh
 // cleans up after itself.
 //
+// With -stage5, once the burst's records were read, it prints one more
+// line after the checks, the burst's stall counts (gate.Report.
+// Stage5Stall), which never change the exit status:
+//
+//	stall: records N oht N stall-runs N tail N longest N start-index I start-wall T threshold N
+//
+// with start-wall in RFC 3339, UTC, or "-" with no OHT record.
+//
 // Exit status: 0 pass, 1 the candidate failed a check, 2 the gate itself
 // failed.
 package main
@@ -26,9 +34,11 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"time"
 
 	"github.com/codeinthecreek/eK8s/gate"
 	"github.com/codeinthecreek/eK8s/internal/hashcore"
+	"github.com/codeinthecreek/eK8s/internal/stallrun"
 )
 
 func main() {
@@ -69,6 +79,9 @@ func main() {
 			fmt.Printf("stage %d %-30s FAIL: %s\n", r.Stage, r.Check, r.Detail)
 		}
 	}
+	if *stage5 && rep.Stage5Stall != nil {
+		fmt.Println(stallLine(*rep.Stage5Stall))
+	}
 	switch {
 	case err != nil:
 		fmt.Fprintln(os.Stderr, "gate error:", err)
@@ -79,4 +92,15 @@ func main() {
 	if !*stage5 {
 		fmt.Println("image", rep.Image)
 	}
+}
+
+// stallLine is the -stage5 stall line for s. It starts "stall:", so it
+// never matches a check's "stage 5 <check> PASS" line.
+func stallLine(s stallrun.Stats) string {
+	wall := "-"
+	if !s.LongestStartWall.IsZero() {
+		wall = s.LongestStartWall.UTC().Format(time.RFC3339Nano)
+	}
+	return fmt.Sprintf("stall: records %d oht %d stall-runs %d tail %d longest %d start-index %d start-wall %s threshold %d",
+		s.Records, s.OHT, s.StallRuns, s.TailRun, s.Longest, s.LongestStartIndex, wall, s.Threshold)
 }
