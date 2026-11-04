@@ -4,7 +4,7 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 *(inferred)* are guesses, not read from the repo; correct them.
 
 ## Now
-- (none)
+- Deploy smoke (deploy.yml) runs by hand only, no PR or push trigger (this PR, draft; docs/decisions.md, 2026-11-04). ci.yml unchanged.
 
 ## Next
 - PR B part 1: raise maxRate and maxBurstSends (loadgen/config.go; committed 19 and 3000) to cover a C0 ladder past 31 (docs/decisions.md, 2026-11-04).
