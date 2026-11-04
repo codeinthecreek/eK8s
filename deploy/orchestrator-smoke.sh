@@ -150,8 +150,10 @@ ok "attempts.jsonl: $n generations, one scored mutation, one stage 1 failure, bo
 
 stalls="$run/stalls.jsonl"
 [ -f "$stalls" ] || die "no stalls.jsonl in the run directory"
+[ "$(tail -c1 "$stalls" | od -An -c | tr -d ' ')" = '\n' ] || die "stalls.jsonl is empty or ends in a torn line"
 while IFS= read -r line; do
-	jq . <<<"$line" >/dev/null 2>&1 || die "stalls.jsonl line is not JSON: $(cut -c1-300 <<<"$line")"
+	[ -n "$line" ] && jq . <<<"$line" >/dev/null 2>&1 ||
+		die "stalls.jsonl line is not JSON: $(cut -c1-300 <<<"$line")"
 done <"$stalls"
 for kind in burst baseline; do
 	jq -e --arg k "$kind" 'select(.kind == $k)' "$stalls" >/dev/null ||
