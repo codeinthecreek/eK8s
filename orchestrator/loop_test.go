@@ -51,6 +51,7 @@ type fakeWindows struct {
 	ev        *events
 	score     map[string]float64
 	window    func(n int, live []string) WindowResult
+	fault     func(n int) error // a non-nil error faults window n
 	windows   int
 	restarted bool
 	dropErr   error // Drop fails with it and sets restarted
@@ -81,6 +82,11 @@ func (w *fakeWindows) Batches(ctx context.Context, n int) ([]Batch, error) {
 func (w *fakeWindows) RunWindow(_ context.Context, live []string, batches []Batch) (WindowResult, error) {
 	w.windows++
 	w.ev.add("window %s", strings.Join(live, ","))
+	if w.fault != nil {
+		if err := w.fault(w.windows); err != nil {
+			return WindowResult{}, err
+		}
+	}
 	if len(batches) < HalvesPerWindow*len(live) {
 		return WindowResult{}, fmt.Errorf("%d batches for %d live", len(batches), len(live))
 	}
@@ -144,6 +150,9 @@ func (g fakeGate) Local(_ context.Context, dir string) (gate.Report, error) {
 
 func (g fakeGate) Stage5(_ context.Context, id, image string, r *gate.Report) error {
 	g.ev.add("stage5 %s %s", id, image)
+	if faultBeforeBurst[id] {
+		return errors.New("loadgen unreachable")
+	}
 	// The burst's records are read before any Stage 5 check, so its
 	// counts are set on a pass, a failure, and a fault after the burst.
 	r.Stage5Stall = &stallrun.Stats{Records: 30, OHT: 2, TailRun: 2, Longest: 2, LongestStartIndex: 28, LongestStartWall: burstWall, Threshold: 60}
@@ -164,6 +173,10 @@ func (g fakeGate) Stage5(_ context.Context, id, image string, r *gate.Report) er
 // faults on after the burst; tests set them before they run and never
 // in parallel.
 var failStage5, faultStage5 = map[string]bool{}, map[string]bool{}
+
+// faultBeforeBurst names the variant ids Stage 5 faults on before the
+// burst is read: no counts, no run id.
+var faultBeforeBurst = map[string]bool{}
 
 // burstWall is the fake burst's longest OHT run's start.
 var burstWall = time.Date(2026, 11, 4, 3, 0, 0, 0, time.UTC)
@@ -223,7 +236,25 @@ func edit(parent map[string][]byte, body string, turns int) *driver.Mutation {
 	}
 }
 
-type loopCluster struct{ ev *events }
+type loopCluster struct {
+	ev  *events
+	cni *fakeCNI
+}
+
+// fakeCNI answers each CNILog call with out, or err when set.
+type fakeCNI struct {
+	out []byte
+	err error
+}
+
+// CNILog logs "cni <since>", since in UTC.
+func (c loopCluster) CNILog(_ context.Context, since time.Time) ([]byte, error) {
+	c.ev.add("cni %s", since.UTC().Format(time.RFC3339Nano))
+	if c.cni.err != nil {
+		return nil, c.cni.err
+	}
+	return c.cni.out, nil
+}
 
 func (c loopCluster) StressOff(context.Context) error { c.ev.add("stress off"); return nil }
 func (c loopCluster) StressOn(context.Context) error  { c.ev.add("stress on"); return nil }
@@ -245,6 +276,7 @@ type loopFixture struct {
 	ev   *events
 	win  *fakeWindows
 	mut  *fakeMutator
+	cni  *fakeCNI
 	run  *lineage.Run
 	loop *Loop
 	cfg  LoopConfig
@@ -261,24 +293,34 @@ func newLoopFixture(t *testing.T, gens int, mut func(n int, parent map[string][]
 		ev: ev, run: run,
 		win: &fakeWindows{ev: ev, score: map[string]float64{}},
 		mut: &fakeMutator{ev: ev, mut: mut},
+		cni: &fakeCNI{out: []byte("2026-11-04T03:00:00.000000001Z calico-node line\n")},
 	}
 	fx.cfg = LoopConfig{
-		Run: run, Windows: fx.win, Cluster: loopCluster{ev}, Gate: fakeGate{ev}, Mutator: fx.mut,
+		Run: run, Windows: fx.win, Cluster: loopCluster{ev, fx.cni}, Gate: fakeGate{ev}, Mutator: fx.mut,
 		Params: fitness.DefaultParams(), Gen0: gen0Files, Generations: gens, TurnCeiling: 1000,
 		ScratchDir: t.TempDir(), Rand: rand.New(rand.NewPCG(1, 2)),
 	}
-	t.Cleanup(func() { clear(failStage5); clear(faultStage5) })
+	t.Cleanup(func() { clear(failStage5); clear(faultStage5); clear(faultBeforeBurst) })
 	return fx
 }
 
 func (fx *loopFixture) start(t *testing.T) (string, error) {
 	t.Helper()
+	return fx.startAt(t, context.Background(), nil)
+}
+
+// startAt runs the loop with ctx and, when now is set, its clock.
+func (fx *loopFixture) startAt(t *testing.T, ctx context.Context, now func() time.Time) (string, error) {
+	t.Helper()
 	l, err := NewLoop(fx.cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if now != nil {
+		l.now = now
+	}
 	fx.loop = l
-	return l.Run(context.Background())
+	return l.Run(ctx)
 }
 
 func (fx *loopFixture) attempts(t *testing.T) map[string]lineage.Attempt {

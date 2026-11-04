@@ -324,11 +324,15 @@ func (l *Loop) gateCandidate(ctx context.Context, id string, files map[string][]
 		return false, rep, err
 	}
 	l.logf("generation %s: gate stage 5", id)
+	burstStart := l.now()
 	serr := l.c.Gate.Stage5(ctx, id, rep.Image, &rep)
 	// Recorded whenever the burst was read, pass, fail or fault, and
 	// before a fault halts the run; it decides nothing.
 	if rep.Stage5Stall != nil {
 		l.appendStall(stallLine(lineage.StallBurst, rep.Stage5RunID, "", id, rep.Stage5Stall, Span{}))
+	}
+	if rep.Stage5RunID != "" {
+		l.archiveCNI(ctx, rep.Stage5RunID, burstStart)
 	}
 	if serr != nil {
 		return false, rep, fmt.Errorf("orchestrator: gate fault, generation %s: %w", id, serr)
@@ -404,11 +408,17 @@ func (l *Loop) probation(ctx context.Context, newcomer string, batches []Batch) 
 			batches = b
 		}
 		l.logf("window: live %q", l.live)
+		start := l.now()
 		res, err := l.c.Windows.RunWindow(ctx, l.live, batches)
 		if err != nil {
+			// A window fault has no run id to name the log by.
+			l.archiveCNI(ctx, faultLogName(start), start)
 			return "", err
 		}
 		l.windowStalls(res)
+		if !res.BaselineSpan.Start.IsZero() {
+			l.archiveCNI(ctx, res.RunID, res.BaselineSpan.Start)
+		}
 		batches = nil
 		if l.c.Windows.Restarted() {
 			return StopRestart, nil
@@ -520,6 +530,39 @@ func (l *Loop) appendStall(s lineage.Stall) {
 	if err := l.c.Run.AppendStall(s); err != nil {
 		l.logf("stalls: %s %s %s not recorded: %v", s.Kind, s.RunID, s.GenerationID, err)
 	}
+}
+
+// archiveCNI reads the CNI's log from since and stores it as
+// cni/<name>.log, or the read's error as cni/<name>.failed: one file
+// per Stage 5 burst that was read, per window that ran its baseline
+// half, and per window fault (docs/decisions.md, 2026-11-04, the D3
+// split: Q2, B, C). It is recording only: a failed read or write is one
+// log line, never a fault, an exclusion or a halt (Q4). Once ctx has
+// ended (the operator's interrupt) there is no read.
+func (l *Loop) archiveCNI(ctx context.Context, name string, since time.Time) {
+	if ctx.Err() != nil {
+		return
+	}
+	b, err := l.c.Cluster.CNILog(ctx, since)
+	if err != nil {
+		if werr := l.c.Run.WriteCNIFailed(name, err.Error()); werr != nil {
+			l.logf("cni: %s log not read: %v (and not recorded: %v)", name, err, werr)
+		} else {
+			l.logf("cni: %s log not read: %v", name, err)
+		}
+		return
+	}
+	if err := l.c.Run.WriteCNILog(name, b); err != nil {
+		l.logf("cni: %s log not recorded: %v", name, err)
+	}
+}
+
+// faultLogName names the CNI log of a window that faulted, started at
+// start: fault-<unix seconds>, which lineage's run-id pattern accepts
+// and no loadgen run id (w-..., gate-...) can be. A fault halts the run,
+// so a run has at most one.
+func faultLogName(start time.Time) string {
+	return "fault-" + strconv.FormatInt(start.Unix(), 10)
 }
 
 // stallLine is one stalls.jsonl line: st's counts for target id in

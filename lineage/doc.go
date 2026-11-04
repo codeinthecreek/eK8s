@@ -11,8 +11,9 @@
 //	genomes/<id>/         the wrapper files and their digest (sha256), made once
 //	transcripts/<id>.json the raw claude -p stream-json output (JSONL), made once
 //	summary.json          why the run stopped, and its total usage, made once at the end
-//	cni/<name>.log        calico-node's log as read for one Stage 5 burst or one window
-//	                      (name: the burst's or the window's run id), made once; over
+//	cni/<name>.log        calico-node's log as read for one Stage 5 burst, one window or a
+//	                      window fault (name: the burst's or the window's run id, or
+//	                      fault-<unix seconds>), made once; over
 //	                      MaxCNILog bytes it is cut there and ends with the line
 //	                      "ek8s: cut at 1048576 bytes" (recording only)
 //	cni/<name>.failed     the error of a failed read of that log, cut to MaxCNIFailed bytes, made once

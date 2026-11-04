@@ -15,9 +15,9 @@ import (
 	"github.com/codeinthecreek/eK8s/lineage"
 )
 
-// Cluster is what a window needs of the kind cluster besides loadgen:
-// the stress-ng switch, the CNI first look, the kubelet's CPU
-// counters and namespace deletion. Every error is a fault of the
+// Cluster is what a window and the Loop need of the kind cluster
+// besides loadgen: the stress-ng switch, the CNI first look, the
+// kubelet's CPU counters, namespace deletion and the CNI's log. Every error is a fault of the
 // cluster, never a variant's. Kube is the implementation; tests fake it.
 type Cluster interface {
 	// StressOff scales stress-ng to 0 and returns once no stress-ng pod
@@ -38,6 +38,11 @@ type Cluster interface {
 	// DeleteNamespace deletes namespace ns and waits until it is gone;
 	// a namespace already gone is no error.
 	DeleteNamespace(ctx context.Context, ns string) error
+	// CNILog reads the CNI's (calico-node's) log from since, for the
+	// run-dir archive (lineage.Run.WriteCNILog); the Loop calls it, and
+	// its error is recorded, never a fault (docs/decisions.md,
+	// 2026-11-04, Q4).
+	CNILog(ctx context.Context, since time.Time) ([]byte, error)
 }
 
 // Names Kube reads from deploy/stress and deploy/calico.

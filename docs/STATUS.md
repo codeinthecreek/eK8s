@@ -4,7 +4,7 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 *(inferred)* are guesses, not read from the repo; correct them.
 
 ## Now
-- D3b (this PR): archive calico-node's log into the run dir, for every gate Stage 5 burst (Q2) and once per window, from the baseline half's start, after the window returns, one untrimmed file (B), also before the halt on a window fault (C); each file capped at 1 MiB with a cut marker line (Q7); a failed read or write is a stderr line and a .failed file, never a fault, exclusion or halt (Q4) (docs/decisions.md, 2026-11-04).
+- D3b (this PR): archive calico-node's log into the run dir, for every gate Stage 5 burst (Q2) and once per window, from the baseline half's start, after the window returns, one untrimmed file (B), also before the halt on a window fault (C); each file capped at 1 MiB with a cut marker line (Q7); a failed read or write is a stderr line (a failed read also a .failed file), never a fault, exclusion or halt (Q4); files cni/<run id>.log, a window fault's cni/fault-<unix seconds>.log; deploy/orchestrator-smoke.sh checks one per burst and window (docs/decisions.md, 2026-11-04).
 
 ## Next
 - PR B part 1: raise maxRate and maxBurstSends (loadgen/config.go; committed 19 and 3000) to cover a C0 ladder past 31 (docs/decisions.md, 2026-11-04).
