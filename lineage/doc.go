@@ -6,12 +6,14 @@
 //
 //	run.json              {"version":1,"host_clock":{...},"allow_unpinned":false}
 //	attempts.jsonl        one JSON Attempt per line, append-only
+//	stalls.jsonl          one JSON Stall per (loadgen run, target), append-only; made by the first
+//	                      append, and read by nothing in the run (recording only)
 //	genomes/<id>/         the wrapper files and their digest (sha256), made once
 //	transcripts/<id>.json the raw claude -p stream-json output (JSONL), made once
 //	summary.json          why the run stopped, and its total usage, made once at the end
 //
 // For the first run the structured table of DESIGN.md sec 14 is this
-// JSONL file, not SQLite (docs/decisions.md, PR #52 S2 and the PR #55
+// attempts.jsonl, not SQLite (docs/decisions.md, PR #52 S2 and the PR #55
 // entry); the rows load into SQLite later.
 //
 // Archive entries and transcripts are written to a temporary name and
