@@ -17,8 +17,9 @@ import (
 
 // Cluster is what a window and the Loop need of the kind cluster
 // besides loadgen: the stress-ng switch, the CNI first look, the
-// kubelet's CPU counters, namespace deletion and the CNI's log. Every error is a fault of the
-// cluster, never a variant's. Kube is the implementation; tests fake it.
+// kubelet's CPU counters, namespace deletion and the CNI's log. Every
+// error but CNILog's is a fault of the cluster, never a variant's;
+// CNILog's is recorded only. Kube is the implementation; tests fake it.
 type Cluster interface {
 	// StressOff scales stress-ng to 0 and returns once no stress-ng pod
 	// is left, terminating ones included: a window starts only once they

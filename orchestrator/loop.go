@@ -72,7 +72,7 @@ var _ Windows = (*Session)(nil)
 type LoopConfig struct {
 	Run     *lineage.Run // a new run directory, with no attempt yet
 	Windows Windows
-	Cluster Cluster // StressOn before Stage 5, DeleteNamespace after a Stage 5 failure
+	Cluster Cluster // StressOn before Stage 5, DeleteNamespace after a Stage 5 failure, CNILog for cni/
 	Gate    Gater
 	Mutator Mutator
 	Params  fitness.Params

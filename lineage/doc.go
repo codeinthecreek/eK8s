@@ -13,10 +13,11 @@
 //	summary.json          why the run stopped, and its total usage, made once at the end
 //	cni/<name>.log        calico-node's log as read for one Stage 5 burst, one window or a
 //	                      window fault (name: the burst's or the window's run id, or
-//	                      fault-<unix seconds>), made once; over
-//	                      MaxCNILog bytes it is cut there and ends with the line
-//	                      "ek8s: cut at 1048576 bytes" (recording only)
-//	cni/<name>.failed     the error of a failed read of that log, cut to MaxCNIFailed bytes, made once
+//	                      fault-<unix seconds>), made once; over MaxCNILog bytes it is
+//	                      cut there and ends with the line "ek8s: cut at 1048576 bytes"
+//	                      (recording only)
+//	cni/<name>.failed     the error of a failed read of that log, cut to MaxCNIFailed
+//	                      bytes, made once
 //
 // For the first run the structured table of DESIGN.md sec 14 is this
 // attempts.jsonl, not SQLite (docs/decisions.md, PR #52 S2 and the PR #55
