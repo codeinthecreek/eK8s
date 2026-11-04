@@ -52,8 +52,8 @@
 # before any orchestrator, c0 or gate run.
 #
 # Stop rule, fixed in advance: at least 15 runs; past 15, another run only
-# while the mid-burst adds so far are under 10; at most 25. The first
-# stall ends the experiment.
+# while the mid-burst adds so far are under 10; at most 25. The first run
+# that is not PASS (rule B, below) ends the experiment.
 #
 # Output (-out, default ~/workspace/scratch/ek8s-runs/diag-runs-<UTC
 # stamp>/): meta.txt, diag.log, summary.tsv (one row per run),
@@ -90,9 +90,19 @@
 # "responses"); a mid-burst add is a hasher pod, other than the first,
 # whose creationTimestamp is between the burst's first intended send
 # minus 1s (the timestamp is cut to whole seconds) and first +
-# burst_sends / burst_rate. STALLED with any stall; MET with 0 stalls and
-# >= 10 mid-burst-add runs; else INCONCLUSIVE. A gate FAIL that is not a
-# stall is counted (other FAILs) but does not change the verdict.
+# burst_sends / burst_rate.
+#
+# Result of a run: PASS only if the gate exits 0, the Unknown-interface
+# drop count and the in-burst end-of-tier drop count (the end-of-tier count
+# over the whole run includes the canary's denied dial and is only
+# recorded) are 0, and the CNI's "Unblocking pod creation" count is 0 (a
+# counter that could not be read is not 0). Otherwise STALL (above), FAIL
+# (any other gate exit 1), FAULT (any other exit; ends the experiment), or
+# DROPS (the gate passed, a counter above is nonzero). A run that is not
+# PASS ends the set (so does -try, and 25 runs). Verdict: STALLED if any
+# run is STALL; else INCONCLUSIVE if any run is not PASS; else MET only
+# with >= 15 runs and >= 10 mid-burst-add runs; else INCONCLUSIVE. The
+# other drop counts, the warnings and the retransmit counters are recorded.
 #
 # deploy/diag/stage5-runs_test.sh tests the pure helpers (stop rule,
 # verdict, drop accounting) without a cluster.
@@ -287,9 +297,9 @@ drop_sum() {
 
 # another_run I ADDS RESULT: succeeds when the stop rule (header) allows
 # another run after run I, with ADDS mid-burst-add runs so far and RESULT
-# run I's result.
+# run I's result; a result other than PASS ends the set.
 another_run() {
-	[ "$3" != STALL ] || return 1
+	[ "$3" = PASS ] || return 1
 	[ "$try" = 0 ] || return 1
 	[ "$1" -lt "$max_runs" ] || return 1
 	[ "$1" -lt "$min_runs" ] || [ "$2" -lt "$need_adds" ]
@@ -298,19 +308,22 @@ another_run() {
 # verdict: summary.tsv rows (no header) on stdin; prints the tally and the
 # verdict, as in the header. Columns: run gate_rc result mid_burst_add ...
 verdict() {
-	awk -F'\t' -v need_adds="$need_adds" -v try="$try" '
+	awk -F'\t' -v need_adds="$need_adds" -v min_runs="$min_runs" -v try="$try" '
 		{
 			runs++
 			if ($4 == "yes") adds++
+			if ($3 != "PASS") notpass++
 			if ($3 == "STALL") { stalls++; if ($4 == "yes") add_stalls++ }
 			if ($3 == "FAIL") fails++
+			if ($3 == "DROPS") dropruns++
 		}
 		END {
 			v = "INCONCLUSIVE"
 			if (stalls + 0 > 0) v = "STALLED"
-			else if (adds + 0 >= need_adds) v = "MET"
+			else if (notpass + 0 > 0) v = "INCONCLUSIVE"
+			else if (runs + 0 >= min_runs && adds + 0 >= need_adds) v = "MET"
 			if (try) v = "none (-try)"
-			printf "runs %d, mid-burst adds %d, stalls %d (%d in add runs), other FAILs %d: %s\n", runs, adds, stalls, add_stalls, fails, v
+			printf "runs %d, mid-burst adds %d, stalls %d (%d in add runs), other FAILs %d, DROPS %d: %s\n", runs, adds, stalls, add_stalls, fails, dropruns, v
 		}'
 }
 
@@ -687,6 +700,11 @@ run_one() {
 		;;
 	*) result=FAULT ;;
 	esac
+	# Rule B (header): a gate pass with a Felix drop in the node's counters
+	# (Unknown interface; end of tier in the burst) or a CNI "Unblocking pod
+	# creation" is not a PASS. A counter that could not be read ("-") is not
+	# shown to be 0.
+	if [ "$result" = PASS ] && { [ "$drops_u" != 0 ] || [ "$drops_eb" != 0 ] || [ "$unblock" != 0 ]; }; then result=DROPS; fi
 	if [ "$result" != FAULT ] && [ "$nread" -eq 0 ]; then
 		echo "VIOLATION: the gate judged the burst (exit $rc) but no record was read, so the burst-time checks never ran" >>"$rdir/state.txt"
 	fi
@@ -826,7 +844,7 @@ main() {
 	{
 		echo "git $(git rev-parse HEAD)"
 		echo "rate $rate (from $rate_src) burst_rate $burst_rate burst_sends $burst_sends try $try"
-		echo "stop rule: at least $min_runs runs, past $min_runs only while mid-burst adds < $need_adds, at most $max_runs; the first stall ends it"
+		echo "stop rule: at least $min_runs runs, past $min_runs only while mid-burst adds < $need_adds, at most $max_runs; the first run that is not PASS ends it"
 		echo "image $image"
 		echo "kind $(kind version)"
 		echo "node image $(docker inspect -f '{{.Config.Image}}' "$node" 2>/dev/null || echo unknown)"
@@ -841,7 +859,7 @@ main() {
 		run_one "$i"
 		last=$(tail -n 1 "$out/summary.tsv")
 		[ "$(cut -f4 <<<"$last")" != yes ] || adds=$((adds + 1))
-		[ "$(cut -f3 <<<"$last")" != STALL ] || say "run $i stalled: the experiment ends (stop rule)"
+		[ "$(cut -f3 <<<"$last")" = PASS ] || say "run $i is $(cut -f3 <<<"$last"), not PASS: the experiment ends (stop rule)"
 		another_run "$i" "$adds" "$(cut -f3 <<<"$last")" || break
 	done
 	tail -n +2 "$out/summary.tsv" | verdict | tee "$out/verdict.txt" | sed 's/^/stage5-runs.sh: /'

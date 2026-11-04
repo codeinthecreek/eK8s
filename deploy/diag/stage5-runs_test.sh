@@ -20,7 +20,7 @@ check() { # check NAME WANT GOT
 yes_no() { if "$@"; then echo yes; else echo no; fi; }
 
 # --- stop rule: at least 15, past 15 only while adds < 10, at most 25,
-# the first stall ends it, -try runs one.
+# the first run that is not PASS ends it, -try runs one.
 try=0
 check "another_run after 1" yes "$(yes_no another_run 1 1 PASS)"
 check "another_run after 14, 14 adds" yes "$(yes_no another_run 14 14 PASS)"
@@ -29,7 +29,9 @@ check "another_run after 15, 9 adds" yes "$(yes_no another_run 15 9 PASS)"
 check "another_run after 24, 0 adds" yes "$(yes_no another_run 24 0 PASS)"
 check "another_run after 25, 0 adds" no "$(yes_no another_run 25 0 PASS)"
 check "another_run after a stall" no "$(yes_no another_run 1 0 STALL)"
-check "another_run after a FAIL" yes "$(yes_no another_run 1 0 FAIL)"
+check "another_run after a FAIL" no "$(yes_no another_run 1 0 FAIL)"
+check "another_run after DROPS" no "$(yes_no another_run 1 0 DROPS)"
+check "another_run after a FAULT" no "$(yes_no another_run 1 0 FAULT)"
 try=1
 check "another_run with -try" no "$(yes_no another_run 1 0 PASS)"
 try=0
@@ -44,13 +46,17 @@ rows() { # rows N ADDS [RESULT_OF_LAST]
 		printf '%s\t0\t%s\t%s\n' "$i" "$r" "$m"
 	done
 }
-check "verdict MET at 10 adds" "runs 15, mid-burst adds 10, stalls 0 (0 in add runs), other FAILs 0: MET" "$(rows 15 10 | verdict)"
-check "verdict INCONCLUSIVE at 9 adds" "runs 25, mid-burst adds 9, stalls 0 (0 in add runs), other FAILs 0: INCONCLUSIVE" "$(rows 25 9 | verdict)"
-check "verdict STALLED" "runs 3, mid-burst adds 3, stalls 1 (1 in add runs), other FAILs 0: STALLED" "$(rows 3 3 STALL | verdict)"
-check "verdict counts other FAILs" "runs 15, mid-burst adds 15, stalls 0 (0 in add runs), other FAILs 1: MET" "$(rows 15 15 FAIL | verdict)"
-check "verdict unknown add is no add" "runs 1, mid-burst adds 0, stalls 0 (0 in add runs), other FAILs 0: INCONCLUSIVE" "$(printf '1\t0\tPASS\tunknown\n' | verdict)"
+check "verdict MET at 10 adds" "runs 15, mid-burst adds 10, stalls 0 (0 in add runs), other FAILs 0, DROPS 0: MET" "$(rows 15 10 | verdict)"
+check "verdict INCONCLUSIVE at 9 adds" "runs 25, mid-burst adds 9, stalls 0 (0 in add runs), other FAILs 0, DROPS 0: INCONCLUSIVE" "$(rows 25 9 | verdict)"
+check "verdict STALLED" "runs 3, mid-burst adds 3, stalls 1 (1 in add runs), other FAILs 0, DROPS 0: STALLED" "$(rows 3 3 STALL | verdict)"
+check "verdict: a FAIL run ends INCONCLUSIVE" "runs 15, mid-burst adds 15, stalls 0 (0 in add runs), other FAILs 1, DROPS 0: INCONCLUSIVE" "$(rows 15 15 FAIL | verdict)"
+check "verdict: a DROPS run ends INCONCLUSIVE" "runs 15, mid-burst adds 15, stalls 0 (0 in add runs), other FAILs 0, DROPS 1: INCONCLUSIVE" "$(rows 15 15 DROPS | verdict)"
+check "verdict: a short set with a DROPS run" "runs 3, mid-burst adds 3, stalls 0 (0 in add runs), other FAILs 0, DROPS 1: INCONCLUSIVE" "$(rows 3 3 DROPS | verdict)"
+check "verdict: fewer than min_runs all-PASS rows" "runs 14, mid-burst adds 14, stalls 0 (0 in add runs), other FAILs 0, DROPS 0: INCONCLUSIVE" "$(rows 14 14 | verdict)"
+check "verdict: a stall with a DROPS run is STALLED" "runs 3, mid-burst adds 3, stalls 1 (1 in add runs), other FAILs 0, DROPS 1: STALLED" "$( { rows 2 2 DROPS; printf '3\t1\tSTALL\tyes\n'; } | verdict)"
+check "verdict unknown add is no add" "runs 1, mid-burst adds 0, stalls 0 (0 in add runs), other FAILs 0, DROPS 0: INCONCLUSIVE" "$(printf '1\t0\tPASS\tunknown\n' | verdict)"
 try=1
-check "verdict with -try" "runs 1, mid-burst adds 1, stalls 0 (0 in add runs), other FAILs 0: none (-try)" "$(rows 1 1 | verdict)"
+check "verdict with -try" "runs 1, mid-burst adds 1, stalls 0 (0 in add runs), other FAILs 0, DROPS 0: none (-try)" "$(rows 1 1 | verdict)"
 try=0
 
 # --- records_tsv: pair and evidence never reach the output.

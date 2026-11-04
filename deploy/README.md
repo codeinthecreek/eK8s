@@ -454,7 +454,7 @@ policy and real canary in place, and stress-ng Running at origin/main's
 `deploy/stress` requests, limits and dose; the experiment stops at the
 first failed assertion or gate fault. Its stop rule is fixed in advance:
 at least 15 runs, more only while fewer than 10 had a mid-burst add, at
-most 25, and the first stall ends it. Runs about 2 minutes each
+most 25, and the first run that is not PASS ends it. Runs about 2 minutes each
 (inferred), so 15 to 25 runs take 30 to 50 minutes. On exit, Ctrl-C
 included, it stops its gate, deletes its namespace `ek8s-v999997` and
 turns stress-ng off; after SIGKILL or a host crash, kill any leftover
@@ -472,8 +472,16 @@ owner's Stage 5 runs: docs/decisions.md, PR #65 C0 entry, r = 0.5 x C0),
 and is required when none is;
 `-out` defaults to `~/workspace/scratch/ek8s-runs/diag-runs-<UTC stamp>/`
 (a relative `-out` is taken from the directory you run it from).
-The verdict is in `verdict.txt`: STALLED on any stall, MET with no stall
-in at least 10 mid-burst-add runs, else INCONCLUSIVE. `summary.tsv` has
+A run is PASS only if the gate exits 0, Felix dropped no packet from an
+unprogrammed pod ("Unknown interface") and denied none in the burst
+(end of tier), and the CNI logged no "Unblocking pod creation" (a counter
+that cannot be read is not 0); otherwise it is STALL, FAIL, FAULT or
+DROPS (the gate passed, a counter is nonzero). The verdict is in
+`verdict.txt`: STALLED on any stall; else INCONCLUSIVE if any run is not
+PASS; else MET only with at least 15 runs, at least 10 of them with a
+mid-burst add; else INCONCLUSIVE (docs/decisions.md, 2026-11-04). The
+end-of-tier count over the whole run includes the canary's denied dial and
+is only recorded. `summary.tsv` has
 one row per run; each `run-NN/` keeps the gate's output, the state
 assertions, records without pairs or evidence, loadgen's SYN and TCP
 retransmit counters, the packets dropped by Felix's "Unknown interface"
