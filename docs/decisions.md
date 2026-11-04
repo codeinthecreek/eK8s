@@ -908,8 +908,8 @@ max. Earlier entries are not backfilled.
 - Origin: owner (Q7)
 
 ## 2026-11-04 · PR #71 · stage5-runs.sh verdict, rule B: a Felix drop or an Unblocking is not a PASS
-- Decision: a run is PASS only with gate exit 0 and zero Unknown-interface drops, zero in-burst end-of-tier drops and zero CNI "Unblocking pod creation" lines; the first run that is not PASS ends the set; MET needs no stall, every run PASS, >= 15 runs and >= 10 mid-burst adds; any non-PASS run without a stall is INCONCLUSIVE.
-- Rejected: MET on zero stalls alone with the drop and Unblocking counts only printed.
+- Decision: a run is PASS only with gate exit 0 and zero Unknown-interface drops, zero in-burst end-of-tier drops and zero CNI "Unblocking pod creation" lines; the first run that is not PASS ends the set; MET needs no stall, every run PASS, >= 15 runs and >= 10 mid-burst adds; any non-PASS run without a stall is INCONCLUSIVE; a count that cannot be read ("-") is not 0, so that run is DROPS.
+- Rejected: MET on zero stalls alone with the drop and Unblocking counts only printed; an unread count taken as 0 or as FAULT.
 - Reason: a SYN dropped to a new pod for less than the hang timeout never reads as a stall, so zero stalls alone could pass a run whose pod was denied.
 - Reverse: drop the DROPS branch in run_one and the notpass test in verdict, and restore the stall-only stop rule in another_run (deploy/diag/stage5-runs.sh).
 - Origin: owner
