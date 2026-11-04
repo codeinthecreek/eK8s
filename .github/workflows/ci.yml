@@ -1,15 +1,10 @@
 name: CI
 
 on:
+  # Draft PRs skip the job (jobs.check.if); ready_for_review starts the run
+  # when the owner-approved PR leaves draft.
   pull_request:
-    paths:
-      - '**.go'
-      - 'go.mod'
-      - 'go.sum'
-      - '**/testdata/**'
-      - '.github/workflows/ci.yml'
-  push:
-    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - '**.go'
       - 'go.mod'
@@ -25,8 +20,18 @@ on:
 permissions:
   contents: read
 
+# One run per PR (the ref for schedule and dispatch); a new push to a PR
+# cancels its run in flight. Only pull_request runs are cancelled: a dispatch
+# never cancels the weekly run or another dispatch (it queues behind it).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   check:
+    # Non-PR events (schedule, workflow_dispatch) have no pull_request
+    # context and always run; a PR runs only once it is not a draft.
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     env:
       # Gate tests fail, not skip, without bwrap, nsenter or a docker
