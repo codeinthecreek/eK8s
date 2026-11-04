@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 // stubKube is a Kube whose kubectl answers from outs in call order (the
@@ -189,5 +190,69 @@ func TestPollCtx(t *testing.T) {
 	cancel()
 	if err := k.StressOff(ctx); err == nil {
 		t.Error("StressOff with ctx done and stress never stopping: want an error")
+	}
+}
+
+// TestCNILogArgs: the exact kubectl call, with since floored to the
+// second less one second in UTC, and the bytes passed back untrimmed.
+func TestCNILogArgs(t *testing.T) {
+	const out = "2026-11-04T07:59:59.5Z first\n2026-11-04T08:00:01Z last\n"
+	k, calls := stubKube(out)
+	since := time.Date(2026, 11, 4, 10, 0, 0, 999999999, time.FixedZone("x", 2*3600))
+	got, err := k.CNILog(t.Context(), since)
+	if err != nil || string(got) != out {
+		t.Fatalf("CNILog = %q, %v; want %q", got, err, out)
+	}
+	want := []string{"-n", "kube-system", "logs", "ds/calico-node", "-c", "calico-node", "--timestamps",
+		"--since-time=2026-11-04T07:59:59Z", "--limit-bytes=1048577",
+		"--request-timeout", "30s", "--context", "kind-x"}
+	if len(*calls) != 1 || !slices.Equal((*calls)[0], want) {
+		t.Fatalf("kubectl calls %q, want [%q]", *calls, want)
+	}
+	if _, err := k.CNILog(t.Context(), time.Time{}); err == nil || len(*calls) != 1 {
+		t.Errorf("zero since: %v after %d calls, want a refusal before kubectl", err, len(*calls))
+	}
+}
+
+func TestCNILogSince(t *testing.T) {
+	for _, c := range []struct {
+		in   time.Time
+		want string
+	}{
+		{time.Date(2026, 11, 4, 10, 0, 0, 0, time.UTC), "2026-11-04T09:59:59Z"},
+		{time.Date(2026, 11, 4, 10, 0, 0, 1, time.UTC), "2026-11-04T09:59:59Z"},
+		{time.Date(2026, 11, 4, 10, 0, 0, 999999999, time.UTC), "2026-11-04T09:59:59Z"},
+		{time.Date(2026, 11, 4, 10, 0, 1, 0, time.UTC), "2026-11-04T10:00:00Z"},
+		{time.Date(2026, 11, 5, 0, 0, 0, 500, time.FixedZone("y", -5*3600)), "2026-11-05T04:59:59Z"},
+		{time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC), "2026-12-31T23:59:59Z"},
+	} {
+		if got := cniLogSince(c.in); got != c.want {
+			t.Errorf("cniLogSince(%v) = %s, want %s", c.in, got, c.want)
+		}
+	}
+}
+
+func TestCNILogError(t *testing.T) {
+	failed := errors.New("kubectl logs: exit status 1: error: container calico-node is not valid")
+	k := &Kube{Context: "kind-x"}
+	k.run = func(context.Context, ...string) (string, error) { return "partial", failed }
+	got, err := k.CNILog(t.Context(), time.Now())
+	if !errors.Is(err, failed) || got != nil {
+		t.Errorf("CNILog = %q, %v; want nil and the kubectl error", got, err)
+	}
+	if _, err := (&Kube{}).CNILog(t.Context(), time.Now()); err == nil || !strings.Contains(err.Error(), "empty kube context") {
+		t.Errorf("no context: %v", err)
+	}
+}
+
+// TestKubectlTrims: every other read keeps the trimmed stdout it had
+// before the raw path was split out.
+func TestKubectlTrims(t *testing.T) {
+	k, _ := stubKube(" \nnamespace/ek8s-v1\n ")
+	if out, err := k.kubectl(t.Context(), "get", "namespaces"); err != nil || out != "namespace/ek8s-v1" {
+		t.Errorf("kubectl = %q, %v", out, err)
+	}
+	if out, err := k.kubectlRaw(t.Context(), "get", "namespaces"); err != nil || out != " \nnamespace/ek8s-v1\n " {
+		t.Errorf("kubectlRaw = %q, %v", out, err)
 	}
 }
