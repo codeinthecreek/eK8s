@@ -19,7 +19,10 @@ name: deploy smoke
 # (docs/STATUS.md, Parked). workflow_dispatch only works once this file is
 # on the default branch.
 on:
+  # Draft PRs skip the job (jobs.smoke.if); ready_for_review starts the run
+  # when the owner-approved PR leaves draft.
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - 'deploy/**'
       # variant-smoke.sh deploys generation 0's image built from these.
@@ -45,8 +48,16 @@ on:
 permissions:
   contents: read
 
+# One run per PR (the ref for dispatch); a new push cancels the run in flight.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   smoke:
+    # workflow_dispatch has no pull_request context and always runs; a PR
+    # runs only once it is not a draft.
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     timeout-minutes: 50
     env:
