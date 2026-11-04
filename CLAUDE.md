@@ -59,7 +59,7 @@ Applies to every session in this repo.
   and replies with a review packet. Draft PRs skip CI (ci.yml and
   deploy.yml). Code marks the PR ready for review only after the owner
   approves it in the planning chat; it then waits for the CI runs that
-  start and reports their conclusions before the owner merges. Review fixes go in follow-up commits
+  start, if any, and reports their conclusions before the owner merges. Review fixes go in follow-up commits
   on the same PR; the owner merges.
   It stops and asks first only for: a design question with options;
   anything on the existing escalation list; an action only the owner can
