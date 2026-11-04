@@ -976,3 +976,10 @@ max. Earlier entries are not backfilled.
 - Reason: owner answers Q2, Q4, B and C (D3 split entry; prompt EK-D3B-P2-20261104); deploy/orchestrator-smoke.sh (g) checks every stalls.jsonl burst run_id and window_run_id has a cni/<id>.log (empty allowed: calico-node may log nothing in a short span) and no .failed.
 - Reverse: delete archiveCNI, faultLogName and their three calls, CNILog from Cluster, and smoke check (g).
 - Origin: Code
+
+## 2026-11-04 · PR #75 (inferred) · CI minutes: draft PRs skip ci.yml and deploy.yml, one run per PR, no push-to-main run (amends the PR #12 CI-trigger entry)
+- Decision: both workflows run on pull_request types opened, synchronize, reopened, ready_for_review; the job is skipped while the PR is a draft (`github.event_name != 'pull_request' || !github.event.pull_request.draft`, so schedule and dispatch still run); concurrency group `workflow-(PR number or ref)` with cancel-in-progress; ci.yml drops its push-to-main trigger. Path filters unchanged. Code opens every PR as a draft and marks it ready only after the owner approves.
+- Rejected: running tests once with -race only (the plain build compiles the !race files in gate and internal/classifier/testvectors, so it tests different code); faster orchestrator tests now (shared pre-generated batches; deferred, docs/AFTER-FIRST-RUN.md).
+- Reason: 342 min in the first 4 days of the month (deploy.yml 202 min / 17 runs, ci.yml 140 min / 13), about 2,500 a month projected; every push to an open PR ran both workflows. Main has no required checks, so skipped runs block nothing; CI no longer re-runs on main after a merge.
+- Reverse: drop `types`, the job `if`, the concurrency block, and restore ci.yml's `push: branches: [main]` with the same paths.
+- Origin: owner

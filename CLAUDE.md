@@ -55,8 +55,11 @@ Applies to every session in this repo.
   contains the Prompt ID, reply only "ALREADY RUN: <Prompt ID>", else
   append the ID and `date -u` to it.
 - Code runs a task end to end: commits, runs the reviewer subagent once
-  per task, pushes, opens the PR with its own title and body,
-  and replies with a review packet. Review fixes go in follow-up commits
+  per task, pushes, opens the PR as a draft with its own title and body,
+  and replies with a review packet. Draft PRs skip CI (ci.yml and
+  deploy.yml). Code marks the PR ready for review only after the owner
+  approves it in the planning chat; it then waits for the CI runs that
+  start and reports their conclusions before the owner merges. Review fixes go in follow-up commits
   on the same PR; the owner merges.
   It stops and asks first only for: a design question with options;
   anything on the existing escalation list; an action only the owner can
@@ -233,7 +236,10 @@ docs/               overview.md (plain-language introduction; DESIGN.md is
   cluster, in the candidate's own `ek8s-v<id>` namespace -- see `gate/`
   and DESIGN.md sec 7, sec 11.
 - CI (`.github/workflows/ci.yml`) runs `go vet`, `go test`, `go test -race`
-  and `govulncheck` on every PR and on pushes to main.
+  and `govulncheck` on a non-draft PR touching Go, module, testdata or the
+  workflow files, weekly (Mondays 06:17 UTC) and by hand. There is no
+  push-to-main run, and a draft PR skips both ci.yml and deploy.yml; a
+  new push to a PR cancels its run in flight.
 
 ## Non-negotiable constraints
 

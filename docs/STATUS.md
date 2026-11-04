@@ -4,7 +4,7 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 *(inferred)* are guesses, not read from the repo; correct them.
 
 ## Now
-- (none open)
+- CI minutes cut (this PR, draft): draft PRs skip ci.yml and deploy.yml, a run per PR cancels on a new push, ci.yml has no push-to-main run; CLAUDE.md: Code opens PRs as drafts and marks them ready only after the owner approves (docs/decisions.md, 2026-11-04).
 
 ## Next
 - PR B part 1: raise maxRate and maxBurstSends (loadgen/config.go; committed 19 and 3000) to cover a C0 ladder past 31 (docs/decisions.md, 2026-11-04).
