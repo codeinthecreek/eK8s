@@ -934,3 +934,10 @@ max. Earlier entries are not backfilled.
 - Reason: a smoke must leave nothing the next step refuses on, and an unknown state is not a pass.
 - Reverse: restore the --wait=false delete in cleanup() (deploy/stage5-smoke.sh).
 - Origin: Code
+
+## 2026-11-04 · PR #73 (inferred) · D3 is split into D3a (stall counts) and D3b (the calico-node log archive)
+- Decision: D3a records the stall counts in the gate and the orchestrator, written to a new run-dir file stalls.jsonl; attempts.jsonl (DESIGN.md sec 14) is unchanged, no DESIGN.md edit (Q1 definitions D1-D7, Q3, Q5 c0 out of D3, Q6 only the longest run's start). A failed read or write of stalls.jsonl or a log file is a stderr line (for logs also a .failed file), never a fault, exclusion or halt (Q4). D3b archives calico-node's log for every gate Stage 5 burst too (Q2), each file capped at 1 MiB with a cut marker line (Q7); per window it is read once, from the baseline half's start, after the window returns, into one file, untrimmed, stalls.jsonl carrying each half's start and end (B); on a window fault the same read runs before the halt (C).
+- Rejected: one D3 PR (counts and archive in one review); per-half log files trimmed by timestamp; a recording failure that faults or excludes.
+- Reason: owner answers to the D3 plan (prompt EK-D3-P2-20261104); D3 is detection and recording only (Q4, 2026-11-02), so recording must never change a verdict.
+- Reverse: STATUS Now/Next; a later entry overrides any answer.
+- Origin: owner

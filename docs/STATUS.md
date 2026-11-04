@@ -4,9 +4,10 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 *(inferred)* are guesses, not read from the repo; correct them.
 
 ## Now
-- D3 (this PR): option 4 detection and recording only (stall-run count, longest run and its start in the gate and the orchestrator; counts only, no Detail), which also archives the CNI agent's logs for each half into the run dir; its retry and exclusion rules wait in docs/AFTER-FIRST-RUN.md.
+- D3a (this PR): option 4 detection and recording only, the counts: internal/stallrun (definitions D1-D7, docs/decisions.md 2026-11-04) used by the gate's Stage 5 path and the orchestrator, recorded per loadgen run and target in a new run-dir file stalls.jsonl (attempts.jsonl unchanged; counts only, no Detail); its retry and exclusion rules wait in docs/AFTER-FIRST-RUN.md.
 
 ## Next
+- D3b: archive calico-node's log into the run dir, for every gate Stage 5 burst (Q2) and once per window, from the baseline half's start, after the window returns, one untrimmed file (B), also before the halt on a window fault (C); each file capped at 1 MiB with a cut marker line (Q7); a failed read or write is a stderr line and a .failed file, never a fault, exclusion or halt (Q4) (docs/decisions.md, 2026-11-04).
 - PR B part 1: raise maxRate and maxBurstSends (loadgen/config.go; committed 19 and 3000) to cover a C0 ladder past 31 (docs/decisions.md, 2026-11-04).
 - The owner runs `go run ./orchestrator/cmd/c0 ...` on merged main, clocks pinned, then `deploy/loadgen-up.sh` at the measured rate. Fresh-cluster check order: deploy/README.md.
 - PR B part 2: r = the measured C0, maxRate to match, b decoupled from r, b decided from the gen-0 Stage 5 runs.
