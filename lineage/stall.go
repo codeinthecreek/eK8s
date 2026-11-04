@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"time"
@@ -20,8 +21,9 @@ const (
 // (loadgen run, target), copied field by field so lineage keeps to the
 // standard library. It is recording only (docs/decisions.md, 2026-11-04
 // D1-D7): no verdict, score, exclusion, streak, cull, halt or prompt
-// reads it. It holds ids, counts, indices and host times, never a
-// record's evidence or any other candidate-written byte.
+// reads it. It holds ids, counts, indices and times (the spans the
+// host's, LongestStartWall a record's IntendedWall, from loadgen's
+// clock), never a record's evidence or any other candidate-written byte.
 type Stall struct {
 	Kind         string `json:"kind"`                    // StallBurst, StallBaseline or StallStress
 	RunID        string `json:"run_id"`                  // the loadgen run's run_id
@@ -83,7 +85,10 @@ func (r *Run) AppendStall(s Stall) error {
 	if err := r.checkTail(stallsFile, true); err != nil {
 		return err
 	}
-	f, err := os.OpenFile(filepath.Join(r.dir, stallsFile), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o600)
+	path := filepath.Join(r.dir, stallsFile)
+	_, serr := os.Lstat(path)
+	made := errors.Is(serr, fs.ErrNotExist)
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o600)
 	if err != nil {
 		return fmt.Errorf("lineage: %w", err)
 	}
@@ -98,9 +103,11 @@ func (r *Run) AppendStall(s Stall) error {
 	if err := f.Close(); err != nil {
 		return fmt.Errorf("lineage: %w", err)
 	}
-	// The first append made the file: its directory entry must survive
-	// a crash too.
-	return syncDir(r.dir)
+	if made {
+		// Its directory entry must survive a crash too.
+		return syncDir(r.dir)
+	}
+	return nil
 }
 
 // utc is t in UTC, the zero time left zero.
