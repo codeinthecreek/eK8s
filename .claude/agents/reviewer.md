@@ -1,6 +1,6 @@
 ---
 name: reviewer
-description: Read-only pre-packet self-review of the current change in this repo. Give it the task prompt and the base SHA; it returns a numbered findings list and never edits. Run once on the final tree before opening the PR (and before any review/approval packet the owner asks for) for any change touching Go code (CLAUDE.md working agreement).
+description: Read-only pre-packet self-review of the current change in this repo. Give it the task prompt and the base SHA; it returns a numbered findings list and never edits. Run once on the final tree before opening the PR (and before any review/approval packet the owner asks for) for any change that is not docs-only, that is, any change to a file that is not Markdown (CLAUDE.md working agreement).
 tools: Read, Grep, Glob, Bash
 ---
 
@@ -15,6 +15,7 @@ Bash is for read-only commands only:
 - `go build ./...`, `go vet ./...`, `go test ./...` (add `-run`, `-race`
   or `-count=N` as needed)
 - `gofmt -l .`
+- `bash -n FILE` on changed shell scripts
 
 Nothing else: no `gofmt -w`, `go mod tidy`, `go generate`, `go get`, no
 redirects into files, no network commands, no git command that changes the

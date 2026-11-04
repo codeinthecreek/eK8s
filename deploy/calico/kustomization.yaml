@@ -1,0 +1,118 @@
+# Calico v3.33.0, the cluster's CNI and NetworkPolicy engine (replaces kind's
+# kindnet; docs/decisions.md, 2026-11-03, D2). calico.yaml is the release
+# manifest, unmodified:
+#   https://raw.githubusercontent.com/projectcalico/calico/v3.33.0/manifests/calico.yaml
+#   tag v3.33.0, commit fbaa371111636a37ecc82625fce8453064a7fff2
+#   sha256 2de8f47595fb9c41b3f47d7b767a1f8e72ecf84057af834738ff12689a234da5
+# Re-check: curl -fsSL <url above> | sha256sum
+# Images: the manifest's three, from quay.io by index digest below (equal to
+# the Docker Hub calico/* v3.33.0 index digests, checked 2026-11-03). Re-check:
+#   docker buildx imagetools inspect quay.io/calico/node:v3.33.0 | grep -m1 Digest
+# No tigera-operator: the plain manifest, like deploy/metrics-server.
+# Applied by deploy/up.sh with server-side apply (the CRD bundle is too large
+# for a client-side apply's last-applied annotation):
+#   kubectl --context kind-ek8s apply --server-side -k deploy/calico
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- calico.yaml
+images:
+# calico/calico: the upgrade-ipam and install-cni init containers and
+# calico-kube-controllers.
+- name: quay.io/calico/calico
+  digest: sha256:4ebc20730127bc9e8bf1db5f5a2d8b58cf37fe0e891b3c7b5471992221d213e5
+# calico/node: the ebpf-bootstrap init container and calico-node.
+- name: quay.io/calico/node
+  digest: sha256:565d8db3200e443955557f8f28ff44ab8a4a456754bc74a19c4f2f3444af9b1c
+# calico/third-party-cni-plugins: the cni-plugins init container.
+- name: quay.io/calico/third-party-cni-plugins
+  digest: sha256:0f32f48279484c0d6f0e0d0e767b2d0e1a6c6ca34cb3421a61b989d992f3df41
+patches:
+# CNI config: the manifest's, plus policy_setup_timeout_seconds. The CNI
+# plugin then holds a new pod's start for up to 10 s until Felix reports its
+# endpoint programmed (cni-plugin/pkg/k8s/k8s.go); past that it logs
+# "Unblocking pod creation" to /var/log/calico/cni/cni.log and starts the pod
+# anyway, still behind Felix's "Unknown interface" drop for what it sends
+# and what is forwarded to it (fail-closed; the node's own traffic to a pod
+# is never policed). The
+# value is a JSON string, so the patch replaces it whole.
+- target:
+    kind: ConfigMap
+    name: calico-config
+    namespace: kube-system
+  patch: |-
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: calico-config
+      namespace: kube-system
+    data:
+      cni_network_config: |-
+        {
+          "name": "k8s-pod-network",
+          "cniVersion": "1.0.0",
+          "plugins": [
+            {
+              "type": "calico",
+              "log_level": "info",
+              "log_file_path": "/var/log/calico/cni/cni.log",
+              "datastore_type": "kubernetes",
+              "nodename": "__KUBERNETES_NODE_NAME__",
+              "mtu": __CNI_MTU__,
+              "ipam": {
+                  "type": "calico-ipam"
+              },
+              "policy": {
+                  "type": "k8s"
+              },
+              "policy_setup_timeout_seconds": 10,
+              "kubernetes": {
+                  "kubeconfig": "__KUBECONFIG_FILEPATH__"
+              }
+            },
+            {
+              "type": "portmap",
+              "snat": true,
+              "capabilities": {"portMappings": true}
+            }
+          ]
+        }
+# calico-node: env merged by name; resources merged too (the manifest sets
+# only requests.cpu, so the patch's 100m is the whole request).
+# - CALICO_IPV4POOL_CIDR: kind's default podSubnet, written out in both kind
+#   configs (the manifest's default, 192.168.0.0/16, can collide with a LAN).
+#   Read only when the default pool is first created.
+# - CALICO_IPV4POOL_IPIP Never: one node, no tunnel (the manifest has Always).
+# - FELIX_NFTABLESMODE Disabled: the iptables dataplane, pinned. Auto already
+#   picks iptables beside kind's iptables kube-proxy; pinning stops a
+#   detection change from switching dataplanes silently.
+# - FELIX_DEFAULTENDPOINTTOHOSTACTION stays the manifest's ACCEPT: it admits
+#   pod-to-node traffic only after the pod's own egress policy passed it, and
+#   coredns, metrics-server and calico-kube-controllers need the node.
+# - CPU request 100m, kindnet's, on CI and the workstation alike (the manifest
+#   has 250m): keeps the workstation's 200m spare and CI's variant budget.
+- target:
+    kind: DaemonSet
+    name: calico-node
+    namespace: kube-system
+  patch: |-
+    apiVersion: apps/v1
+    kind: DaemonSet
+    metadata:
+      name: calico-node
+      namespace: kube-system
+    spec:
+      template:
+        spec:
+          containers:
+          - name: calico-node
+            env:
+            - name: CALICO_IPV4POOL_CIDR
+              value: "10.244.0.0/16"
+            - name: CALICO_IPV4POOL_IPIP
+              value: "Never"
+            - name: FELIX_NFTABLESMODE
+              value: "Disabled"
+            resources:
+              requests:
+                cpu: 100m

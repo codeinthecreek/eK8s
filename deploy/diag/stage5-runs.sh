@@ -1,80 +1,88 @@
 #!/usr/bin/env bash
-# Diagnostic only, workstation only: is the Stage 5 new-connection stall
-# (a contiguous over_hang_timeout run when the HPA adds the second pod
-# mid-burst) caused by kindnet's NetworkPolicy path? docs/decisions.md,
-# 2026-11-02 entries. Never part of a run, a smoke or CI.
+# Diagnostic only, workstation only: does Stage 5 still stall (a
+# contiguous over_hang_timeout run when the HPA adds the second pod
+# mid-burst) now that Calico enforces the NetworkPolicies? The owner's
+# validation of D2 (docs/decisions.md, 2026-11-03). Never part of a run, a
+# smoke or CI.
 #
-# kindnet queues the first packet of a new connection to userspace when
-# its source or destination is a pod some NetworkPolicy selects, so the
-# OFF arm removes both policies on the burst's path: ek8s-system/loadgen
-# and the diag variant's ek8s-v<id>/variant. With loadgen's policy gone its
-# canary would connect, so the OFF arm also points the canary at
-# 192.0.2.1:443 (TEST-NET-1, the renderer's own stand-in), which cannot
-# connect. The ON arm is the cluster as deploy/up.sh and loadgen-up.sh
-# leave it. Runs alternate ON, OFF, ON, ... with -runs runs per arm
-# (at most 15, never extended), each a real `gate -stage5` on
-# generation 0 built from this checkout, stress-ng on.
+# Adapted from stage5-nopolicy.sh (PR #70), which found the stall on
+# kindnet's policy path; git keeps it and decisions.md its result. One
+# arm, the cluster as deploy/up.sh and loadgen-up.sh leave it: no OFF arm,
+# no canary patch, no policy removed. So stage5-nopolicy.sh's G1 (refuse in
+# CI), G2 (EK8S_DIAG_NOPOLICY, the opt-in variable) and G5 (restore the
+# policies and the canary on exit) are gone: they guarded isolation
+# removal, which this script never does. Each run is a real `gate -stage5`
+# on generation 0 built from this checkout, stress-ng on.
 #
-# Every run asserts its arm's state:
-#   ON   before the gate: ek8s-system/loadgen exists, loadgen's start
-#        line has the real canary_addr, POST /canary reads refused twice;
-#        once the burst has begun (its first record read): ek8s-v<id>/
-#        variant exists and the first hasher pod's IP is in podips-v4;
-#        loadgen's IP is in kindnet's podips-v4 set in every snapshot.
-#   OFF  before the gate: no NetworkPolicy in ek8s-system, canary_addr is
-#        192.0.2.1:443, POST /canary reads refused twice, loadgen's IP is
-#        not in podips-v4; loadgen's IP is in no snapshot taken while the
-#        gate runs, and no hasher pod's IP is in any snapshot taken once
-#        the burst has begun (before it, the variant's policy may still
-#        exist for an instant); after the gate: no NetworkPolicy in
-#        ek8s-system or ek8s-v<id>.
-#   Both before the gate: exactly one stress-ng pod, Running and ready,
-#        whose requests and limits, and the stress-dose ConfigMap, equal
-#        origin/main's deploy/stress (a run without that stress is a
-#        violation, never judged); after the gate: the same pod, with no
-#        restart. A run the gate judged (exit 0 or 1) must have records
-#        read, so the burst-time checks above cannot pass by never running.
-# A failed assertion, a gate fault (exit 2) or a policy that cannot be
-# restored ends the experiment: the run is not counted.
+# Every run asserts the deployed state:
+#   before the gate: DaemonSet kube-system/calico-node Ready;
+#        NetworkPolicy ek8s-system/loadgen exists; loadgen's -canary-addr
+#        argument is the template's and its start line has the real
+#        canary_addr; POST /canary reads refused twice; exactly one
+#        stress-ng pod, Running and ready, whose requests and limits, and
+#        the stress-dose ConfigMap, equal origin/main's deploy/stress (a run
+#        without that stress is a violation, never judged);
+#   once the burst has begun (its first record read), and after the gate:
+#        NetworkPolicy ek8s-v<id>/variant exists;
+#   after the gate: the same stress-ng pod, with no restart. A run the gate
+#        judged (exit 0 or 1) must have records read, so the burst-time
+#        checks cannot pass by never running.
+# A failed assertion or a gate fault (exit 2) ends the experiment: the run
+# is not counted.
 #
-# Guards, before anything changes:
-#   G1 refuses when CI or GITHUB_ACTIONS is set;
-#   G2 refuses unless EK8S_DIAG_NOPOLICY=yes-no-isolation;
+# Guards, before anything changes (numbered as in stage5-nopolicy.sh):
 #   G3 refuses while a variant namespace (label ek8s.io/role=variant)
 #      exists, or a process named orchestrator, c0 or gate runs (the names
 #      `go run` and `go build` give ./orchestrator/cmd/orchestrator,
-#      ./orchestrator/cmd/c0 and ./gate/cmd/gate); the namespace and the
-#      first two names are checked again before every run, and the two
-#      names on every poll while the gate runs;
-#   G4 builds generation 0 from this checkout's HEAD and refuses a tree with
-#      changes (untracked and ignored files included) under cmd/service,
-#      internal/, go.mod, go.sum or deploy/ek8s-system, and a HEAD
-#      that is not an ancestor of origin/main or of PR #70's head (both
-#      fetched first; a failed fetch refuses), so no mutant's wrapper ever
-#      runs without isolation; the result goes to meta.txt;
-#   G5 on exit (INT, TERM and HUP included; bash ignores further signals
-#      while it restores, though a second Ctrl-C can still kill a kubectl
-#      it is running, which ends in POLICY NOT RESTORED), and after every OFF run, restores the ON state
-#      (applies deploy/ek8s-system, puts the canary argument back, then
-#      requires the real canary_addr and POST /canary refused twice within
-#      60s) and prints "POLICY NOT RESTORED" and exits non-zero if it
-#      cannot. On exit it also deletes the diag namespace and turns
-#      stress-ng off. SIGKILL or a host crash skips G5, and nothing else
-#      would notice: the orchestrator and the gate check neither the policy
-#      nor canary_addr, and the stand-in canary always reads refused. After
-#      any unclean end, run deploy/up.sh and deploy/loadgen-up.sh <r>, with
-#      the r in meta.txt and the exit message, before any orchestrator, c0
-#      or gate run.
+#      ./orchestrator/cmd/c0 and ./gate/cmd/gate): the script redeploys
+#      loadgen and runs its own gate, which would corrupt a live run. The
+#      namespace and the first two names are checked again before every
+#      run, and the two names on every poll while the gate runs;
+#   G4 builds generation 0, the gate and loadgen from this checkout's HEAD
+#      and refuses a tree with changes (untracked and ignored files
+#      included) under cmd/service, internal/, gate/, loadgen/, deploy/,
+#      go.mod or go.sum, and a HEAD that is not an ancestor of origin/main
+#      or of PR #71's head (both fetched first; a failed fetch refuses), so
+#      the result is about main's code; the result goes to meta.txt.
+# On exit (INT, TERM and HUP included) the script stops a running gate,
+# deletes the diag namespace and turns stress-ng off. SIGKILL or a host
+# crash skips that: then a gate may still run, stress-ng stays on and
+# ek8s-v999997 stays (G3 refuses the next start while it exists), so
+# kill any leftover gate, delete ek8s-v999997 and scale stress-ng to 0
+# before any orchestrator, c0 or gate run.
 #
-# Output (-out, default ~/workspace/scratch/ek8s-runs/diag-nopolicy-<UTC
+# Stop rule, fixed in advance: at least 15 runs; past 15, another run only
+# while the mid-burst adds so far are under 10; at most 25. The first run
+# that is not PASS (rule B, below) ends the experiment.
+#
+# Output (-out, default ~/workspace/scratch/ek8s-runs/diag-runs-<UTC
 # stamp>/): meta.txt, diag.log, summary.tsv (one row per run),
-# verdict.txt, and per run run-NN-<arm>/ with gate.out, state.txt,
-# records.tsv (index, kind, intended send time, latency, bucket, reason,
-# skipped, fault; never a pair or evidence), pods.txt, podips.txt (each
-# kindnet set snapshot), netstat.tsv (loadgen's netns TcpExt
-# TCPSynRetrans and Tcp RetransSegs, sampled about every second),
-# kindnet.log (its raw lines for the run's interval) and syncs.txt (its
-# "Syncing nftables rules" lines, with their timestamps).
+# verdict.txt, and per run run-NN/ with gate.out, state.txt, records.tsv
+# (index, kind, intended send time, latency, bucket, reason, skipped,
+# fault; never a pair or evidence), pods.txt, netstat.tsv (loadgen's netns
+# TcpExt TCPSynRetrans and Tcp RetransSegs, sampled about every second),
+# iptables.tsv (Felix's drop rules, below), calico-node.log (its raw lines
+# for the run's span) and cni-unblocking.txt (the CNI's "Unblocking pod
+# creation" lines in the run's span).
+#
+# iptables.tsv: the packet counters (`iptables-save -c` on the node) of
+# every rule commented "Unknown interface" (felix/rules/dispatch.go: a
+# packet from a pod Felix has not programmed, or forwarded to one) or
+# "End of tier <tier>. Drop if no policies passed packet"
+# (felix/rules/endpoints.go: a packet a programmed pod's policy denies),
+# read before the gate, on every poll while it runs (about every second,
+# like netstat.tsv) and after it. A rule is keyed by its chain and text without Felix's
+# "cali:<hash>" comment, since the hash changes whenever the rules before
+# it do (a new pod added to a dispatch chain), and Felix's rewrite then
+# starts the rule's counters at 0: a counter lower than the last read is
+# taken as such a reset and counted from 0. Each rule's increases are
+# summed over the run and over the burst (from the first read once a
+# record has been read). The gate's canary runs before the burst and is
+# denied by loadgen's egress policy, so it adds end-of-tier drops to the
+# run but not to the burst. A drop in the burst is the burst's own
+# traffic denied: Felix not yet programmed for a new pod, or a new pod's
+# IP not yet in a policy's IP set. Drops between a rule's last read and
+# its rewrite or deletion are lost, so the sums are lower bounds.
 #
 # Verdict (summary.tsv, verdict.txt): a stall is a gate exit 1 whose
 # "responses" line names over_hang_timeout, or whose records read hold
@@ -82,23 +90,33 @@
 # "responses"); a mid-burst add is a hasher pod, other than the first,
 # whose creationTimestamp is between the burst's first intended send
 # minus 1s (the timestamp is cut to whole seconds) and first +
-# burst_sends / burst_rate. OFF is MET with 0 stalls in
-# >= 15 runs holding >= 10 mid-burst adds, STALLED with any stall, else
-# INCONCLUSIVE; ON is MET with >= 1 stall in its mid-burst-add runs, else
-# INCONCLUSIVE. Both arms: CONFIRMED when both are MET, NOT-CONFIRMED
-# when OFF STALLED, else INCONCLUSIVE.
+# burst_sends / burst_rate.
 #
-# Usage, after deploy/up.sh on the workstation (-arm on|off runs one arm
-# only, for a dry try; its verdict is per arm):
-#   EK8S_DIAG_NOPOLICY=yes-no-isolation deploy/diag/stage5-nopolicy.sh \
-#       [-rate R] [-runs 15] [-arm both|on|off] [-out DIR]
-# (a relative -out is taken from the directory the script is run from).
-# -rate defaults to the -rate argument of the loadgen already deployed
-# (whatever deployed it last: a smoke run may have changed it), printed
-# with its source 5s before anything is deployed and kept in meta.txt;
-# with no loadgen deployed it is required. The burst rate b is 4 x r (gate/cmd/gate).
+# Result of a run: PASS only if the gate exits 0, the Unknown-interface
+# drop count and the in-burst end-of-tier drop count (the end-of-tier count
+# over the whole run includes the canary's denied dial and is only
+# recorded) are 0, and the CNI's "Unblocking pod creation" count is 0 (a
+# counter that could not be read is not 0). Otherwise STALL (above), FAIL
+# (any other gate exit 1), FAULT (any other exit; ends the experiment), or
+# DROPS (the gate passed, a counter above is nonzero). A run that is not
+# PASS ends the set (so does -try, and 25 runs). Verdict: STALLED if any
+# run is STALL; else INCONCLUSIVE if any run is not PASS; else MET only
+# with >= 15 runs and >= 10 mid-burst-add runs; else INCONCLUSIVE. The
+# other drop counts, the warnings and the retransmit counters are recorded.
+#
+# deploy/diag/stage5-runs_test.sh tests the pure helpers (stop rule,
+# verdict, drop accounting) without a cluster.
+#
+# Usage, after deploy/up.sh on the workstation:
+#   deploy/diag/stage5-runs.sh [-rate R] [-try] [-out DIR]
+# -try runs one run and gives no verdict, for a dry try. A relative -out is
+# taken from the directory the script is run from. -rate defaults to the
+# -rate argument of the loadgen already deployed (whatever deployed it
+# last: a smoke run may have changed it), printed with its source 5s
+# before anything is deployed and kept in meta.txt; with no loadgen
+# deployed it is required. The burst rate b is 4 x r (gate/cmd/gate).
 # Needs go, docker, kind, kubectl, git, pgrep; deploys loadgen at -rate
-# (deploy/loadgen-up.sh) and leaves it deployed, in the ON state.
+# (deploy/loadgen-up.sh) and leaves it deployed.
 set -euo pipefail
 
 cluster=ek8s
@@ -110,26 +128,25 @@ stress_ns=ek8s-stress
 id=999997
 ns="ek8s-v$id"
 proxy=/api/v1/namespaces/$sys/services/loadgen:control/proxy
-standin=192.0.2.1:443
 # deploy/loadgen/deployment.yaml.tmpl's argument, verbatim (unexpanded).
 # shellcheck disable=SC2016
 canary_arg='-canary-addr=$(KUBERNETES_SERVICE_HOST):$(KUBERNETES_SERVICE_PORT)'
-# kindnetd's table (kind v0.33.0 images/kindnetd/cmd/kindnetd/main.go)
-# and kube-network-policies' set of policy-selected pod IPs.
-kn_table=kindnet-network-policies
-kn_set=podips-v4
-max_runs=15
+# The stop rule (header).
+min_runs=15
+max_runs=25
+need_adds=10
+cni_log=/var/log/calico/cni/cni.log
 # G4 also accepts commits of this script's own PR before it merges.
 # GitHub keeps refs/pull/<n>/head after the branch is deleted.
-diag_pr=70
+diag_pr=71
 # loadgen's per-request client timeout, 3 x HangTimeout + 1s (DESIGN.md
 # sec 10): the last send of a burst completes within it.
 client_timeout_s=7
 
-rate="" rate_src="" runs=$max_runs arm=both out="" gate_pid="" touched=0 g4_result="" want_stress=""
+rate="" rate_src="" try=0 out="" gate_pid="" touched=0 g4_result="" want_stress=""
 
 k() { kubectl --context "$ctx" "$@"; }
-say() { echo "stage5-nopolicy.sh: $*" | if [ -n "${log_file:-}" ]; then tee -a "$log_file"; else cat; fi; }
+say() { echo "stage5-runs.sh: $*" | if [ -n "${log_file:-}" ]; then tee -a "$log_file"; else cat; fi; }
 die() { say "FAIL: $*" >&2; exit 1; }
 now() { date -u +%Y-%m-%dT%H:%M:%S.%NZ; }
 epoch() { date -u -d "$1" +%s.%N; }
@@ -205,29 +222,115 @@ stall_stats() {
 		}'
 }
 
-# arm_verdicts: summary.tsv rows (no header) on stdin; prints the ON and
-# OFF tallies and verdicts and the overall verdict, as described above.
-# Columns: run arm gate_rc result mid_burst_add ...
-arm_verdicts() {
-	awk -F'\t' -v need_runs="$max_runs" -v want="$arm" '
+# drop_rules: `iptables-save -c -t filter` on stdin; one line per rule
+# iptables.tsv counts (header): packets, kind (unknown_if or end_of_tier)
+# and the rule without its counters and its "cali:<hash>" comment,
+# tab-separated. Felix renders a rule's comments as -m comment --comment
+# "<text>", the hash first (felix/iptables/renderer.go); the end-of-tier
+# text names the deny action, Drop (felix/iptables/actions.go).
+drop_rules() {
+	awk -v OFS='\t' '
+		/^\[[0-9]+:[0-9]+\] -A / {
+			kind = ""
+			if (index($0, "--comment \"Unknown interface\"")) kind = "unknown_if"
+			else if ($0 ~ /--comment "End of tier [^"]*\. Drop if no policies passed packet"/) kind = "end_of_tier"
+			if (kind == "") next
+			pk = $1; sub(/^\[/, "", pk); sub(/:.*$/, "", pk)
+			rule = $0; sub(/^\[[0-9]+:[0-9]+\] /, "", rule)
+			gsub(/ -m comment --comment "cali:[^"]*"/, "", rule)
+			print pk, kind, rule
+		}'
+}
+
+# drop_tally BURST: drop_rules lines on stdin, each prefixed with its read's
+# index (0 before the gate, then 1, 2, ... in order) and a tab; prints
+# iptables.tsv (header): kind, chain, first and last counter read, the
+# increase over the run and over the burst, the resets seen, and the rule.
+# An increase between two consecutive reads is the counter's rise, or the
+# new counter when it fell (a rewrite, counted from 0); a rule absent from
+# the previous read counts from 0 (new, or recreated: a reset), except in
+# read 0. BURST is the first read's index once a record was read ("" when
+# none was): an increase belongs to the burst when its earlier read is at
+# or after BURST, and every burst increase is "-" with BURST "".
+drop_tally() {
+	awk -F'\t' -v OFS='\t' -v burst="$1" '
+		function flush(   k, v, inc) {
+			for (k in cnt) {
+				v = cnt[k]
+				if (!(k in seen)) {
+					seen[k] = 1; order[++n] = k; first[k] = v; run[k] = 0; bur[k] = 0; resets[k] = 0
+					inc = (ri == 0 ? 0 : v)
+				} else if (prev_i[k] == ri - 1 && v >= prev_v[k]) {
+					inc = v - prev_v[k]
+				} else {
+					inc = v; resets[k]++
+				}
+				run[k] += inc
+				if (burst != "" && ri - 1 >= burst + 0) bur[k] += inc
+				prev_i[k] = ri; prev_v[k] = v
+			}
+			delete cnt
+		}
+		NR == 1 { ri = $1 + 0 }
+		$1 + 0 != ri { flush(); ri = $1 + 0 }
+		{ cnt[$3 FS $4] += $2 }
+		END {
+			if (NR > 0) flush()
+			print "kind", "chain", "first", "last", "run_increase", "burst_increase", "resets", "rule"
+			for (j = 1; j <= n; j++) {
+				k = order[j]
+				split(k, kr, FS); split(kr[2], w, " ")
+				print kr[1], w[2], first[k], prev_v[k], run[k], (burst == "" ? "-" : bur[k]), resets[k], kr[2]
+			}
+		}'
+}
+
+# drop_sum KIND COLUMN: iptables.tsv on stdin; the sum of COLUMN
+# (run_increase or burst_increase) over KIND's rules, or "-" when no rule of
+# KIND has a number there.
+drop_sum() {
+	awk -F'\t' -v kind="$1" -v col="$2" '
+		NR == 1 { for (i = 1; i <= NF; i++) if ($i == col) c = i; next }
+		$1 == kind && $c != "-" { s += $c; any = 1 }
+		END { print (any ? s : "-") }'
+}
+
+# drops_result U EB UNBLOCK: PASS for a gate-pass run whose Unknown-interface
+# count, in-burst end-of-tier count and CNI Unblocking count are all 0, else
+# DROPS; a count that is "-" (could not be read) is not 0.
+drops_result() {
+	if [ "$1" = 0 ] && [ "$2" = 0 ] && [ "$3" = 0 ]; then echo PASS; else echo DROPS; fi
+}
+
+# another_run I ADDS RESULT: succeeds when the stop rule (header) allows
+# another run after run I, with ADDS mid-burst-add runs so far and RESULT
+# run I's result; a result other than PASS ends the set.
+another_run() {
+	[ "$3" = PASS ] || return 1
+	[ "$try" = 0 ] || return 1
+	[ "$1" -lt "$max_runs" ] || return 1
+	[ "$1" -lt "$min_runs" ] || [ "$2" -lt "$need_adds" ]
+}
+
+# verdict: summary.tsv rows (no header) on stdin; prints the tally and the
+# verdict, as in the header. Columns: run gate_rc result mid_burst_add ...
+verdict() {
+	awk -F'\t' -v need_adds="$need_adds" -v min_runs="$min_runs" -v try="$try" '
 		{
-			a = $2; runs[a]++
-			if ($5 == "yes") adds[a]++
-			if ($4 == "STALL") { stalls[a]++; if ($5 == "yes") add_stalls[a]++ }
+			runs++
+			if ($4 == "yes") adds++
+			if ($3 != "PASS") notpass++
+			if ($3 == "STALL") { stalls++; if ($4 == "yes") add_stalls++ }
+			if ($3 == "FAIL") fails++
+			if ($3 == "DROPS") dropruns++
 		}
 		END {
-			on_v = "INCONCLUSIVE"
-			if (add_stalls["on"] + 0 >= 1) on_v = "MET"
-			off_v = "INCONCLUSIVE"
-			if (stalls["off"] + 0 > 0) off_v = "STALLED"
-			else if (runs["off"] + 0 >= need_runs && adds["off"] + 0 >= 10) off_v = "MET"
-			printf "ON: runs %d, mid-burst adds %d, stalls %d (%d in add runs): %s\n", runs["on"], adds["on"], stalls["on"], add_stalls["on"], on_v
-			printf "OFF: runs %d, mid-burst adds %d, stalls %d (%d in add runs): %s\n", runs["off"], adds["off"], stalls["off"], add_stalls["off"], off_v
-			if (want != "both") { print "overall: none (-arm " want ")"; exit }
 			v = "INCONCLUSIVE"
-			if (off_v == "STALLED") v = "NOT-CONFIRMED"
-			else if (off_v == "MET" && on_v == "MET") v = "CONFIRMED"
-			print "overall: " v
+			if (stalls + 0 > 0) v = "STALLED"
+			else if (notpass + 0 > 0) v = "INCONCLUSIVE"
+			else if (runs + 0 >= min_runs && adds + 0 >= need_adds) v = "MET"
+			if (try) v = "none (-try)"
+			printf "runs %d, mid-burst adds %d, stalls %d (%d in add runs), other FAILs %d, DROPS %d: %s\n", runs, adds, stalls, add_stalls, fails, dropruns, v
 		}'
 }
 
@@ -283,32 +386,32 @@ canary() {
 canary_refused_twice() {
 	local deadline=$((SECONDS + $1)) r
 	while :; do
-		r=$(canary)
+		r=$(canary) || return 1
 		[ "$r" = refused ] && break
 		[ "$SECONDS" -lt "$deadline" ] || { say "POST /canary still $r after $1s"; return 1; }
 		sleep 2
 	done
-	r=$(canary)
+	r=$(canary) || return 1
 	[ "$r" = refused ] || { say "POST /canary $r after refused"; return 1; }
 }
 
-# set_ips: the IPv4 elements of kindnet's podips-v4 set, one per line.
-set_ips() {
-	local s
-	s=$(docker exec "$node" nft list set inet "$kn_table" "$kn_set") || die "cannot list set inet $kn_table $kn_set on $node"
-	grep -A1000 'elements' <<<"$s" | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' || true
+# drop_snapshot: drop_rules of the node's filter table. A read with no
+# such rule fails: the dispatch chains always carry one, and an empty read
+# would make drop_tally count every rule's whole counter again.
+drop_snapshot() {
+	local s r
+	s=$(docker exec "$node" iptables-save -c -t filter) || return 1
+	r=$(drop_rules <<<"$s")
+	[ -n "$r" ] || return 1
+	echo "$r"
 }
 
-# wait_set IP present|absent BOUND: waits for kindnet's next sync.
-wait_set() {
-	local deadline=$((SECONDS + $3)) ips
-	[ -n "$1" ] || return 1
-	while :; do
-		ips=$(set_ips) || return 1
-		if grep -qxF "$1" <<<"$ips"; then [ "$2" = present ] && return 0; else [ "$2" = absent ] && return 0; fi
-		[ "$SECONDS" -lt "$deadline" ] || return 1
-		sleep 1
-	done
+# cni_size: the byte size of the node's CNI log.
+cni_size() {
+	local n
+	n=$(docker exec "$node" stat -c %s "$cni_log") || return 1
+	[[ $n =~ ^[0-9]+$ ]] || return 1
+	echo "$n"
 }
 
 # loadgen_pid POD: the loadgen process's pid in the node's pid namespace,
@@ -356,61 +459,18 @@ canary_value() {
 	k -n "$sys" get deploy loadgen -o jsonpath="{.spec.template.spec.containers[0].args[$(canary_index)]}"
 }
 
-# set_canary VALUE: replaces the -canary-addr argument (a JSON patch whose
-# test op makes it fail unless the old value is still there) and waits
-# for the Recreate rollout.
-set_canary() {
-	local idx old
-	# Every step is checked: the restore runs with errexit off.
-	idx=$(canary_index) || die "cannot find loadgen's -canary-addr argument"
-	old=$(canary_value) || die "cannot read loadgen's -canary-addr argument"
-	[ "$old" = "$1" ] && return 0
-	k -n "$sys" patch deploy loadgen --type=json -p \
-		"[{\"op\":\"test\",\"path\":\"/spec/template/spec/containers/0/args/$idx\",\"value\":\"$old\"},{\"op\":\"replace\",\"path\":\"/spec/template/spec/containers/0/args/$idx\",\"value\":\"$1\"}]" >/dev/null ||
-		die "cannot patch loadgen's -canary-addr to $1"
-	k -n "$sys" rollout status deploy/loadgen --timeout=180s >/dev/null || die "loadgen not Ready after setting $1"
-}
-
-# check_on FILE: asserts the ON state, appending what it saw to FILE.
-check_on() {
-	local pod start lip
-	k -n "$sys" get networkpolicy loadgen >/dev/null 2>&1 || die "ON: NetworkPolicy $sys/loadgen missing"
-	[ "$(canary_value)" = "$canary_arg" ] || die "ON: loadgen's argument is '$(canary_value)', not $canary_arg"
-	pod=$(loadgen_pod) || die "ON: no loadgen pod"
-	start=$(start_line "$pod") || die "ON: no start line"
-	[[ " $start " == *" canary_addr=$api "* ]] || die "ON: start line's canary_addr is not $api: $start"
-	canary_refused_twice 60 || die "ON: POST /canary not refused twice within 60s"
-	lip=$(pod_ip "$sys" "$pod") || die "ON: no IP for $pod"
-	wait_set "$lip" present 15 || die "ON: loadgen's IP $lip not in $kn_set within 15s"
-	echo "ON $(now): NetworkPolicy $sys/loadgen present; canary_addr=$api; POST /canary refused twice; $lip in $kn_set" >>"$1"
-}
-
-# check_off FILE: asserts the OFF state before a run.
-check_off() {
-	local pod start lip nps
-	nps=$(k -n "$sys" get networkpolicy -o name) || die "OFF: cannot list NetworkPolicies in $sys"
-	[ -z "$nps" ] || die "OFF: NetworkPolicies in $sys: $nps"
-	[ "$(canary_value)" = "-canary-addr=$standin" ] || die "OFF: loadgen's argument is '$(canary_value)'"
-	pod=$(loadgen_pod) || die "OFF: no loadgen pod"
-	start=$(start_line "$pod") || die "OFF: no start line"
-	[[ " $start " == *" canary_addr=$standin "* ]] || die "OFF: start line's canary_addr is not $standin: $start"
-	canary_refused_twice 30 || die "OFF: POST /canary to $standin not refused twice within 30s"
-	lip=$(pod_ip "$sys" "$pod") || die "OFF: no IP for $pod"
-	wait_set "$lip" absent 15 || die "OFF: loadgen's IP $lip still in $kn_set after 15s"
-	echo "OFF $(now): no NetworkPolicy in $sys; canary_addr=$standin; POST /canary refused twice; $lip not in $kn_set" >>"$1"
-}
-
-# set_off: removes loadgen's policy and points the canary at the stand-in.
-set_off() {
-	k -n "$sys" delete networkpolicy loadgen --ignore-not-found >/dev/null || die "cannot delete NetworkPolicy $sys/loadgen"
-	set_canary "-canary-addr=$standin"
-}
-
-# restore_on FILE: the ON state, re-applied and asserted (G5).
-restore_on() {
-	k apply -k deploy/ek8s-system >/dev/null || die "cannot apply deploy/ek8s-system"
-	set_canary "$canary_arg"
-	check_on "$1"
+# check_deployed FILE: asserts the deployed state before a run (header),
+# appending what it saw to FILE.
+check_deployed() {
+	local pod start
+	k -n kube-system rollout status ds/calico-node --timeout=30s >/dev/null || die "DaemonSet kube-system/calico-node not Ready"
+	k -n "$sys" get networkpolicy loadgen >/dev/null 2>&1 || die "NetworkPolicy $sys/loadgen missing"
+	[ "$(canary_value)" = "$canary_arg" ] || die "loadgen's argument is '$(canary_value)', not $canary_arg"
+	pod=$(loadgen_pod) || die "no loadgen pod"
+	start=$(start_line "$pod") || die "no start line"
+	[[ " $start " == *" canary_addr=$api "* ]] || die "start line's canary_addr is not $api: $start"
+	canary_refused_twice 60 || die "POST /canary not refused twice within 60s"
+	echo "$(now): calico-node Ready; NetworkPolicy $sys/loadgen present; canary_addr=$api; POST /canary refused twice" >>"$1"
 }
 
 # deployed_rate: the -rate argument of the loadgen Deployment, if any.
@@ -516,55 +576,38 @@ live_guard() {
 
 # --- one run ------------------------------------------------------------
 
-# run_one N ARM
+# run_one N
 run_one() {
-	local n=$1 a=$2 pods_ok=0 rdir pod lip pid t0 gpid kpid rc cur=0 body next result mid=no
+	local n=$1 pods_ok=0 rdir pod lip pid t0 gpid rc cur=0 body next result mid=no
 	local stress0 stress1 start_wall="" start_e="" end_e="" stats nread oht longest sfirst slast syn0="" rs0="" syn1="" rs1="" ts c
-	rdir="$out/run-$(printf %02d "$n")-$a"
+	local burst_read="" reads=0 cni0 cni1 cni_span unblock warn_err drops_u drops_e drops_eb targets
+	rdir="$out/run-$(printf %02d "$n")"
 	mkdir -p "$rdir"
 	live_guard
 	! k get namespace "$ns" >/dev/null 2>&1 || die "namespace $ns exists"
 
-	if [ "$a" = off ]; then
-		set_off
-		check_off "$rdir/state.txt"
-	else
-		check_on "$rdir/state.txt"
-	fi
+	check_deployed "$rdir/state.txt"
 	if ! stress0=$(stress_state 2>"$work/stress.err"); then
 		echo "VIOLATION: stress-ng before the gate: $(cat "$work/stress.err")" >>"$rdir/state.txt"
-		die "run $n ($a): stress-ng is not Running at origin/main's dose ($(cat "$work/stress.err")); the run is not judged"
+		die "run $n: stress-ng is not Running at origin/main's dose ($(cat "$work/stress.err")); the run is not judged"
 	fi
 	echo "stress before the gate: $stress0" >>"$rdir/state.txt"
 	pod=$(loadgen_pod)
 	lip=$(pod_ip "$sys" "$pod")
 	pid=$(loadgen_pid "$pod")
+	drop_snapshot | sed 's/^/0\t/' >"$work/drops" || die "run $n: cannot read the node's iptables-save"
+	cni0=$(cni_size) || die "run $n: cannot stat $cni_log on $node"
 	t0=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-	say "run $n ($a): loadgen $pod ($lip, pid $pid), gate starting at $t0"
+	say "run $n: loadgen $pod ($lip, pid $pid), gate starting at $t0"
 
 	"$work/gate" -stage5 -image "$image" -id "$id" -rate "$rate" >"$rdir/gate.out" 2>&1 &
 	gate_pid=$!
 	gpid=$gate_pid
-	kpid=""
-	if [ "$a" = off ]; then
-		# The gate creates the bundle with its policy; delete it as soon as
-		# it exists (the gate waits for Ready before its canary and burst).
-		(
-			until k -n "$ns" get networkpolicy variant >/dev/null 2>&1; do
-				kill -0 "$gpid" 2>/dev/null || exit 0
-				sleep 0.1
-			done
-			k -n "$ns" delete networkpolicy variant >/dev/null
-			echo "deleted $ns/variant at $(now)" >>"$rdir/state.txt"
-		) &
-		kpid=$!
-	fi
 
 	: >"$rdir/records.tsv"
 	: >"$rdir/pods.txt"
 	pods_ok=0
 	printf 'time\tTCPSynRetrans\tRetransSegs\n' >"$rdir/netstat.tsv"
-	: >"$rdir/podips.txt"
 	while kill -0 "$gpid" 2>/dev/null; do
 		ts=$(now)
 		if c=$(counters "$pid"); then printf '%s\t%s\t%s\n' "$ts" "${c% *}" "${c#* }" >>"$rdir/netstat.tsv"; fi
@@ -578,66 +621,81 @@ run_one() {
 			mv "$rdir/pods.tmp" "$rdir/pods.txt"
 			pods_ok=$((pods_ok + 1))
 		fi
-		local ips hip first_ip procs
-		ips=$(set_ips)
-		{ echo "== $ts"; echo "$ips"; } >>"$rdir/podips.txt"
+		local procs
 		procs=$(live_procs)
 		[ -z "$procs" ] || echo "VIOLATION $ts: G3: running: $procs" >>"$rdir/state.txt"
-		if [ "$a" = off ]; then
-			! grep -qxF "$lip" <<<"$ips" || echo "VIOLATION $ts: loadgen's $lip in $kn_set" >>"$rdir/state.txt"
-			# Hasher pods only once the burst has begun: until the watcher
-			# deletes it, the variant's policy may put a pod in the set.
-			if [ -s "$rdir/records.tsv" ]; then
-				while read -r hip; do
-					[ -z "$hip" ] || ! grep -qxF "$hip" <<<"$ips" || echo "VIOLATION $ts: $hip in $kn_set" >>"$rdir/state.txt"
-				done < <(awk '{ print $3 }' "$rdir/pods.txt")
+		# Felix's drop counters, every poll (header, iptables.tsv); a failed
+		# read is skipped and noted.
+		if drop_snapshot | sed "s/^/$((reads + 1))\t/" >>"$work/drops"; then
+			reads=$((reads + 1))
+			# The first read once the burst has begun: the canary is done, so
+			# drops from here on are the burst's own traffic.
+			if [ -z "$burst_read" ] && [ -s "$rdir/records.tsv" ]; then
+				burst_read=$reads
+				echo "burst's first drop-counter read ($burst_read) at $ts" >>"$rdir/state.txt"
 			fi
 		else
-			grep -qxF "$lip" <<<"$ips" || echo "VIOLATION $ts: loadgen's $lip not in $kn_set" >>"$rdir/state.txt"
-			if [ -s "$rdir/records.tsv" ]; then
-				k -n "$ns" get networkpolicy variant >/dev/null 2>&1 || echo "VIOLATION $ts: $ns/variant missing during the burst" >>"$rdir/state.txt"
-				# The first pod was Ready before the burst, so kindnet has
-				# synced it; a newer pod may lag (the lag the canary exists for).
-				first_ip=$(sort -k2 "$rdir/pods.txt" | awk 'NR == 1 { print $3 }')
-				[ -z "$first_ip" ] || grep -qxF "$first_ip" <<<"$ips" ||
-					echo "VIOLATION $ts: first hasher pod's $first_ip not in $kn_set" >>"$rdir/state.txt"
-			fi
+			echo "NOTE $ts: iptables-save on $node failed; read skipped" >>"$rdir/state.txt"
+		fi
+		if [ -s "$rdir/records.tsv" ]; then
+			k -n "$ns" get networkpolicy variant >/dev/null 2>&1 || echo "VIOLATION $ts: $ns/variant missing during the burst" >>"$rdir/state.txt"
 		fi
 		sleep 0.5
 	done
 	rc=0
 	wait "$gpid" || rc=$?
 	gate_pid=""
-	[ -z "$kpid" ] || wait "$kpid" || true
+	if ! drop_snapshot | sed "s/^/$((reads + 1))\t/" >>"$work/drops"; then
+		echo "VIOLATION: cannot read the node's iptables-save after the gate" >>"$rdir/state.txt"
+	fi
 	# The tail of the records, unless the gate already DELETEd the target
 	# (it does on a fail, after reading them).
 	while body=$(api_get "/targets/$id/records?since=$cur" 2>/dev/null) && next=$(json_int next "${body##*\"gap\"}") && [ "$next" -gt "$cur" ]; do
 		records_tsv <<<"$body" >>"$rdir/records.tsv"
 		cur=$next
 	done
-	if api_get /targets 2>/dev/null | grep -q "\"id\":\"$id\""; then
+	# Into a variable first: grep -q would SIGPIPE kubectl under pipefail.
+	targets=$(api_get /targets 2>/dev/null || true)
+	if grep -q "\"id\":\"$id\"" <<<"$targets"; then
 		api_delete "/targets/$id?through=$((cur > 0 ? cur - 1 : 0))" >/dev/null 2>&1 || say "run $n: DELETE /targets/$id failed (left in loadgen)"
 	fi
 	if c=$(counters "$pid"); then printf '%s\t%s\t%s\n' "$(now)" "${c% *}" "${c#* }" >>"$rdir/netstat.tsv"; fi
 
-	k -n kube-system logs ds/kindnet --timestamps --since-time="$t0" >"$rdir/kindnet.log" 2>&1 || say "run $n: cannot read kindnet's log"
-	grep -F 'Syncing nftables rules' "$rdir/kindnet.log" >"$rdir/syncs.txt" || true
+	# Felix's drop counters (header, iptables.tsv).
+	drop_tally "$burst_read" <"$work/drops" >"$rdir/iptables.tsv"
+	drops_u=$(drop_sum unknown_if run_increase <"$rdir/iptables.tsv")
+	drops_e=$(drop_sum end_of_tier run_increase <"$rdir/iptables.tsv")
+	drops_eb=$(drop_sum end_of_tier burst_increase <"$rdir/iptables.tsv")
+	# calico-node's log for the run's span; warnings and worse counted.
+	if k -n kube-system logs ds/calico-node -c calico-node --timestamps --since-time="$t0" >"$rdir/calico-node.log" 2>&1; then
+		warn_err=$(grep -cE '\[(WARNING|ERROR|FATAL|PANIC)\]' "$rdir/calico-node.log" || true)
+	else
+		say "run $n: cannot read calico-node's log"
+		warn_err=-
+	fi
+	# The CNI log's lines written since the gate started. A log rotated in
+	# between (timberjack, at 100 MB) is read whole and noted.
+	cni_span=""
+	if cni1=$(cni_size); then
+		if [ "$cni1" -lt "$cni0" ]; then
+			echo "NOTE: $cni_log rotated during the run; its whole new file counted" >>"$rdir/state.txt"
+			cni0=0
+		fi
+		cni_span=$(docker exec "$node" tail -c "+$((cni0 + 1))" "$cni_log") || cni_span="" cni1=""
+	fi
+	if [ -n "${cni1:-}" ]; then
+		{ grep -F 'Unblocking pod creation' <<<"$cni_span" || true; } >"$rdir/cni-unblocking.txt"
+		unblock=$(grep -c . "$rdir/cni-unblocking.txt" || true)
+	else
+		say "run $n: cannot read $cni_log on $node"
+		unblock=-
+	fi
 
 	# The same pod, no restart, the same resources and dose.
 	if ! stress1=$(stress_state 2>"$work/stress.err") || [ "$stress1" != "$stress0" ]; then
 		echo "VIOLATION: stress-ng changed during the run: before '$stress0', after '${stress1:-$(cat "$work/stress.err")}'" >>"$rdir/state.txt"
 	fi
-	if [ "$a" = off ]; then
-		local nps_sys nps_ns
-		if ! nps_sys=$(k -n "$sys" get networkpolicy -o name) || [ -n "$nps_sys" ]; then
-			echo "VIOLATION: a NetworkPolicy in $sys after the run, or the listing failed: ${nps_sys:-}" >>"$rdir/state.txt"
-		fi
-		if ! nps_ns=$(k -n "$ns" get networkpolicy -o name) || [ -n "$nps_ns" ]; then
-			echo "VIOLATION: a NetworkPolicy in $ns after the run, or the listing failed: ${nps_ns:-}" >>"$rdir/state.txt"
-		fi
-	else
-		k -n "$ns" get networkpolicy variant >/dev/null 2>&1 || echo "VIOLATION: $ns/variant missing after the run" >>"$rdir/state.txt"
-	fi
+	k -n "$ns" get networkpolicy variant >/dev/null 2>&1 || echo "VIOLATION: $ns/variant missing after the run" >>"$rdir/state.txt"
 
 	stats=$(stall_stats <"$rdir/records.tsv")
 	IFS=$'\t' read -r nread oht longest sfirst slast <<<"$stats"
@@ -649,6 +707,11 @@ run_one() {
 		;;
 	*) result=FAULT ;;
 	esac
+	# Rule B (header): a gate pass with a Felix drop in the node's counters
+	# (Unknown interface; end of tier in the burst) or a CNI "Unblocking pod
+	# creation" is not a PASS. A counter that could not be read ("-") is not
+	# shown to be 0.
+	[ "$result" != PASS ] || result=$(drops_result "$drops_u" "$drops_eb" "$unblock")
 	if [ "$result" != FAULT ] && [ "$nread" -eq 0 ]; then
 		echo "VIOLATION: the gate judged the burst (exit $rc) but no record was read, so the burst-time checks never ran" >>"$rdir/state.txt"
 	fi
@@ -674,22 +737,18 @@ run_one() {
 	else
 		mid=unknown
 	fi
-	printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-		"$n" "$a" "$rc" "$result" "$mid" "${start_wall:--}" "$burst_sends" "$nread" "$oht" "$longest" "$sfirst" "$slast" \
+	printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+		"$n" "$rc" "$result" "$mid" "${start_wall:--}" "$burst_sends" "$nread" "$oht" "$longest" "$sfirst" "$slast" \
 		"$(awk -v a="$syn0" -v b="$syn1" 'BEGIN { if (a == "" || b == "") print "-"; else print b - a }')" \
 		"$(awk -v a="$rs0" -v b="$rs1" 'BEGIN { if (a == "" || b == "") print "-"; else print b - a }')" \
-		"$(grep -c 'Could not receive message' "$rdir/kindnet.log" || true)" \
-		"$(grep -c . "$rdir/syncs.txt" || true)" \
+		"$drops_u" "$drops_e" "$drops_eb" "$warn_err" "$unblock" \
 		"$(awk '{ print $1 "@" $2 }' "$rdir/pods.txt" | sort -t@ -k2 | tr '\n' ' ' | sed 's/ $//; s/^$/-/')" \
 		"$stress0" >>"$out/summary.tsv"
-	say "run $n ($a): gate exit $rc, $result; mid-burst add $mid; over_hang_timeout $oht, longest run $longest ($sfirst .. $slast); $nread of $burst_sends records read"
+	say "run $n: gate exit $rc, $result; mid-burst add $mid; over_hang_timeout $oht, longest run $longest ($sfirst .. $slast); $nread of $burst_sends records read; drops: unknown interface $drops_u, end of tier $drops_e ($drops_eb in the burst); calico-node warnings/errors $warn_err; CNI unblocking $unblock"
 
 	k delete namespace "$ns" --wait=true --timeout=300s >/dev/null || die "namespace $ns not deleted in 300s"
-	if [ "$a" = off ]; then
-		restore_on "$rdir/state.txt" || die "ON state not restored after run $n"
-	fi
-	! grep -q '^VIOLATION' "$rdir/state.txt" || die "run $n ($a): state assertion failed, see $rdir/state.txt; the experiment stops"
-	[ "$result" != FAULT ] || die "run $n ($a): gate fault (exit $rc), see $rdir/gate.out; the experiment stops"
+	! grep -q '^VIOLATION' "$rdir/state.txt" || die "run $n: state assertion failed, see $rdir/state.txt; the experiment stops"
+	[ "$result" != FAULT ] || die "run $n: gate fault (exit $rc), see $rdir/gate.out; the experiment stops"
 }
 
 # --- main ---------------------------------------------------------------
@@ -698,39 +757,29 @@ main() {
 	while [ "$#" -gt 0 ]; do
 		case "$1" in
 		-rate) rate=$2; shift 2 ;;
-		-runs) runs=$2; shift 2 ;;
-		-arm) arm=$2; shift 2 ;;
+		-try) try=1; shift ;;
 		-out) out=$2; shift 2 ;;
-		*) die "usage: EK8S_DIAG_NOPOLICY=yes-no-isolation $0 [-rate R] [-runs N<=15] [-arm both|on|off] [-out DIR]" ;;
+		*) die "usage: $0 [-rate R] [-try] [-out DIR]" ;;
 		esac
 	done
-	if ! [[ $runs =~ ^[0-9]+$ ]] || [ "$runs" -lt 1 ] || [ "$runs" -gt "$max_runs" ]; then
-		die "-runs $runs: want 1 to $max_runs (never extended)"
-	fi
-	case "$arm" in both | on | off) ;; *) die "-arm $arm: want both, on or off" ;; esac
 	# A relative -out is the caller's, taken before moving to the repo root.
 	case "$out" in /* | "") ;; *) out="$PWD/$out" ;; esac
 	cd "$(dirname "$0")/../.."
 
-	# G1, G2: before any cluster call.
-	if [ -n "${CI:-}" ] || [ -n "${GITHUB_ACTIONS:-}" ]; then
-		die "G1: CI or GITHUB_ACTIONS is set; this diagnostic is workstation only"
-	fi
-	[ "${EK8S_DIAG_NOPOLICY:-}" = yes-no-isolation ] || die "G2: set EK8S_DIAG_NOPOLICY=yes-no-isolation (this removes NetworkPolicy isolation while it runs)"
 	for tool in go docker kind kubectl git pgrep; do
 		command -v "$tool" >/dev/null || die "$tool not on PATH"
 	done
 	# The output directory first, so a refusal from here on is recorded.
-	out=${out:-$HOME/workspace/scratch/ek8s-runs/diag-nopolicy-$(date -u +%Y%m%dT%H%M%SZ)}
+	out=${out:-$HOME/workspace/scratch/ek8s-runs/diag-runs-$(date -u +%Y%m%dT%H%M%SZ)}
 	[ ! -e "$out" ] || die "$out exists"
 	mkdir -p "$out"
 	log_file="$out/diag.log"
 	echo "started $(now)" >"$out/meta.txt"
 
-	# G4: generation 0 is this checkout's, and the checkout is main's or
-	# this PR's. Untracked and ignored files count too: go build compiles
-	# them. deploy/ek8s-system is what the restore applies.
-	local changed g4_paths="cmd/service internal go.mod go.sum deploy/ek8s-system"
+	# G4: generation 0, the gate and loadgen are this checkout's, and the
+	# checkout is main's or this PR's. Untracked and ignored files count
+	# too: go build compiles them.
+	local changed g4_paths="cmd/service internal gate loadgen deploy go.mod go.sum"
 	# shellcheck disable=SC2086
 	changed=$(git status --porcelain --untracked-files=all --ignored -- $g4_paths) || die "G4: git status failed"
 	[ -z "$changed" ] || die "G4: $g4_paths differ from HEAD (untracked and ignored files included): $changed"
@@ -801,41 +850,41 @@ main() {
 
 	{
 		echo "git $(git rev-parse HEAD)"
-		echo "rate $rate (from $rate_src) burst_rate $burst_rate burst_sends $burst_sends runs/arm $runs arm $arm"
+		echo "rate $rate (from $rate_src) burst_rate $burst_rate burst_sends $burst_sends try $try"
+		echo "stop rule: at least $min_runs runs, past $min_runs only while mid-burst adds < $need_adds, at most $max_runs; the first run that is not PASS ends it"
 		echo "image $image"
 		echo "kind $(kind version)"
 		echo "node image $(docker inspect -f '{{.Config.Image}}' "$node" 2>/dev/null || echo unknown)"
-		echo "kindnet $(k -n kube-system get ds kindnet -o jsonpath='{..image}')"
-		echo "api $api standin $standin"
+		echo "calico-node $(k -n kube-system get ds calico-node -o jsonpath='{.spec.template.spec.containers[?(@.name=="calico-node")].image}')"
+		echo "api $api"
 	} >>"$out/meta.txt"
-	printf 'run\tarm\tgate_rc\tresult\tmid_burst_add\tburst_start\tburst_sends\trecords_read\tover_hang_timeout\tlongest_run\tstall_first_send\tstall_last_send\tsyn_retrans\tretrans_segs\tkindnet_enoent\tkindnet_sync_lines\tpods\tstress\n' >"$out/summary.tsv"
+	printf 'run\tgate_rc\tresult\tmid_burst_add\tburst_start\tburst_sends\trecords_read\tover_hang_timeout\tlongest_run\tstall_first_send\tstall_last_send\tsyn_retrans\tretrans_segs\tunknown_if_drops\tend_of_tier_drops\tend_of_tier_drops_burst\tcalico_warn_err\tcni_unblocking\tpods\tstress\n' >"$out/summary.tsv"
 
-	local i order=""
-	case "$arm" in
-	both) for ((i = 0; i < runs; i++)); do order+=" on off"; done ;;
-	*) for ((i = 0; i < runs; i++)); do order+=" $arm"; done ;;
-	esac
-	i=0
-	for a in $order; do
+	local i=0 adds=0 last
+	while :; do
 		i=$((i + 1))
-		run_one "$i" "$a"
+		run_one "$i"
+		last=$(tail -n 1 "$out/summary.tsv")
+		[ "$(cut -f4 <<<"$last")" != yes ] || adds=$((adds + 1))
+		[ "$(cut -f3 <<<"$last")" = PASS ] || say "run $i is $(cut -f3 <<<"$last"), not PASS: the experiment ends (stop rule)"
+		another_run "$i" "$adds" "$(cut -f3 <<<"$last")" || break
 	done
-	tail -n +2 "$out/summary.tsv" | arm_verdicts | tee "$out/verdict.txt" | sed 's/^/stage5-nopolicy.sh: /'
+	tail -n +2 "$out/summary.tsv" | verdict | tee "$out/verdict.txt" | sed 's/^/stage5-runs.sh: /'
 }
 
-# on_exit: G5, then stress-ng off and the scratch dir gone.
+# on_exit: the gate stopped, the diag namespace deleted, stress-ng off
+# and the scratch dir gone.
 on_exit() {
 	local rc=$?
-	# The restore must finish or report: no errexit (each step checks
+	# The cleanup must finish or report: no errexit (each step checks
 	# itself), and bash ignores INT, TERM, HUP and PIPE (a closed terminal)
-	# until it has. A kubectl it runs still gets the terminal's SIGINT; a
-	# killed step ends in POLICY NOT RESTORED.
+	# until it has.
 	set +e
 	trap '' INT TERM HUP PIPE
 	trap - EXIT
 	if [ "${touched:-0}" = 1 ]; then
 		# The gate cancels and drains its burst on SIGINT (gate/cmd/gate:
-		# signal.NotifyContext(os.Interrupt)); the policy watcher is killed.
+		# signal.NotifyContext(os.Interrupt)).
 		if [ -n "${gate_pid:-}" ] && kill -INT "$gate_pid" 2>/dev/null; then
 			say "interrupting the running gate (pid $gate_pid) and waiting for it"
 			wait "$gate_pid" 2>/dev/null || true
@@ -843,17 +892,13 @@ on_exit() {
 		jobs -p | xargs -r kill -TERM 2>/dev/null || true
 		wait 2>/dev/null || true
 		if ! k delete namespace "$ns" --ignore-not-found --wait=true --timeout=300s >/dev/null 2>&1; then
-			say "namespace $ns not deleted: it may still run generation 0 without its NetworkPolicy; delete it by hand" >&2
-			rc=1
-		fi
-		if ! (restore_on "$out/restore.txt"); then
-			say "POLICY NOT RESTORED: check NetworkPolicy $sys/loadgen and loadgen's -canary-addr, then run deploy/up.sh and deploy/loadgen-up.sh ${rate:-<r>} (the r this run used, from ${rate_src:-unknown}; meta.txt has it)" >&2
+			say "namespace $ns not deleted; delete it by hand before any orchestrator, c0 or gate run" >&2
 			rc=1
 		fi
 		k -n "$stress_ns" scale deploy/stress-ng --replicas=0 >/dev/null 2>&1 || say "stress-ng not scaled to 0; scale it by hand"
 	fi
 	if [ -n "${out:-}" ] && [ -d "$out" ] && [ ! -e "$out/verdict.txt" ]; then
-		echo "STOPPED before the last run (exit $rc): no verdict; summary.tsv holds the runs that completed" >"$out/verdict.txt"
+		echo "STOPPED before the stop rule ended it (exit $rc): no verdict; summary.tsv holds the runs that completed" >"$out/verdict.txt"
 	fi
 	rm -rf "${work:-}"
 	[ -z "${out:-}" ] || say "output in $out"

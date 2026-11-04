@@ -1,12 +1,13 @@
 # loadgen's pods (DESIGN.md sec 11).
 # Ingress: no rule, so no pod and no address outside the node is admitted.
-# The API server's service proxy still gets in: kindnet never evaluates
-# traffic from a root-owned socket on the node (kube-network-policies'
-# "meta skuid 0 accept"), the same bypass that admits kubelet probes. That
-# bypass admits every root process on the node, and only those: the API
-# server, the kubelet, the control plane and root hostNetwork pods, all of
-# which can already exec into loadgen. The bypass covers only packets made
-# on loadgen's own node: this holds because the cluster has one node
+# The API server's service proxy still gets in: Calico never polices
+# traffic from the node to a pod on it (felix/rules/static.go at v3.33.0),
+# the same path kubelet probes take. That admits every process in the
+# node's network namespace, under any uid, and every hostNetwork pod; here
+# all run as root (the API server, the kubelet, the control plane,
+# kube-proxy, calico-node), and all can already exec into loadgen. Traffic
+# forwarded through the node is policed, so only packets made on loadgen's
+# own node get in: this holds because the cluster has one node
 # (deploy/kind). The control port is the only one because loadgen listens
 # on no other, not because of this policy.
 # Egress: TCP 8080 to variant namespaces (label ek8s.io/role: variant),

@@ -82,6 +82,9 @@ type StepRecord struct {
 	CPUUnmeasured string  `json:"cpu_unmeasured,omitempty"`
 
 	// Excluded lists why the window was not scored (orchestrator.Excluded*).
+	// A c0.json written before Calico replaced kindnet says
+	// kindnet-not-ready where one now says cni-not-ready: both mean the
+	// CNI first look failed (docs/decisions.md, 2026-11-03).
 	Excluded []string `json:"excluded,omitempty"`
 
 	BootID        string `json:"loadgen_boot_id,omitempty"`

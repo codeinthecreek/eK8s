@@ -15,7 +15,7 @@ import (
 )
 
 // Cluster is what a window needs of the kind cluster besides loadgen:
-// the stress-ng switch, the kindnet first look, the kubelet's CPU
+// the stress-ng switch, the CNI first look, the kubelet's CPU
 // counters and namespace deletion. Every error is a fault of the
 // cluster, never a variant's. Kube is the implementation; tests fake it.
 type Cluster interface {
@@ -27,10 +27,10 @@ type Cluster interface {
 	// stress-ng pod is Running and not terminating: gate Stage 5 runs
 	// against stress (DESIGN.md sec 7).
 	StressOn(ctx context.Context) error
-	// KindnetReady reports whether the kindnet DaemonSet is Ready, a
-	// cheap first look before a half; the policy canary decides
-	// (DESIGN.md sec 11).
-	KindnetReady(ctx context.Context) (bool, error)
+	// CNIReady reports whether the CNI's DaemonSet (Calico's
+	// calico-node) is Ready, a cheap first look before a half; the
+	// policy canary decides (DESIGN.md sec 11).
+	CNIReady(ctx context.Context) (bool, error)
 	// PodCPU reads the kubelet's cumulative pod CPU counters
 	// (/metrics/resource through the API server, DESIGN.md sec 9).
 	PodCPU(ctx context.Context) (fitness.Sample, error)
@@ -39,13 +39,13 @@ type Cluster interface {
 	DeleteNamespace(ctx context.Context, ns string) error
 }
 
-// Names Kube reads from deploy/stress and kind.
+// Names Kube reads from deploy/stress and deploy/calico.
 const (
 	stressNS         = "ek8s-stress"
 	stressDeployment = "stress-ng"
 	stressSelector   = "app=stress-ng"
-	kindnetNS        = "kube-system"
-	kindnetDaemonSet = "kindnet" // kind's CNI DaemonSet (checked against kind v0.33.0's manifest)
+	cniNS            = "kube-system"
+	cniDaemonSet     = "calico-node" // the CNI's DaemonSet (checked against Calico v3.33.0's manifest)
 )
 
 // Kube timings: kubectlRequestTimeout bounds each API request of a
@@ -174,10 +174,10 @@ func stressSettled(b []byte, want int) (bool, error) {
 	return p.Metadata.DeletionTimestamp == nil && p.Status.Phase == "Running", nil
 }
 
-func (k *Kube) KindnetReady(ctx context.Context) (bool, error) {
-	out, err := k.kubectl(ctx, "get", "daemonset", kindnetDaemonSet, "-n", kindnetNS, "-o", "json")
+func (k *Kube) CNIReady(ctx context.Context) (bool, error) {
+	out, err := k.kubectl(ctx, "get", "daemonset", cniDaemonSet, "-n", cniNS, "-o", "json")
 	if err != nil {
-		return false, fmt.Errorf("orchestrator: kindnet: %w", err)
+		return false, fmt.Errorf("orchestrator: cni: %w", err)
 	}
 	return daemonSetReady([]byte(out))
 }
@@ -200,10 +200,10 @@ func daemonSetReady(b []byte) (bool, error) {
 		} `json:"status"`
 	}
 	if err := json.Unmarshal(b, &d); err != nil {
-		return false, fmt.Errorf("orchestrator: kindnet: kubectl output: %w", err)
+		return false, fmt.Errorf("orchestrator: cni: kubectl output: %w", err)
 	}
 	if d.Kind != "DaemonSet" {
-		return false, fmt.Errorf("orchestrator: kindnet: kubectl output: kind %q, want DaemonSet", d.Kind)
+		return false, fmt.Errorf("orchestrator: cni: kubectl output: kind %q, want DaemonSet", d.Kind)
 	}
 	s := d.Status
 	n := s.DesiredNumberScheduled

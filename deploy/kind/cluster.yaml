@@ -6,6 +6,13 @@ name: ek8s
 networking:
   # kind's default, written out: the API server listens on loopback only.
   apiServerAddress: "127.0.0.1"
+  # No kindnet: Calico (deploy/calico, applied by up.sh) is the CNI and the
+  # NetworkPolicy engine. Without a CNI the node stays NotReady until
+  # calico-node runs.
+  disableDefaultCNI: true
+  # kind's default, written out: deploy/calico's IP pool
+  # (CALICO_IPV4POOL_CIDR) must match it.
+  podSubnet: "10.244.0.0/16"
 # No extraPortMappings: loadgen runs in the cluster (namespace ek8s-system)
 # and reaches variants by Service DNS, so nothing is published on the host.
 nodes:

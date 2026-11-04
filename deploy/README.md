@@ -7,6 +7,8 @@ workstation (DESIGN.md sec 2).
 ```
 kind/cluster.yaml     the cluster: name ek8s, one node, Kubernetes 1.37.0
 kind/cluster-ci.yaml  the same at CI size (10m / 256Mi reserved, default CPU manager)
+calico/               Calico v3.33.0, vendored, the CNI and NetworkPolicy engine
+                      (kind's kindnet disabled), + four patches
 metrics-server/       metrics-server v0.9.0, vendored, + --kubelet-insecure-tls
 stress/               namespace ek8s-stress: stress-ng Deployment (0 replicas),
                       its dose ConfigMap, a deny-all NetworkPolicy
@@ -23,7 +25,7 @@ loadgen-smoke.sh      loadgen smoke test (run after up.sh; deploys loadgen)
 watch.sh <run> [log]  read-only tmux panes for watching a run (pods, top, HPAs,
                       events, node docker stats, attempts.jsonl, the log)
 diag/                 diagnostics, workstation only, never in a run or CI
-                      (stage5-nopolicy.sh: the kindnet-stall experiment)
+                      (stage5-runs.sh: Stage 5 runs that validate D2, Calico)
 ```
 
 ## Cluster
@@ -38,6 +40,41 @@ diag/                 diagnostics, workstation only, never in a run or CI
 - The kubelet reserves 1 CPU and 2Gi (kubeReserved + systemReserved), so
   pod requests are scheduled against the ~7 cores / ~13-14 GB budget of
   DESIGN.md sec 2, not the whole host.
+- No kind default CNI (`disableDefaultCNI`): Calico is the CNI and the
+  NetworkPolicy engine (Calico below). Pod subnet 10.244.0.0/16.
+
+## Calico
+
+`calico/` vendors Calico v3.33.0's release manifest (`calico.yaml`,
+unmodified; its URL, tag commit and sha256 are in `kustomization.yaml`,
+with a re-check command) and pins its three images from quay.io by
+digest, the way `metrics-server/` does. No operator: one `calico-node`
+DaemonSet (Felix, the iptables dataplane) and the
+`calico-kube-controllers` Deployment. up.sh applies it server-side (the
+CRD bundle is too large for a client-side apply). The patches:
+
+- IP pool `default-ipv4-ippool`: 10.244.0.0/16 (both kind configs' pod
+  subnet), no IPIP tunnel (one node).
+- `FELIX_NFTABLESMODE=Disabled`: the iptables dataplane, pinned.
+- CNI `policy_setup_timeout_seconds: 10`: a new pod starts only once Felix
+  reports its policy programmed; past 10 s the CNI starts it anyway and
+  logs `Unblocking pod creation` to `/var/log/calico/cni/cni.log` on the
+  node. variant-smoke.sh and a final CI step fail on any such line.
+- `calico-node` requests 100m CPU (the manifest has 250m), on CI and the
+  workstation alike.
+
+`FELIX_DEFAULTENDPOINTTOHOSTACTION` stays the manifest's `ACCEPT`: a pod's
+traffic to the node itself passes only after the pod's own egress policy
+did, and coredns, metrics-server and calico-kube-controllers need the
+node. Calico fails closed: until Felix has programmed a pod, every packet
+it sends, and every packet forwarded to it, is dropped (the "Unknown
+interface" rule; smoke.sh checks the rule is in place). Traffic from the
+node to a pod on it is never policed (Felix's rules, static.go), which is
+how the API server's proxy reaches loadgen (ek8s-system below).
+
+A cluster built before Calico still runs kindnet: up.sh refuses it, so
+delete and recreate it (`kind delete cluster --name ek8s`, then
+`deploy/up.sh`).
 
 ## Host setup
 
@@ -119,8 +156,8 @@ fails under the restriction with "loopback: Failed RTM_NEWADDR".
 ## Bring-up and smoke test
 
 ```
-deploy/up.sh      # create cluster ek8s if absent; load stress-ng; apply infra
-deploy/smoke.sh   # node reservation, metrics-server, stress-ng on and off
+deploy/up.sh      # create cluster ek8s if absent; apply Calico; load stress-ng; apply infra
+deploy/smoke.sh   # Calico, node reservation, metrics-server, stress-ng on and off
 deploy/loadgen-up.sh 2   # build and deploy loadgen at r = 2 (see loadgen below)
 kind delete cluster --name ek8s   # tear down
 ```
@@ -196,12 +233,16 @@ server's service proxy reaches the stand-in's control port, and neither a
 pod in the variant namespace nor an `ek8s-system` pod without
 `app=loadgen` does; that pod is also refused by the variant; neither the
 stand-in nor a pod in the variant namespace reaches an external address or
-the API server, and the stand-in cannot use a DNS server other than
-kube-dns (each first shown reachable from the `ek8s-system` pod without
-`app=loadgen`); with the variant at 2 pods (HPA `minReplicas` raised in the
-smoke only), a deleted pod's EndpointSlice entry is `ready=false`,
+the API server or the kubelet's port on the node, and the stand-in cannot
+use a DNS server other than kube-dns (each first shown reachable from the
+`ek8s-system` pod without `app=loadgen`); a pod in `ek8s-stress`, under
+its deny-all policy, reaches none of those targets, nor the variant or
+DNS, and that `ek8s-system` pod cannot reach it, though the node can (each
+refusal paired with a target shown reachable); with the variant at 2 pods
+(HPA `minReplicas` raised in the smoke only), a deleted pod's EndpointSlice entry is `ready=false`,
 `terminating=true` within 2s while the other stays ready; and deleting the
-namespace removes everything. It needs `ek8s-system` from up.sh and
+namespace removes everything. Last, it fails on any `Unblocking pod
+creation` line its run added to the node's CNI log. It needs `ek8s-system` from up.sh and
 removes what it created on success; on failure it leaves the variant
 namespace and the smoke pods for inspection. CI runs it after smoke.sh.
 
@@ -216,11 +257,13 @@ it (see loadgen below).
 | Service `loadgen` | ClusterIP, port `control` 9090 -> the pod port named `control`; reached from the host as `kubectl get --raw /api/v1/namespaces/ek8s-system/services/loadgen:control/proxy/...` |
 | NetworkPolicy `loadgen` | pods `app=loadgen`: no ingress rule; egress TCP 8080 to namespaces labelled `ek8s.io/role: variant`, DNS (UDP/TCP 53) to kube-dns only |
 
-With no ingress rule, the API server's proxy gets in only because kindnet
-never applies policy to traffic from a root-owned socket on the node. That
-covers every root process on the node (the API server, the kubelet, the
-control plane, root hostNetwork pods), all of which can already exec into
-loadgen (DESIGN.md sec 11).
+With no ingress rule, the API server's proxy gets in only because Calico
+never polices traffic from the node to a pod on it. That covers every
+process in the node's network namespace, under any uid, and every
+hostNetwork pod; in this cluster all of them run as root (the API server,
+the kubelet, the control plane, kube-proxy, calico-node), and all can
+already exec into loadgen. The ek8s namespaces are Pod Security
+`restricted`, which forbids hostNetwork (DESIGN.md sec 11).
 
 ## loadgen
 
@@ -397,45 +440,54 @@ the next scale-up reads the new values. The pod is Burstable (CPU request
 
 ## Diagnostics
 
-`diag/stage5-nopolicy.sh` asks whether the Stage 5 stall on an HPA pod add
-is kindnet's NetworkPolicy path (docs/decisions.md, 2026-11-02 and
-2026-11-03). It runs real `gate -stage5` bursts on generation 0, stress-ng
-on, alternating ON (the cluster as deployed) and OFF (no NetworkPolicy on
-the burst's path: ek8s-system/loadgen and the diag variant's policy are
-deleted, and loadgen's canary points at 192.0.2.1:443 so the gate's canary
-still reads refused). **OFF removes isolation while it runs**: it refuses to
-start in CI, without `EK8S_DIAG_NOPOLICY=yes-no-isolation`, while a variant
-namespace or an orchestrator, c0 or gate process exists, with local
-changes to the code generation 0 is built from, or on a commit that is not
-on origin/main or PR #70 (it fetches both first, and refuses if it cannot);
-before every gate start it requires stress-ng Running at origin/main's
-`deploy/stress` requests, limits and dose; it restores and re-checks
-the ON state after every OFF run and on exit, and prints
-`POLICY NOT RESTORED` (exit 1) if it cannot. Each run asserts its arm's
-state, and the experiment stops at the first failed assertion or gate
-fault. **SIGKILL or a host crash skips the restore, and nothing else would
-notice** (the orchestrator and the gate check neither the policy nor the
-canary address, and the stand-in canary always reads refused): after any
-unclean end, run `deploy/up.sh` and `deploy/loadgen-up.sh <r>` before any
-orchestrator, c0 or gate run, with the r the experiment used (meta.txt's
-`rate` line; the exit message prints it). Runs about 2 minutes each (inferred), so the full 15 + 15 takes
-about an hour.
+`diag/stage5-runs.sh` asks whether the Stage 5 stall on an HPA pod add,
+which PR #70's experiment put on kindnet's NetworkPolicy path, is gone now
+that Calico enforces the policies (D2; docs/decisions.md, 2026-11-03). It
+runs real `gate -stage5` bursts on generation 0, stress-ng on, against the
+cluster as deployed: it removes no policy and patches nothing in loadgen.
+It refuses to start while a variant namespace or an orchestrator, c0 or
+gate process exists, with local changes under `cmd/service`, `internal/`,
+`gate/`, `loadgen/`, `deploy/`, `go.mod` or `go.sum`, or on a commit that
+is not on origin/main or PR #71 (it fetches both first, and refuses if it
+cannot). Before every gate start it requires calico-node Ready, loadgen's
+policy and real canary in place, and stress-ng Running at origin/main's
+`deploy/stress` requests, limits and dose; the experiment stops at the
+first failed assertion or gate fault. Its stop rule is fixed in advance:
+at least 15 runs, more only while fewer than 10 had a mid-burst add, at
+most 25, and the first run that is not PASS ends it. Runs about 2 minutes each
+(inferred), so 15 to 25 runs take 30 to 50 minutes. On exit, Ctrl-C
+included, it stops its gate, deletes its namespace `ek8s-v999997` and
+turns stress-ng off; after SIGKILL or a host crash, kill any leftover
+gate, delete `ek8s-v999997` and scale stress-ng to 0 before any
+orchestrator, c0 or gate run.
 
 ```
-EK8S_DIAG_NOPOLICY=yes-no-isolation deploy/diag/stage5-nopolicy.sh             # 15 ON + 15 OFF, alternating
-EK8S_DIAG_NOPOLICY=yes-no-isolation deploy/diag/stage5-nopolicy.sh -runs 1      # one of each, a dry try
-EK8S_DIAG_NOPOLICY=yes-no-isolation deploy/diag/stage5-nopolicy.sh -arm off -runs 1   # one arm only
+deploy/diag/stage5-runs.sh -rate 15.5        # the experiment
+deploy/diag/stage5-runs.sh -rate 15.5 -try   # one run, no verdict: a dry try
 ```
 
 `-rate` is loadgen's r (b = 4 x r), deployed by the script; it defaults to
 the `-rate` argument of the loadgen already deployed (r = 15.5 for the
-owner's 37 Stage 5 runs: docs/decisions.md, PR #65 C0 entry, r = 0.5 x C0),
+owner's Stage 5 runs: docs/decisions.md, PR #65 C0 entry, r = 0.5 x C0),
 and is required when none is;
-`-out` defaults to `~/workspace/scratch/ek8s-runs/diag-nopolicy-<UTC stamp>/`
+`-out` defaults to `~/workspace/scratch/ek8s-runs/diag-runs-<UTC stamp>/`
 (a relative `-out` is taken from the directory you run it from).
-The verdict is in `verdict.txt` (CONFIRMED, NOT-CONFIRMED or INCONCLUSIVE;
-an arm short of its criterion after its runs is INCONCLUSIVE, never
-extended) and one row per run in `summary.tsv`; each `run-NN-<arm>/` keeps
-the gate's output, the state assertions, records without pairs or evidence,
-kindnet's raw log lines and set snapshots, and loadgen's SYN and TCP
-retransmit counters. The script's header has the details.
+A run is PASS only if the gate exits 0, Felix dropped no packet from an
+unprogrammed pod ("Unknown interface") and denied none in the burst
+(end of tier), and the CNI logged no "Unblocking pod creation" (a counter
+that cannot be read is not 0); otherwise it is STALL, FAIL, FAULT or
+DROPS (the gate passed, a counter is nonzero). The verdict is in
+`verdict.txt`: STALLED on any stall; else INCONCLUSIVE if any run is not
+PASS; else MET only with at least 15 runs, at least 10 of them with a
+mid-burst add; else INCONCLUSIVE (docs/decisions.md, 2026-11-04). The
+end-of-tier count over the whole run includes the canary's denied dial and
+is only recorded. `summary.tsv` has
+one row per run; each `run-NN/` keeps the gate's output, the state
+assertions, records without pairs or evidence, loadgen's SYN and TCP
+retransmit counters, the packets dropped by Felix's "Unknown interface"
+and end-of-tier rules over the run and over the burst (their counters
+read on every poll), calico-node's raw log lines for the run, and any CNI
+"Unblocking pod creation" line. The script's header has the details;
+`diag/stage5-runs_test.sh` tests its stop rule, verdict and counting
+without a cluster.
+PR #70's `stage5-nopolicy.sh`, which this replaces, is in git history.

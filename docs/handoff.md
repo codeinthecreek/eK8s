@@ -46,7 +46,7 @@ autonomous").
   packet after `Added complexity:`, see "Review packet"): the reviewer
   subagent's findings on the final tree (CLAUDE.md), one line per finding,
   `<n> <severity> <file:line> <finding> -- fixed | declined: <reason> | deferred: <where recorded>`,
-  or `Self-review: skipped (docs-only)`.
+  or `Self-review: skipped (docs-only: only Markdown files changed)`.
 - When the change under feedback was self-reviewed, end each `Feedback:`
   line with one tag: `[missed]` (checkable in-repo, reviewer did not
   report it), `[repo-unseeable]` (needed context outside the repo) or

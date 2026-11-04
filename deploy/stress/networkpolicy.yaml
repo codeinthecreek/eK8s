@@ -1,5 +1,5 @@
 # stress-ng needs no network: deny all ingress and egress (enforced by
-# kindnet's built-in NetworkPolicy support, kind >= v0.24.0).
+# Calico, deploy/calico; deploy/variant-smoke.sh check (j) probes it).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
