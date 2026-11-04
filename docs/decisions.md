@@ -935,21 +935,21 @@ max. Earlier entries are not backfilled.
 - Reverse: restore the --wait=false delete in cleanup() (deploy/stage5-smoke.sh).
 - Origin: Code
 
-## 2026-11-04 · PR #73 (inferred) · D3 is split into D3a (stall counts) and D3b (the calico-node log archive)
+## 2026-11-04 · PR #73 · D3 is split into D3a (stall counts) and D3b (the calico-node log archive)
 - Decision: D3a records the stall counts in the gate and the orchestrator, written to a new run-dir file stalls.jsonl; attempts.jsonl (DESIGN.md sec 14) is unchanged, no DESIGN.md edit (Q1 definitions D1-D7, Q3, Q5 c0 out of D3, Q6 only the longest run's start). A failed read or write of stalls.jsonl or a log file is a stderr line (for logs also a .failed file), never a fault, exclusion or halt (Q4). D3b archives calico-node's log for every gate Stage 5 burst too (Q2), each file capped at 1 MiB with a cut marker line (Q7); per window it is read once, from the baseline half's start, after the window returns, into one file, untrimmed, stalls.jsonl carrying each half's start and end (B); on a window fault the same read runs before the halt (C).
 - Rejected: one D3 PR (counts and archive in one review); per-half log files trimmed by timestamp; a recording failure that faults or excludes.
 - Reason: owner answers to the D3 plan (prompt EK-D3-P2-20261104); D3 is detection and recording only (Q4, 2026-11-02), so recording must never change a verdict.
 - Reverse: STATUS Now/Next; a later entry overrides any answer.
 - Origin: owner
 
-## 2026-11-04 · PR #73 (inferred) · internal/stallrun: stall-run definitions D1-D7
+## 2026-11-04 · PR #73 · internal/stallrun: stall-run definitions D1-D7
 - Decision: internal/stallrun.Detect(recs, rate) counts one (loadgen run, target)'s records: D1 an OHT record is Bucket failed with Reason over_hang_timeout, any other record (another reason, success, graceful_shed, Skipped, Fault) breaks a run; D2 ordered by Index (a copy; window records arrive by Seq), a missing index ends a run; D3 an OHT run is maximal at consecutive indices, length 1 included; D4 a stall run is an OHT run of >= Threshold(rate) = ceil(rate x HangTimeout) (31 at 15.5, 124 at 62; at least 1) with a recovery record at a later index, a recovery record being a classified response (not Skipped, not a Fault) that is not OHT (R38: a Skipped or Fault record means loadgen got no answer); D5 TailRun is the last OHT run's length when no recovery record has a higher index, else 0, and the tail is never a stall; D6 the longest run (tail included, ties to the earliest), its start Index and IntendedWall (UTC), else 0, -1, zero time; D7 Stats holds records, OHT, stall runs, tail, longest, start and threshold.
 - Rejected: a missing index bridged as OHT (would join two runs across a send loadgen did not record); any later non-OHT record as recovery, Skipped and Fault included (a wedged candidate followed by skipped sends would count as a stall); a threshold from the planned send interval rounded down (a run shorter than one hang timeout of sends would count); per-target filtering inside Detect (the caller passes one target's records).
 - Reason: owner Q1 on the D3 plan (prompt EK-D3-P2-20261104); one package so a gate burst and a window half count by the same rules; stdlib, loadgen/wire and internal/classifier only, outside Stage 1's import allowlist.
 - Reverse: remove its callers (gate.Report.Stage5Stall, orchestrator VariantResult.BaselineStall/StressStall, the stalls.jsonl writes), then delete internal/stallrun.
 - Origin: Code (approved by the owner as Q1)
 
-## 2026-11-04 · PR #73 (inferred) · stalls.jsonl: a run-dir file for the stall counts
+## 2026-11-04 · PR #73 · stalls.jsonl: a run-dir file for the stall counts
 - Decision: lineage.Run.AppendStall appends one JSON line per (loadgen run, target) to stalls.jsonl, as AppendAttempt does (mode 0600, synced, refused after a torn tail), the file made by the first append: kind burst | baseline | stress, run_id, window_run_id (halves only), generation_id, the stallrun.Stats fields in snake_case, span_start and span_end for halves (RFC 3339 UTC; these and longest_start_wall omitted when zero); validation is ids by lineage's patterns, the kind, counts >= 0, longest_start_index >= -1. The Loop writes the burst line once Stage 5 returns with Stage5Stall set (pass, fail or fault, before any halt; gate.Report.Stage5RunID names the run) and one line per variant per half that ran once RunWindow returns. A failed write is one log line on the run's stderr. Nothing in the run reads the file.
 - Rejected: the counts in attempts.jsonl (owner Q3; BuildPrompt reads it); a reader, or a torn-tail check in Open (nothing reads the file in D3a); making the file in Create (lazily made, so a run dir opened from before D3a appends without a migration).
 - Reason: owner answers Q3, Q4 and B (prompt EK-D3-P2-20261104); a run-dir format addition, logged per CLAUDE.md.

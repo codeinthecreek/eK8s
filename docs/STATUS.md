@@ -4,10 +4,9 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 *(inferred)* are guesses, not read from the repo; correct them.
 
 ## Now
-- D3a (this PR): option 4 detection and recording only, the counts: internal/stallrun (definitions D1-D7, docs/decisions.md 2026-11-04) used by the gate's Stage 5 path and the orchestrator, recorded per loadgen run and target in a new run-dir file stalls.jsonl (attempts.jsonl unchanged; counts only, no Detail); its retry and exclusion rules wait in docs/AFTER-FIRST-RUN.md.
+- D3b (this PR): archive calico-node's log into the run dir, for every gate Stage 5 burst (Q2) and once per window, from the baseline half's start, after the window returns, one untrimmed file (B), also before the halt on a window fault (C); each file capped at 1 MiB with a cut marker line (Q7); a failed read or write is a stderr line and a .failed file, never a fault, exclusion or halt (Q4) (docs/decisions.md, 2026-11-04).
 
 ## Next
-- D3b: archive calico-node's log into the run dir, for every gate Stage 5 burst (Q2) and once per window, from the baseline half's start, after the window returns, one untrimmed file (B), also before the halt on a window fault (C); each file capped at 1 MiB with a cut marker line (Q7); a failed read or write is a stderr line and a .failed file, never a fault, exclusion or halt (Q4) (docs/decisions.md, 2026-11-04).
 - PR B part 1: raise maxRate and maxBurstSends (loadgen/config.go; committed 19 and 3000) to cover a C0 ladder past 31 (docs/decisions.md, 2026-11-04).
 - The owner runs `go run ./orchestrator/cmd/c0 ...` on merged main, clocks pinned, then `deploy/loadgen-up.sh` at the measured rate. Fresh-cluster check order: deploy/README.md.
 - PR B part 2: r = the measured C0, maxRate to match, b decoupled from r, b decided from the gen-0 Stage 5 runs.
@@ -25,8 +24,8 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 - Driver, resolved 2026-10-28: TestLiveMutation passed (11 turns) on the workstation.
 
 ## Recent
+- #73 D3a: option 4 detection and recording only, the counts: internal/stallrun (definitions D1-D7, docs/decisions.md 2026-11-04) used by the gate's Stage 5 path and the orchestrator, recorded per loadgen run and target in a new run-dir file stalls.jsonl (attempts.jsonl unchanged; counts only, no Detail); its retry and exclusion rules wait in docs/AFTER-FIRST-RUN.md
 - #72 D2 wrap-up: records the owner's Calico validation (MET), adds deploy/down.sh, fixes the fresh-cluster check order and stage5-smoke.sh's leftover namespace (it now waits for the namespace to be gone and fails closed), moves the C0 re-measure into PR B (docs/decisions.md, 2026-11-04)
 - #71 D2 Calico replaces kindnet as the CNI and NetworkPolicy engine: deploy/calico vendored by sha256 and digest, kind configs without the default CNI, up.sh, smokes that prove isolation, deploy/diag/stage5-runs.sh (rule B verdict) for the owner's validation; reviewer now runs on every change that is not docs-only (docs/decisions.md, 2026-11-03 and 2026-11-04); validated MET by the owner's workstation run (15 runs, 13 mid-burst adds, 0 stalls, 0 DROPS; docs/decisions.md, 2026-11-04)
 - #70 D1 kindnet-stall diagnosis: deploy/diag/stage5-nopolicy.sh (alternating ON/OFF Stage 5 runs, guards G1-G5); the owner's run put the stall on kindnet's policy path, Q2 yes, switch to Calico (docs/decisions.md, 2026-11-02 and 2026-11-03)
 - #69 static CPU manager on the workstation cluster, loadgen exclusive core (1 CPU / 384Mi), stress-ng request 2750m / limit 3; CI-size loadgen request via EK8S_LOADGEN_CPU_REQUEST (docs/decisions.md, 2026-11-01); loadgen-smoke.sh check (7) proves the exclusive core under the static policy (skipped, printed, under none), unrun until the owner's workstation run
-- #68 the stress half restored: each window is a baseline run then a stress run, fitness = min (docs/decisions.md, 2026-10-29); deploy/watch.sh (read-only tmux panes for a run); CLAUDE.md Guard bullet
