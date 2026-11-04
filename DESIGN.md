@@ -1130,7 +1130,13 @@ API server, the kubelet, the control plane, kube-proxy, calico-node; the
 ek8s namespaces are Pod Security restricted, which forbids hostNetwork),
 and all of them can already exec into loadgen. Traffic forwarded through
 the node is policed, so the bypass covers only packets made on loadgen's
-own node, which holds because the cluster has one node. The control port is the only one
+own node: host-to-pod traffic is unpoliced only on the pod's own node, so a
+second node would make policing stricter, not weaker (a process on another
+node reaches loadgen as forwarded traffic, which no rule admits). The
+single-node assumption lies elsewhere, in PodCPU (one node's kubelet
+counters) and in stress-ng contention (one node's CPU shared by every
+variant's pods); the orchestrator's oneNode check refuses a cluster with
+more than one node. The control port is the only one
 reachable because loadgen listens on no other, not because of the policy.
 deploy/variant-smoke.sh, run in CI, fails unless the proxy reaches a
 stand-in on the control port, a variant pod and an `ek8s-system` pod
