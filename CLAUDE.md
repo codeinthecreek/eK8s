@@ -56,8 +56,9 @@ Applies to every session in this repo.
   append the ID and `date -u` to it.
 - Code runs a task end to end: commits, runs the reviewer subagent once
   per task, pushes, opens the PR as a draft with its own title and body,
-  and replies with a review packet. Draft PRs skip CI (ci.yml and
-  deploy.yml). Code marks the PR ready for review only after the owner
+  and replies with a review packet. Draft PRs skip ci.yml. deploy.yml runs
+  on no PR: it is dispatched by hand when the planning chat asks for it.
+  Code marks the PR ready for review only after the owner
   approves it in the planning chat; it then waits for the CI runs that
   start, if any, and reports their conclusions before the owner merges.
   Review fixes go in follow-up commits on the same PR; the owner merges.
@@ -238,8 +239,9 @@ docs/               overview.md (plain-language introduction; DESIGN.md is
 - CI (`.github/workflows/ci.yml`) runs `go vet`, `go test`, `go test -race`
   and `govulncheck` on a non-draft PR touching Go, module, testdata or the
   workflow files, weekly (Mondays 06:17 UTC) and by hand. There is no
-  push-to-main run, and a draft PR skips both ci.yml and deploy.yml; a
-  new push to a PR cancels its run in flight.
+  push-to-main run, and a draft PR skips it; a new push to a PR cancels its
+  run in flight. deploy.yml (the kind smoke) runs on no PR or push: it is
+  dispatched by hand when the planning chat asks for it.
 
 ## Non-negotiable constraints
 
