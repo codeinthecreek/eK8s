@@ -134,7 +134,9 @@ func parseLabels(s string) (labels map[string]string, rest string, err error) {
 //   - namespace has no pod in end;
 //   - a pod of namespace in start is gone in end, since its final
 //     counter is lost and the half's CPU would be undercounted (an HPA
-//     scale-down, a deletion: the half is excluded);
+//     scale-down, a deletion). The half is not excluded: the
+//     orchestrator scores that variant at the CPU ceiling (score in
+//     orchestrator/window.go; DESIGN.md sec 11, PR #58);
 //   - a counter went down (a reset).
 func CPUSeconds(start, end Sample, namespace string) (float64, error) {
 	var sum float64
