@@ -1013,3 +1013,8 @@ max. Earlier entries are not backfilled.
 - Rejected: r = 0.5 x C0 = 15.5 (the default rule, run 2's basis) and b decoupled from r: owner decision D3.
 - Reverse: run 3 with -rate 15.5 and loadgen-up.sh 15.5; revert the DESIGN.md sec 10 and sec 15 run-3 sentences.
 - Origin: owner (r = C0, b = 4r), Code (the measurement)
+
+## 2026-11-05 · Run 3 recorded: GO, gen 0 degrades under stress and variants spread more than drift
+- Decision: run 3 (r = 31, b = 124, n = 3,720, -generations 2; run3-20261105T021240Z) is a GO. Exit 0, 13 turns, 3 windows, 6 halves, 0 excluded, 0 stalls or OHT, CPUUnmeasured none. Gen 0 stress success_rate 0.9954 / 0.9837 / 0.9552 (below 1, so it sheds or fails), p95 568-598 ms.
+- Rule: spread (max - min of variant scores in a window) 0.0331 (w2) and 0.0511 (w3) vs gen 0 drift 0.0198 (w1 to w2) and 0.0431 (w2 to w3): spread > drift each time. Caveat: drift and spread are confounded, live count grew 1/2/3 and gen 0 fell with it; shed and failed counts are not in the run dir (success_rate only).
+- Origin: owner
