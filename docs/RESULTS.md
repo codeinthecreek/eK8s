@@ -13,8 +13,9 @@ better), described in `DESIGN.md` sec 9.
 ## Summary
 
 One pod running the fixed Argon2id core can serve about 32 successes/s,
-whatever the wrapper around it does, because that is what one CPU buys at
-0.031 CPU-seconds per success (section 4). Evolution therefore found no
+whatever the wrapper around it does, which matches what one CPU buys at
+0.031 CPU-seconds per success (section 4 gives the measurements and labels
+the inference). Evolution therefore found no
 extra throughput. It found a shorter wait for a hashing slot, 500 ms down to
 67 ms, which cut the stress-half p95 latency about 3 times (about 590 to about
 184 ms) at the same throughput (sections 3.2 and 5). Most of the score gain
@@ -37,8 +38,7 @@ came in the first step, 500 to 250 ms; later steps are small and within noise
 - A window is a baseline half (300 s of load, no neighbour) followed by a
   stress half (300 s of load while a stress-ng neighbour takes about 3 CPUs:
   3 CPU workers at 100% load, `deploy/stress/dose.yaml:11-12`, request 2750m
-  and limit 3, `deploy/stress/deployment.yaml:70,73`; it drew 2961m when
-  measured, `docs/STATUS.md` Parked). A variant's window score is the lower
+  and limit 3, `deploy/stress/deployment.yaml:70,73`). A variant's window score is the lower
   of its two halves' scores (`DESIGN.md` sec 9, "fitness = min").
   A half scores 0.4 x success rate + share served x (0.3 x latency score +
   0.3 x CPU score) (`fitness/params.go:34-45`, `fitness/score.go:134`).
@@ -111,8 +111,7 @@ diff of each genome against its parent in the run's genome archive; nothing
 else under `internal/wrapper/` differs. The AI's explanation is the
 `rationale` it recorded with each attempt. All 8 say the change was not built
 or run, so its effect was untested when proposed. That is by design: the AI's
-sandbox allows only the Read and Edit tools (`docs/overview.md` sec 11, line
-710), so it cannot build or run anything, and it sees only a scratch copy of
+sandbox allows only the Read and Edit tools (`docs/overview.md` sec 11), so it cannot build or run anything, and it sees only a scratch copy of
 the wrapper.
 
 | Gen | Parent | acquireWait (parent -> gen) | AI's stated reason, paraphrased |
@@ -328,8 +327,9 @@ within noise.
   deployed. Both c0 runs were made on a tree with uncommitted changes
   (`repo_dirty` is true in both records). For gen 0 the only uncommitted change
   was `docs/STATUS.md` (`docs/decisions.md`, PR #77 entry). For gen 7 it was
-  the gen 7 `tunables.go`, the change under test (stated by the owner; the
-  gen 7 record holds only `repo_dirty: true`). The slot count of 2 is derived,
+  the gen 7 `tunables.go`, the change under test (the worktree's git status
+  before the run showed only `internal/wrapper/tunables.go` modified; the c0
+  record itself holds only `repo_dirty: true`). The slot count of 2 is derived,
   not read at run time.
 - c0 measures at no stress. Stress-half cpu/success in run 4 (0.034-0.038 s) is
   higher than c0's 0.031 s; the cause was not investigated.
