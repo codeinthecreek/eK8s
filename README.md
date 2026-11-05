@@ -157,3 +157,10 @@ section.
 
 Details and enforcement: [CLAUDE.md](CLAUDE.md), [DESIGN.md](DESIGN.md)
 sec 4, 6 and 7.
+
+## Licence
+
+The project is BSD 3-Clause; see [LICENSE](LICENSE). The vendored Calico and
+metrics-server manifests keep their upstream Apache-2.0 licences:
+[deploy/calico/LICENSE](deploy/calico/LICENSE) and
+[deploy/metrics-server/LICENSE](deploy/metrics-server/LICENSE).

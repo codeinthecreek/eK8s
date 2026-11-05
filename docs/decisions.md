@@ -1063,3 +1063,10 @@ max. Earlier entries are not backfilled.
 - Reason: development has ended and the repo goes public; the snapshot plus an evidence-based record is enough for a reader to reuse the method.
 - Reverse: delete WORKFLOW.md sections 12 and 13 and the snapshot notes; restore the two AFTER-FIRST-RUN.md items.
 - Origin: owner
+
+## 2026-11-05 · PR #85 (inferred) · BSD 3-Clause for the project; vendored manifests keep their upstream licences
+- Decision: the project is BSD 3-Clause (LICENSE at the root), matching the owner's other public repos; deploy/calico/ and deploy/metrics-server/ ship their upstream Apache-2.0 LICENSE files, taken unmodified at the pinned tags (Calico's is LICENSE.md upstream).
+- Rejected: MIT (equivalent in effect; consistency across repos won).
+- Reason: the repo goes public and needs a licence; the vendored manifests are not ours to relicense.
+- Reverse: replace LICENSE; the vendored files stay with their manifests.
+- Origin: owner
