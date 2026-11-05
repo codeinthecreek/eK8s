@@ -1,18 +1,18 @@
-# Status: resume point for work after a gap
+# Status: where the work stopped
 
-Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
-*(inferred)* are guesses, not read from the repo; correct them.
+Development ended at #81. Documentation PRs follow until the repo goes
+public; they are listed under Now. Lines marked *(inferred)* were not
+checked against the tree.
 
 ## Now
 - #82 (inferred): documentation fixes before the repo goes public (README, RESULTS, STATUS, AFTER-FIRST-RUN; overview and deploy/README follow)
 
 ## Next
-- Open follow-ups: docs/AFTER-FIRST-RUN.md (stress-based fitness calibration, if the owner wants it; a significance margin for culls; checking that the cull tie rule matches l.live order; the deploy/README.md host notes for Arch and Ubuntu). Nothing there blocks another run except as the owner decides.
+- No development scheduled. The open backlog is docs/AFTER-FIRST-RUN.md.
 
 ## Parked
-- driver TestSandboxTree fails on the workstation's Arch go1.27.3 (also on origin/main 91fdfe6): the toolchain's vendored x/crypto under /usr/lib/go/src/vendor/golang.org/x/crypto (TLS ciphers, no argon2) is visible in the sandbox; to be fixed in a separate driver PR (owner decision R1, 2026-11-05).
-- Gate Details carry candidate-controlled output (sb.withOutput: Stage 1 boot, Stage 2, Stage 4 concurrency; the Stage 4 race-report excerpt is the output tail) and a mutant can log request bodies, so pool and fresh passwords can appear in Report Details. The driver (DESIGN.md sec 12 per-call context) must never pass gate Detail or candidate output into a prompt verbatim, or later mutants could learn pool pairs (table lookup, verify memoization). The integrity evidence kept in lineage (the offending response body, DESIGN.md sec 9) is candidate-controlled too and falls under the same rule. Driver side structural since #57: BuildPrompt reads lineage records and fitness.Params only, and lineage records hold no Detail or evidence; the orchestrator must keep it so (never a Detail in a record or in a prompt): orchestrator.WindowResult holds counts, reason names and scores only (#58). orchestrator.Loop records check names and reason tokens only, and logs a failing gate Detail to its stderr only, quoted and cut to 1 KiB (#59).
-- Pending workstation (loadgen numbers; DESIGN.md sec 10, 15): (Q4) check the lag thresholds (p99 10 ms, any 100 ms) against a real run; (Q7) acceptance check: zero readiness failures for gen 0 at 4 x 1 pod (HPA pinned, PR B), stress on, rate r, over >= 3 windows.
+- driver `TestSandboxTree` fails on go1.27.x (seen on the Arch workstation's go1.27.3, also on origin/main 91fdfe6) and passes on CI's Go 1.26.10: the toolchain's vendored x/crypto under /usr/lib/go/src/vendor/golang.org/x/crypto (TLS ciphers, no argon2) is visible in the sandbox. Not fixed.
+- Standing rule for any driver change: gate Details and candidate output can hold pool or fresh passwords, so the driver must never put them into a prompt verbatim, or later mutants could learn pool pairs. The driver's prompt reads lineage records and fitness parameters only, and the orchestrator keeps Details and evidence out of records. See DESIGN.md sec 12 (per-call context) and sec 9 (integrity evidence).
 
 ## Recent
 - #81 results write-up (docs/RESULTS.md), overview and README refresh for runs 1-4 and the c0 results, STATUS cleanup
