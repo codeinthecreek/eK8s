@@ -786,7 +786,9 @@ surface.
 **Pooled across endpoints (hash and verify), not scored separately.** The
 fixed core's cost is symmetric between the two operations (verify
 re-derives the same Argon2id computation; the comparison step is
-negligible against ~100ms hash cost), and nothing in the evolvable
+negligible against ~100ms hash cost, the design-time estimate; the
+measured cost is about 0.031 CPU-seconds per success, docs/RESULTS.md
+section 4), and nothing in the evolvable
 parameters is endpoint-specific, so there is no mechanism that would ever
 produce genuine per-endpoint divergence -- only traffic-mix artifacts from
 the load generator's hash:verify ratio, which is a separate experiment to
