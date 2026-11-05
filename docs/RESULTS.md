@@ -5,9 +5,14 @@ measurements (c0) showed. It is written for an engineer who knows Linux and
 Kubernetes but not this project. Each claim is followed by the evidence for
 it. A sentence that goes beyond the evidence starts with "Inference:".
 
-Sources are the run records (the attempts log and summary of each run) and
-the entries in `docs/decisions.md` for runs 3 and 4 and for PR #77 and PR #80.
-Runs are named by run id. Scores are the project's fitness (0 to 1, higher is
+The run records (the attempts log, summary and c0 output of each run) are not
+in the repo; they stayed on the workstation that made the runs. The numbers
+here are as recorded in the `docs/decisions.md` entries for PRs #77-#80
+(runs 3 and 4, and the two c0 measurements), and for runs 1 and 2 in the
+entries dated 2026-10-28 and 2026-10-31. "#N" is a pull request number in
+this repo (`git log --grep '#N'` finds its merge). Process terms such as
+"owner" are defined in the README. Runs are named by run id. Scores are
+the project's fitness (0 to 1, higher is
 better), described in `DESIGN.md` sec 9.
 
 ## Summary
@@ -24,8 +29,9 @@ came in the first step, 500 to 250 ms; later steps are small and within noise
 
 ## 1. Setup in brief
 
-- One workstation (8 cores, clocks pinned to `performance`, turbo off) runs a
-  kind cluster. Detail: `docs/overview.md`, `DESIGN.md` sec 2 and sec 11.
+- One workstation (8 cores, clocks pinned to `performance`, turbo off; how to
+  pin them: `deploy/README.md`, "Host clocks") runs a kind cluster. Detail:
+  `docs/overview.md`, `DESIGN.md` sec 2 and sec 11.
 - Each candidate program ("variant") runs as one pod with a 250m CPU request
   and a 1000m CPU limit. Its wrapper has 2 concurrency slots for hashing.
   The 2 is derived (Go rounds a 1000m cgroup limit up to GOMAXPROCS = 2); it
@@ -52,7 +58,8 @@ came in the first step, 500 to 250 ms; later steps are small and within noise
   After each full window the lowest-ranked is culled (once four are live),
   and the AI proposes a new variant from a parent. The AI edits only the
   wrapper source (`internal/wrapper/`), in a sandbox.
-- c0 is a separate tool that finds C0: the highest rate one generation-0 pod
+- c0 is a separate tool (`orchestrator/cmd/c0`; `deploy/README.md`, "C0")
+  that finds C0: the highest rate one generation-0 pod
   sustains with at most 1% of requests shed or failed and p95 of successes at
   most 500 ms (`HangTimeout`/4, `HangTimeout` = 2 s), at no stress.
 
@@ -333,3 +340,12 @@ within noise.
   not read at run time.
 - c0 measures at no stress. Stress-half cpu/success in run 4 (0.034-0.038 s) is
   higher than c0's 0.031 s; the cause was not investigated.
+
+## 7. Reproducing these results
+
+Bring up the cluster and run the orchestrator as in the README ("Bring up
+the cluster"). Repeat the capacity measurement with `orchestrator/cmd/c0`,
+following `deploy/README.md` ("C0"), with pinned host clocks. Runs 3 and 4
+used r = 31, the C0 of generation 0.
+A repeat will not give the same lineage: the AI's proposals and the parent
+draws differ, and section 6 lists the other limits.

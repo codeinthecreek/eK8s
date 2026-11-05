@@ -5,7 +5,7 @@ not this project or Go. Implementation detail is left out.
 
 [DESIGN.md](../DESIGN.md) is the authoritative design: if this page
 and DESIGN.md disagree, DESIGN.md wins. For what the runs showed, see
-[RESULTS.md](RESULTS.md). For where the work is right now, see
+[RESULTS.md](RESULTS.md). For where the work stopped, see
 [STATUS.md](STATUS.md).
 
 ## 1. What this is, in one paragraph
@@ -177,7 +177,7 @@ only).
 
 ### Generation 0: the starting genome
 
-The wrapper source, as of commit a2d1ec1 on main, is four files:
+The generation 0 wrapper source is four files:
 
 | File | Role | Evolvable? |
 |------|------|------------|
@@ -309,12 +309,16 @@ were the baseline half only).
   [7] Score all 4; cull the lowest ---------------->+
 ```
 
-The archive holds every version that ever passed the gate, not just
-the live ones. Parents are drawn from a capped pool of about 15-20 of
-them: the oldest drop out, except the best ever. That keeps diversity,
-so the search does not just hill-climb from the current best. If no new best appears for a while,
-the AI is asked for a *structurally* different approach instead of a
-small tweak.
+The archive holds every version that passed the gate and was scored,
+not just the live ones. A parent is chosen by tournament: two are drawn
+at random from the archive and the better one wins. That keeps
+diversity, so the search does not just hill-climb from the current best.
+The design adds two things that were designed, not built: capping the
+pool to about 15-20 versions (the oldest drop out, except the best ever;
+the code draws from every eligible version), and a stagnation rule that,
+when no new best appears for a while, asks the AI for a *structurally*
+different approach instead of a small tweak (DESIGN.md sec 11 and sec 13;
+the code names an "escalated" mode, but nothing triggers it).
 
 The design stops a run when progress stalls for good, or when an
 AI-usage ceiling is reached. The runs so far follow the simpler "first
@@ -335,9 +339,10 @@ Any single failure rejects the candidate. There is no partial credit.
 | 4 Concurrency | local | Under parallel requests with the race detector on, no answers leak between requests |
 | 5 Under pressure | kind | It runs in its own namespace with a noisy neighbour, gets a short burst of load, and the pod must not crash and no response may be "failed" |
 
-Stages 1-4 run on the host today. The planned direction (not built) is
-to move Stages 2-4 into a pod in the cluster, so the host never runs
-candidate code; the build and the static checks stay on the host.
+Stages 1-4 run on the host. Moving Stages 2-4 into a pod in the cluster,
+so the host never runs candidate code, was designed, not built
+(DESIGN.md sec 7, "Planned"); the build and the static checks stay on the
+host.
 The gate is a filter, not the defense: it only keeps obviously broken
 candidates out. What protects the scores is checking live answers
 (section 8), which a candidate cannot tell apart from real traffic.
@@ -466,10 +471,10 @@ checks the reply in two steps:
 The load generator never runs Argon2 itself; it only keeps the
 (password, hash) pairs it saw. After each window the orchestrator
 verifies them on the host with the real core, before the variant is
-scored. For a variant's first K scored windows (to start, 3) every hash
-is verified. After that only a sample is (to start, 10% of the
-variant's hashes per window). Every hash in the Stage 5 burst is
-verified too.
+scored. Every hash of every window is verified, and every hash in the
+Stage 5 burst. The design also called for sampling after a variant's
+first K = 3 scored windows (about 10% of its hashes per window); that
+was not built.
 
 The salt doubles as a cheat detector. Every genuine hash carries a
 brand-new random salt. With 16 random bytes, an accidental repeat is
@@ -566,8 +571,8 @@ good faith. Here they are disastrous:
 - a cached verify answer means logging people in without checking
   their password
 
-Escalation mode makes this more likely, not less, because it
-explicitly asks for structurally different ideas.
+Escalation mode (designed, not built) would make this more likely, not
+less, because it explicitly asks for structurally different ideas.
 
 **3. Cheating can be conditional.** A variant could take the shortcut
 *only when overloaded*. It would pass every quiet-conditions test,
@@ -591,25 +596,25 @@ bypass.
 |-------|-------------------------|-----------------|
 | Always answer "match" on /verify | no Argon2, instant | the judge checks answers against pairs it built itself, including deliberate mismatches |
 | Turn a core error into "match" (fail open) | looks robust | gate Stage 2 sends bad and wrong-strength hashes; the answer must be 400; the same invalid hashes are sent live and in Stage 5 (see "Loopholes") |
-| Return a made-up hash string | no Argon2 | format and strength checks on every response; full verification on the host after each window (today every hash, every window; sampling after a variant's first K windows is planned, not built) and for every Stage 5 hash |
+| Return a made-up hash string | no Argon2 | format and strength checks on every response; full verification on the host after each window (every hash, every window; sampling after a variant's first K windows was not built) and for every Stage 5 hash |
 | Re-send earlier hashes | no Argon2 | salt reuse is tracked while the load generator serves the variant; deliberately repeated passwords catch a password -> hash cache |
 | Bring its own, weaker Argon2 | faster | Stage 1 library allowlist; Stage 3 exact strength check |
 | Cheat only when overloaded | passes quiet tests | Stage 5 (under stress-ng) and the stress half of every window (from run 2) use the same strict judge |
 | Pull all its pods out of rotation | avoids load | its own dedicated traffic fails, and that is scored |
 | Answer "busy" (503) to everything | never slow | only partial credit, and its success rate collapses |
 
-**Why some checks are sampled, and when they run.** Fully verifying a
+**Why full verification waits for the gap, and when checks run.** Fully verifying a
 hash costs one Argon2 run, which would distort the measurements if it
 shared the node with a window. So traffic flows only during observation
 windows, and the gaps between them carry no load. Builds, gate runs and
 Stage 5 happen in the gaps, and so does full verification, after a
 window and before scoring. During a window only the cheap checks run on
-every response: format, strength and salt reuse. A variant's first K
-scored windows are to be verified in full; after that, a sample. That
-sampling is planned, not built: today the host verifies every recorded
-hash in every window (run 1 did), so no cheat can slip through by
-waiting. Once sampling lands, a cheat deliberately held back past those
-windows could; that limit is accepted, and a sampled catch will still
+every response: format, strength and salt reuse. The design verified a
+variant's first K scored windows in full and a sample after that;
+sampling was not built. The host verifies every recorded hash in every
+window (run 1 did), so no cheat can slip through by waiting. Had
+sampling been built, a cheat deliberately held back past those windows
+could have; that limit was accepted, and a sampled catch would still
 disqualify. A variant that fails an integrity check is culled at the
 end of the window, before it is scored.
 
@@ -617,7 +622,7 @@ end of the window, before it is scored.
 
 The four loopholes tracked earlier each have a fix in
 [DESIGN.md](../DESIGN.md). Checked against the code, the core of each
-is built; the parts still pending are named below and in
+is built; the parts not built are named below and in
 [AFTER-FIRST-RUN.md](AFTER-FIRST-RUN.md):
 
 - **Reusing undelivered work:** a hash computed for a request that
@@ -629,11 +634,12 @@ is built; the parts still pending are named below and in
   even when the answer arrives past the time ceiling: a slow cheat is
   still a cheat. *Built:* the host verifies every recorded hash each
   window and keeps every salt it has seen, then culls before scoring
-  (`orchestrator/window.go:175`, `integrity.go:36-50` and `82-100`,
-  `loop.go:441`); every Stage 5 burst hash is verified too
-  (`gate/stage5.go:184`). *Pending:* sampled verification after a
-  variant's first K = 3 windows (no code; today it is all hashes, every
-  window), and dropping loadgen's per-variant salt copy, which grows
+  (`verifyAll` and `judgeIntegrity` in `orchestrator/integrity.go`,
+  called by `Session.judge` in `orchestrator/window.go`; `Loop.judge` in
+  `orchestrator/loop.go`); every Stage 5 burst hash is verified too
+  (`burstVerdicts` in `gate/burstverdict.go`). *Not built:* sampled
+  verification after a variant's first K = 3 windows (the host verifies
+  all hashes, every window), and dropping loadgen's per-variant salt copy, which grows
   for the variant's whole life (`loadgen/check.go:53-61`; it is freed
   only when the target is deleted, `loadgen/control.go:139`).
 - **Memorizing verify answers:** fixed by fresh pairs, each sent once.
@@ -682,7 +688,7 @@ is built; the parts still pending are named below and in
 - Each variant gets its own namespace and identical resource limits.
 - A variant's pods are meant to have no outbound connections (a network
   policy denies all egress) and to accept traffic only from the load
-  generator; a CI smoke test checks this. kind's default network plugin
+  generator; the deploy smoke test (run by hand) checks this. kind's default network plugin
   does not enforce egress rules, so the cluster uses Calico instead
   (`DESIGN.md` sec 11). Calico lets traffic from the node itself reach
   a pod on it, so the load generator's control port is reachable by
@@ -762,8 +768,8 @@ to 9 exist.
 
 ## 12. Where the project is now
 
-For the current state, always check [STATUS.md](STATUS.md). Every
-change updates it; this page is not updated that often.
+[STATUS.md](STATUS.md) records where the work stopped (development
+ended at #81).
 
 Four evolutionary runs and two capacity (c0) measurements are done.
 [RESULTS.md](RESULTS.md) reports them, with the evidence for each claim.

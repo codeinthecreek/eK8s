@@ -23,10 +23,12 @@ loadgen-up.sh <r>     build loadgen's image, load it and apply its Deployment
 smoke.sh              infra smoke test (run after up.sh)
 variant-smoke.sh      variant bundle smoke test (run after up.sh)
 loadgen-smoke.sh      loadgen smoke test (run after up.sh; deploys loadgen)
+stage5-smoke.sh       gate Stage 5 end to end on generation 0 (run after up.sh)
+orchestrator-smoke.sh dry run of the orchestrator for 2 generations, fake claude
 watch.sh <run> [log]  read-only tmux panes for watching a run (pods, top, HPAs,
                       events, node docker stats, attempts.jsonl, the log)
 diag/                 diagnostics, workstation only, never in a run or CI
-                      (stage5-runs.sh: Stage 5 runs that validate D2, Calico)
+                      (stage5-runs.sh: Stage 5 runs that check the Stage 5 stall is gone under Calico)
 ```
 
 ## Cluster
@@ -217,29 +219,27 @@ the end-to-end dry run (`deploy/orchestrator-smoke.sh`: the orchestrator for
 checked), then a Calico check that fails on any `Unblocking pod creation`
 line in the node's CNI log (a pod started before its policy was
 programmed, by any smoke). It has no push or pull_request trigger. Run it by
-hand (Actions tab, deploy smoke, Run workflow, on the PR's branch) when the
-planning chat asks in a review. The paths below usually warrant a run:
+hand (Actions tab, deploy smoke, Run workflow, on the PR's branch) before
+merging a change under the paths below:
 `deploy/**`, `cmd/service/**`, `internal/wrapper/**`, `loadgen/**`,
 `internal/classifier/**`, `gate/**`, `internal/hashcore/**`,
 `internal/hostpairs/**`, `loadgen/client/**`, `loadgen/wire/**`,
 `orchestrator/**`, `driver/**`, `lineage/**`, `fitness/**`, and
 `.github/workflows/deploy.yml`. One run per ref; a newer dispatch replaces a
 pending one, and a run in progress is never cancelled.
-The repo is private, so
-its ubuntu-latest runner has 2 CPU / 8 GB, too small for the full-size
-reservation and stress dose. On failure it dumps `kubectl get pods -A`,
+While the repo was private, its ubuntu-latest runner had 2 CPU / 8 GB; the
+CI-size settings in the table above exist for that runner, which was too
+small for the full-size reservation and stress dose. On failure it dumps `kubectl get pods -A`,
 `kubectl describe node`, the failing pods' events and Calico's logs. It proves the
 mechanics (pinned images, kustomizations, PSA, metrics-server, stress-ng on
 and off, the variant bundle, ek8s-system, the dry run), not the full-size
 numbers; those need a workstation run.
-`workflow_dispatch` (manual runs) works only once the workflow is on the
-default branch.
 
 ## Variant bundle
 
 Each variant lives in its own namespace, `ek8s-v<id>` (DESIGN.md sec 11),
 rendered from `variant/*.yaml.tmpl` by package `deploy/variant` and
-applied by gate Stage 5 (not yet built):
+applied by gate Stage 5:
 
 | Object | What it holds |
 |--------|---------------|
@@ -451,7 +451,7 @@ one (ladder too high, a step invalid twice, a confirm window failed: C0
 unresolved, everything recorded), 2 on a fault, a disqualification, an
 interrupt or a refused start. On exit the namespace and the loadgen
 target are deleted unless `-keep`; loadgen stays deployed at the last
-stepped rate, so run 2 starts with `deploy/loadgen-up.sh <r>`. The pod, restart and HPA checks compare the state just before the window with the state just after it; a restart between steps is not seen. A run takes about an hour: at most 9 windows of 5 minutes
+stepped rate, so the next run starts with `deploy/loadgen-up.sh <r>`. The pod, restart and HPA checks compare the state just before the window with the state just after it; a restart between steps is not seen. A run takes about an hour: at most 9 windows of 5 minutes
 for the default ladder without reruns, plus a loadgen redeploy each
 *(inferred)*.
 
@@ -475,14 +475,16 @@ The dose lives in ConfigMap `stress-dose` (stress/dose.yaml): CPU workers,
 per-worker CPU load, VM workers and VM bytes. Change it while stress is off;
 the next scale-up reads the new values. The pod is Burstable (CPU request
 2750m, limit 3: the dose stays 3 cores, as in run 2); memory request = limit =
-2Gi, so keep `VM_BYTES` under it. All values are starting guesses
-(DESIGN.md sec 15).
+2Gi, so keep `VM_BYTES` under it. These are the dose values
+runs 2-4 used.
 
 ## Diagnostics
 
 `diag/stage5-runs.sh` asks whether the Stage 5 stall on an HPA pod add,
 which PR #70's experiment put on kindnet's NetworkPolicy path, is gone now
-that Calico enforces the policies (D2; docs/decisions.md, 2026-11-03). It
+that Calico enforces the policies (docs/decisions.md, 2026-11-03). The
+answer was yes: Calico removes the stall (rule B met; docs/decisions.md,
+2026-11-04, PR #72). It
 runs real `gate -stage5` bursts on generation 0, stress-ng on, against the
 cluster as deployed: it removes no policy and patches nothing in loadgen.
 It refuses to start while a variant namespace or an orchestrator, c0 or
@@ -510,8 +512,9 @@ deploy/diag/stage5-runs.sh -rate 15.5 -try   # one run, no verdict: a dry try
 the `-rate` argument of the loadgen already deployed (r = 15.5 for the
 owner's Stage 5 runs: docs/decisions.md, PR #65 C0 entry, r = 0.5 x C0),
 and is required when none is;
-`-out` defaults to `~/workspace/scratch/ek8s-runs/diag-runs-<UTC stamp>/`
-(a relative `-out` is taken from the directory you run it from).
+`-out` defaults to a `diag-runs-<UTC stamp>/` directory under your home
+directory (the script's header gives the exact path); pass `-out` to choose
+one (a relative `-out` is taken from the directory you run it from).
 A run is PASS only if the gate exits 0, Felix dropped no packet from an
 unprogrammed pod ("Unknown interface") and denied none in the burst
 (end of tier), and the CNI logged no "Unblocking pod creation" (a counter
