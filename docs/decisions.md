@@ -1056,3 +1056,10 @@ max. Earlier entries are not backfilled.
 | 31 | 9112 | 0 | 0 | 9112 | 324.3 | 0.0305 | pass |
 | 31 | 9112 | 0 | 0 | 9112 | 398.5 | 0.0299 | pass |
 - Origin: owner (the run), Code (the record)
+
+## 2026-11-05 · PR #84 (inferred) · docs/workflow/ stays the PR #32 snapshot, plus the change table and a retrospective
+- Decision: docs/workflow/ (WORKFLOW.md, chat-instructions.md, templates/) is kept as extracted at PR #32 and stays in this repo; WORKFLOW.md gains a snapshot note, section 12 (what changed after #32, and why) and section 13 (a retrospective); README.md links it; the two docs/AFTER-FIRST-RUN.md items about extraction and the freeze are marked resolved.
+- Rejected: a full re-sync of the templates to the final method (multi-prompt work for a repo whose development has ended; the live CLAUDE.md, docs/handoff.md and .claude/agents/reviewer.md already show the final form).
+- Reason: development has ended and the repo goes public; the snapshot plus an evidence-based record is enough for a reader to reuse the method.
+- Reverse: delete WORKFLOW.md sections 12 and 13 and the snapshot notes; restore the two AFTER-FIRST-RUN.md items.
+- Origin: owner
