@@ -1024,3 +1024,35 @@ max. Earlier entries are not backfilled.
 - Result: best-ever fitness 0.9066 (gen 1, window 2), never beaten; gen 0 0.9033 / 0.8789 / 0.8430 / 0.8046 in windows 1-4, rank 1/1, 2/2, 3/3, 4/4, culled in window 4. Last window 0.8491-0.8684 (gen 7 best); live-count 1 to 4 and every variant fell as live count grew (confounded, as run 3).
 - Reason: owner prompt EK-RUN4-20261105; numbers only, nothing read into them here. Tables in the PR body.
 - Origin: owner
+
+## 2026-11-05 · PR #80 (inferred) · c0 on run 4 generation 7: C = 32
+- Decision: record only. c0 on run 4's generation 7 wrapper gave C0 = 32 (last_pass 32, first_fail 33; c0 printed "C0 32, r = 16"); generation 0 (PR #77) gave C0 = 31. Run dir $HOME/workspace/scratch/ek8s-runs/c0-run4g7-20261105 (c0.json, c0.log); numbers below are from c0.json. Pod CPU request 250m, limit 1000m (deploy/variant/20-limitrange.yaml.tmpl:13-18). Concurrency slots are not a constant in either tunables.go: capacity() (internal/wrapper/server.go:51-59) is max(1, min(GOMAXPROCS, memLimit/2/20Mi)); the c0 source comment (orchestrator/cmd/c0/main.go:11-14) assumes 2 slots per pod: "Gen 0's wrapper has 2 slots per pod: under the 1000m CPU limit Go sets GOMAXPROCS to 2 (it rounds a cgroup limit up, with a minimum of 2; docs/decisions-archive.md, PR #26 variant-resources entry), and the slots are min(GOMAXPROCS, memory limit / 2 / 20 MiB), 2 here." The other constants in the two tunables.go are identical; the slot count was not read at run time.
+- Image: ek8s-wrapper:d38833d16929, built by `go run ./gate/cmd/gate -repo . -candidate <run4 dir>/genomes/7/files` in worktree $HOME/workspace/scratch/ek8s-c-wt (stages 1-4 passed; host go version go1.27.3-X:nodwarf5 linux/amd64); genome digest recomputed, equal to the recorded f1e632d073fcd6f3de50b3851c8cb73e339532cb0a59058c4a9ec47dfe0b6c77. Run 4 records no image tags, so d38833d16929 cannot be tied to the image run 4 deployed. Gen 0 reference: PR #77, run dir $HOME/workspace/scratch/ek8s-runs/c0-20261105T000346Z, image ek8s-wrapper:ecb783ac3370.
+- Diff gen 0 to gen 7 (internal/wrapper/tunables.go:21, one line): `acquireWait = classifier.HangTimeout / 4` becomes `acquireWait = classifier.HangTimeout / 30`.
+- Labels: c0 labels the variant "generation 0" and prints r by the 0.5 x C rule; neither applies here (this is generation 7, and run 4 used r = 31). The c0 preflight passed with pinned clocks (c0.json: allow_unpinned false, governors performance on cpu0-7, intel_pstate no_turbo 1). Both runs: confirm 2, ladder 8,16,24,28,32,36,40,44,48, 1 pod, 0 restarts.
+- Generation 7 (image d38833d16929, repo_head b9cf1b3, repo_dirty true; ladder order as run):
+| r | requests | shed | failed | successes | p95 ms | cpu/success s | verdict |
+|---|---|---|---|---|---|---|---|
+| 8 | 2342 | 0 | 0 | 2342 | 33.7 | 0.0306 | pass |
+| 16 | 4720 | 0 | 0 | 4720 | 33.1 | 0.0313 | pass |
+| 24 | 7042 | 0 | 0 | 7042 | 33.3 | 0.0311 | pass |
+| 28 | 8221 | 0 | 0 | 8221 | 33.0 | 0.0306 | pass |
+| 32 | 9388 | 22 | 0 | 9366 | 124.2 | 0.0316 | pass |
+| 36 | 10565 | 1209 | 0 | 9356 | 161.2 | 0.0318 | fail |
+| 34 | 9993 | 623 | 0 | 9370 | 157.4 | 0.0315 | fail |
+| 33 | 9713 | 341 | 0 | 9372 | 153.4 | 0.0317 | fail |
+| 32 | 9392 | 7 | 0 | 9385 | 109.5 | 0.0313 | pass |
+| 32 | 9392 | 23 | 0 | 9369 | 127.4 | 0.0312 | pass |
+- Generation 0 (image ecb783ac3370, repo_head 68403f8, repo_dirty true; ladder order as run):
+| r | requests | shed | failed | successes | p95 ms | cpu/success s | verdict |
+|---|---|---|---|---|---|---|---|
+| 8 | 2362 | 0 | 0 | 2362 | 37.5 | 0.0324 | pass |
+| 16 | 4710 | 0 | 0 | 4710 | 35.6 | 0.0317 | pass |
+| 24 | 7077 | 0 | 0 | 7077 | 34.8 | 0.0299 | pass |
+| 28 | 8217 | 0 | 0 | 8217 | 33.5 | 0.0305 | pass |
+| 32 | 9390 | 27 | 0 | 9363 | 552.2 | 0.0311 | fail |
+| 30 | 8823 | 0 | 0 | 8823 | 34.3 | 0.0315 | pass |
+| 31 | 9104 | 4 | 0 | 9100 | 402.9 | 0.0307 | pass |
+| 31 | 9112 | 0 | 0 | 9112 | 324.3 | 0.0305 | pass |
+| 31 | 9112 | 0 | 0 | 9112 | 398.5 | 0.0299 | pass |
+- Origin: owner (the run), Code (the record)
