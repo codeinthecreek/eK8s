@@ -194,7 +194,8 @@ orchestrator/       population manager, selection, scoring loop.
 lineage/            run directory: genome archive (files + sha256), JSONL
                     attempt records, raw claude -p transcripts (SQLite later).
 docs/               overview.md (plain-language introduction; DESIGN.md is
-                    authoritative), decisions.md (implementation decision
+                    authoritative), RESULTS.md (results of runs 1-4
+                    and c0), decisions.md (implementation decision
                     log), STATUS.md (resume point), AFTER-FIRST-RUN.md
                     (items deferred until after the first run),
                     handoff.md (packet formats for the planning chat,
