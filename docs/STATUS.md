@@ -4,7 +4,7 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 *(inferred)* are guesses, not read from the repo; correct them.
 
 ## Now
-- (nothing in progress)
+- PR #80 (inferred): c0 on run 4 generation 7 recorded: C = 32 (gen 0: 31); docs/decisions.md, 2026-11-05, this PR.
 
 ## Next
 - Before run 2: (b) the orchestrator records and refuses unpinned clocks (reuse internal/hostclock) [done, #66]; fitness calibration with pinned clocks (CPU per success 0.0296-0.0311 s and p95 33 ms flat; crude floors 0.025 s and 25 ms set in #68, stress-based calibration open); stress windows at r = 15.5 [stress half built, #68; a window now takes about 10 min of load, so a generation about 13 min (inferred)]. Run 2 at r = 15.5 (b = 62, burst n = 1,860); C0 = 31 re-measured by c0 in PR B (#77, maxRate 50). Details: docs/AFTER-FIRST-RUN.md, items added 2026-10-29.
