@@ -16,14 +16,13 @@ container registry.
 ## Result so far
 
 Four evolutionary runs and two capacity measurements are done. A capacity
-measurement ("c0", tool `orchestrator/cmd/c0`) finds the highest request
-rate one pod serves within the shed and latency limits. One pod
-running the fixed Argon2id core serves about 32 successes/s whatever the
-wrapper around it does, so evolution found no extra throughput. It found
-a shorter wait for a hashing slot (500 ms down to 67 ms), which cut the
-stress-half p95 latency about 3 times at the same throughput. The
-evidence and the limits of these claims are in
-[docs/RESULTS.md](docs/RESULTS.md).
+measurement ("c0", tool `orchestrator/cmd/c0`) finds the highest request rate
+one pod serves within the shed and latency limits. One pod running the fixed
+Argon2id core serves about 32 successes/s whatever the wrapper around it does,
+so evolution found no extra throughput. It found a shorter wait for a hashing
+slot (in run 4, 500 ms down to 67 ms), which cut the stress-half p95 latency
+about 3 times at the same throughput. The evidence and the limits of these
+claims are in [docs/RESULTS.md](docs/RESULTS.md).
 
 ## The loop
 

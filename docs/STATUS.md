@@ -5,7 +5,7 @@ public; they are listed under Now. Lines marked *(inferred)* were not
 checked against the tree.
 
 ## Now
-- #83 (inferred): publish the run records
+- #83 (inferred): run records published in docs/runs/ (the run.json, summary.json, attempts.jsonl, stalls.jsonl and run.log of runs 1-4 and run 2's failed first attempt, and the c0.json of both c0 runs; run.log paths made generic); docs/RESULTS.md and README.md corrected against them (run 1 success rate and CPU-clamp claims, run 2 spread, gen 3 success rate, mutation scope of run 2, run 1 gen 3 parent)
 
 ## Next
 - No development scheduled. The open backlog is docs/AFTER-FIRST-RUN.md.

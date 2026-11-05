@@ -5,27 +5,27 @@ measurements (c0) showed. It is written for an engineer who knows Linux and
 Kubernetes but not this project. Each claim is followed by the evidence for
 it. A sentence that goes beyond the evidence starts with "Inference:".
 
-The run records (the attempts log, summary and c0 output of each run) are not
-in the repo; they stayed on the workstation that made the runs. The numbers
-here are as recorded in the `docs/decisions.md` entries for PRs #77-#80
-(runs 3 and 4, and the two c0 measurements), and for runs 1 and 2 in the
-entries dated 2026-10-28 and 2026-10-31. "#N" is a pull request number in
-this repo (`git log --grep '#N'` finds its merge). Process terms such as
-"owner" are defined in the README. Runs are named by run id. Scores are
-the project's fitness (0 to 1, higher is
-better), described in `DESIGN.md` sec 9.
+The run records (each run's `run.json`, `summary.json`, `attempts.jsonl`,
+`stalls.jsonl` and `run.log`, and the `c0.json` of each c0 measurement) are in
+`docs/runs/`; see [docs/runs/README.md](runs/README.md) for what each file
+holds. The numbers here were checked against those records. Where a
+`docs/decisions.md` entry (PRs #77-#80, and the entries dated 2026-10-28 and
+2026-10-31) differs from the records, the records are right. "#N" is a pull
+request number in this repo (`git log --grep '#N'` finds its merge). Process
+terms such as "owner" are defined in the README. Runs are named by run id.
+Scores are the project's fitness (0 to 1, higher is better), described in
+`DESIGN.md` sec 9.
 
 ## Summary
 
 One pod running the fixed Argon2id core can serve about 32 successes/s,
-whatever the wrapper around it does, which matches what one CPU buys at
-0.031 CPU-seconds per success (section 4 gives the measurements and labels
-the inference). Evolution therefore found no
-extra throughput. It found a shorter wait for a hashing slot, 500 ms down to
-67 ms, which cut the stress-half p95 latency about 3 times (about 590 to about
-184 ms) at the same throughput (sections 3.2 and 5). Most of the score gain
-came in the first step, 500 to 250 ms; later steps are small and within noise
-(section 3.4).
+whatever the wrapper around it does, which matches what one CPU buys at 0.031
+CPU-seconds per success (section 4 gives the measurements and labels the
+inference). Evolution therefore found no extra throughput. In run 4 it found a
+shorter wait for a hashing slot, 500 ms down to 67 ms, which cut the
+stress-half p95 latency about 3 times (about 590 to about 184 ms) at the same
+throughput (sections 3.2 and 5). Most of the score gain came in the first step,
+500 to 250 ms; later steps are small and within noise (section 3.4).
 
 ## 1. Setup in brief
 
@@ -40,7 +40,8 @@ came in the first step, 500 to 250 ms; later steps are small and within noise
   not part of what evolves. A variant is the wrapper around it: how many
   requests wait, for how long, and when they are shed with an HTTP 503.
 - The load is open-loop: requests are sent at a fixed rate r whether or not
-  earlier ones have finished. Runs 3 and 4 use r = 31 requests/s per variant.
+  earlier ones have finished. Runs 3 and 4 use r = 31 requests/s per variant
+  (the first line of each `docs/runs/<run>/run.log`).
 - A window is a baseline half (300 s of load, no neighbour) followed by a
   stress half (300 s of load while a stress-ng neighbour takes about 3 CPUs:
   3 CPU workers at 100% load, `deploy/stress/dose.yaml:11-12`, request 2750m
@@ -72,31 +73,43 @@ came in the first step, 500 to 250 ms; later steps are small and within noise
 | run3-20261105T021240Z | 2026-11-05 02:15 | 45 min | 31 | 124 | 2 | 13 | 0.055 | 3 | 0 | exit 0; owner verdict GO |
 | run4-20261105T033013Z | 2026-11-05 03:35 | 2 h 36 min | 31 | 124 | 8 | 36 | 0.171 | 9 | 0 | exit 0; 8 of 8 mutations passed the gate |
 
-Wall clock runs from the first gate line of the run's log to the time in its
-`summary.json`. Cost is `usage.cost_usd` from `summary.json`, summed over the
-run's AI turns, as reported by claude -p. run1 and run2b are the run ids as
-recorded; those two runs predate the timestamped ids.
+Wall clock runs from the first gate line of the run's `run.log` to the time in
+its `summary.json`. The first line of each `run.log` gives r. Cost is
+`usage.cost_usd` from `summary.json`, summed over the run's AI turns, as
+reported by claude -p. run1 and run2b are the run ids as recorded; those two
+runs predate the timestamped ids.
 
-run2b is the second attempt at run 2. The first attempt failed its own
-Stage 5 gate on generation 0 before any AI turn; that was traced to a network
-stall in the kindnet CNI, which Calico replaced in PR #71
-(`docs/decisions.md`, 2026-11-02 and 2026-11-03). Burst b is the rate of the
-gate's Stage 5 burst. Run 1's b is not in its record; 44 follows from the
-b = 4r rule and is an inference.
+run2b is the second attempt at run 2. The first attempt failed its own Stage 5
+gate on generation 0 before any AI turn; that was traced to a network stall in
+the kindnet CNI, which Calico replaced in PR #71 (`docs/decisions.md`,
+2026-11-02 and 2026-11-03); its record is `docs/runs/run2` (0 generations, 0
+turns). Burst b is the rate of the gate's Stage 5 burst. Run 1's b is not in
+its record; 44 follows from the b = 4r rule and is an inference.
 
 What each run established:
 
-- **run1**: the pipeline works end to end (10 of 10 mutations passed the
-  gate, no exclusions). It did not discriminate between variants. r = 11 was
-  far below capacity, windows had no stress half, every variant had
-  success rate 1, and the CPU floor (0.05 s) sat above the host's measured
-  0.0424 s per success, so that term clamped to 1. Inference: culls ranked
-  p95 jitter (`docs/decisions.md`, 2026-10-28).
+- **run1**: the pipeline works end to end (10 of 10 mutations passed the gate,
+  no exclusions). It did not discriminate between variants. r = 11 was far
+  below capacity and windows had no stress half. Baseline success rate was 1
+  for 33 of the 38 variant scores and 0.987 for the other five. Run 1's
+  per-success CPU ran 0.038-0.056 s, so the CPU term, which clamps to 1 at or
+  below the 0.05 s floor, clamped only for the 15 of 38 scores at or below it
+  (generation 0 in the first window: 0.0424 s). Inference: where both terms
+  were at 1, only p95 separated variants, so those culls ranked p95 jitter; for
+  the other scores CPU noise (and in five, success rate) also moved the score,
+  and the record does not say how much (`docs/decisions.md`, 2026-10-28, states
+  the p95-jitter conclusion for the whole run). Generation 3 descended from
+  generation 1, not 2 (its genome is byte-identical to generation 2's), and its
+  rationale assumed the file came from generation 2. Inference: the prompt's
+  lineage context did not make the parent clear to the AI.
 - **run2b**: a stress half was added and floors were recalibrated. Load was
-  still far below capacity: generation 0's stress-half success rate was 1
-  in all three windows, and window-to-window drift of the same variant
-  (about 0.004) exceeded the spread between variants in one window (about
-  0.0002). Verdict STOP (`docs/decisions.md`, 2026-10-31).
+  still far below capacity: generation 0's stress-half success rate was 1 in
+  all three windows, and window-to-window drift of the same variant (about
+  0.004) exceeded the spread between variants in one window (about
+  0.0002-0.0004). Both mutations changed `acquire` in
+  `internal/wrapper/server.go` (a client-disconnect check, then a non-blocking
+  slot grab), not `tunables.go`. Verdict STOP (`docs/decisions.md`,
+  2026-10-31).
 - **run3-20261105T021240Z**: r was raised to C0 = 31 (c0, PR #77). Generation 0
   now degraded under stress: stress-half success rate 0.9954, 0.9837, 0.9552 and
   p95 568-598 ms across the three windows. Spread between variants in a
@@ -156,7 +169,7 @@ Stress-half values, mean over the windows in which each generation was scored
 | 0 | 4 | 500 ms | 592 (571-614) | 0.964 (0.929-0.994) | 0.0345 |
 | 1 | 8 | 250 ms | 362 (358-366) | 0.945 (0.931-0.975) | 0.0362 |
 | 2 | 6 | 154 ms | 270 (260-273) | 0.934 (0.928-0.950) | 0.0365 |
-| 3 | 4 | 250 ms | 364 (362-365) | 0.940 (0.936-0.942) | 0.0371 |
+| 3 | 4 | 250 ms | 364 (362-365) | 0.939 (0.936-0.942) | 0.0371 |
 | 4 | 1 | 200 ms | 314 | 0.928 | 0.0363 |
 | 5 | 1 | 333 ms | 450 | 0.937 | 0.0375 |
 | 6 | 3 | 100 ms | 213 (211-215) | 0.932 (0.930-0.934) | 0.0383 |
@@ -326,8 +339,10 @@ within noise.
 - Score margins between gens 1, 6, 7, 8 are about 1.2 to 3 times the measured
   drift, so they are indicative, not significant. No significance test was
   run.
-- The AI changed only one constant. Run 4 therefore says little about whether
-  evolution can find structural changes to the wrapper.
+- In runs 1, 3 and 4 the AI changed only one constant (`acquireWait`); in run 2
+  (run2b) both mutations changed the `acquire` function in `server.go`. These
+  runs therefore say little about whether evolution can find structural changes
+  to the wrapper.
 - Run 4 did not record the image tags it deployed. The gen 7 c0 image
   (d38833d16929) was rebuilt from the recorded gen 7 genome (its digest
   matches the record), so it cannot be tied to the image that run 4
