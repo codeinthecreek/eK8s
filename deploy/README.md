@@ -248,7 +248,7 @@ applied by gate Stage 5 (not yet built):
 | NetworkPolicy | all pods: no egress; ingress TCP 8080 only from `ek8s-system` pods labelled `app=loadgen` |
 | Deployment `hasher` | the candidate image (`imagePullPolicy: Never`), no `replicas` field (the HPA owns it), env from the downward API, readiness `/readyz` (every 2s, timeout 2s, 3 failures), liveness `/healthz`, 30s grace, restricted securityContext, no service account token |
 | Service `hasher` | port 8080: `hasher.ek8s-v<id>.svc.cluster.local:8080` |
-| HPA `hasher` | 1-2 pods at 70% of the CPU request |
+| HPA `hasher` | pinned at 1 pod (min = max = 1; 70% CPU target kept for a later unpin) |
 
 The renderer takes only a decimal id, a label `ek8s-<16 hex>` (random per
 deployment, DESIGN.md sec 5) and an image `ek8s-wrapper:<12 hex>` (the
@@ -279,7 +279,7 @@ use a DNS server other than kube-dns (each first shown reachable from the
 its deny-all policy, reaches none of those targets, nor the variant or
 DNS, and that `ek8s-system` pod cannot reach it, though the node can (each
 refusal paired with a target shown reachable); with the variant at 2 pods
-(HPA `minReplicas` raised in the smoke only), a deleted pod's EndpointSlice entry is `ready=false`,
+(HPA `minReplicas` and `maxReplicas` raised to 2 in the smoke only), a deleted pod's EndpointSlice entry is `ready=false`,
 `terminating=true` within 2s while the other stays ready; and deleting the
 namespace removes everything. Last, it fails on any `Unblocking pod
 creation` line its run added to the node's CNI log. It needs `ek8s-system` from up.sh and
@@ -310,14 +310,14 @@ already exec into loadgen. The ek8s namespaces are Pod Security
 Deployment `loadgen` in `ek8s-system`, rendered from
 `loadgen/deployment.yaml.tmpl` by package `deploy/loadgen` and applied by
 `loadgen-up.sh`, not by the ek8s-system kustomization. One replica,
-strategy `Recreate`, 1 CPU / 384Mi Guaranteed (an exclusive core under the workstation cluster's static CPU manager; `EK8S_LOADGEN_CPU_REQUEST` lowers only the CPU request, 100m in CI), a `tcpSocket` readiness
+strategy `Recreate`, 1 CPU / 768Mi Guaranteed (an exclusive core under the workstation cluster's static CPU manager; `EK8S_LOADGEN_CPU_REQUEST` lowers only the CPU request, 100m in CI), a `tcpSocket` readiness
 probe on the container port `control` (9090) and no liveness probe, a 15 s
 grace period, `GOMEMLIMIT` from the downward API, no service-account
 token (DESIGN.md sec 10). The renderer takes only the rate `r` and an
 image `ek8s-loadgen:<12 hex>`; it fills `-rate`, `-window` and
 `-burst-rate` from `r` alone (b = 4r, W = 5 min), refuses an r not in its
 shortest decimal form, and refuses anything loadgen itself would refuse
-(such as r above 19).
+(such as r above 50, its maxRate).
 
 ```
 deploy/loadgen-up.sh 2   # r = 2, the smoke run's rate
@@ -336,7 +336,7 @@ for; the policy canary reads refused from its pod; 9090 is its only
 listening socket (read from an ephemeral container's `/proc/net`) and no UDP
 socket is bound; every control endpoint works through the API server's
 service proxy, including a refused `DELETE` during a run and a cancelled
-run's records; and at r = 19 (the largest rate) the largest pair upload is
+run's records; and at r = 50 (the largest rate) the largest pair upload is
 accepted. It targets id 999999 and refuses to start if `ek8s-v999999`
 exists, so no variant is sent load; it refuses to start beside an
 existing `app=loadgen` pod, and deletes its Deployment on exit
@@ -399,12 +399,12 @@ variant-resources entry), and the slots are min(GOMAXPROCS, memory limit /
 patches its HPA to 1/1, and for each step redeploys loadgen at the step's
 rate (`loadgen-up.sh`), runs one 5-minute window through
 `orchestrator.Session` and applies the pass rule. It walks `-ladder`
-(default 6,9,12,15,18,19) up to the first fail, bisects integer rates
+(default 8,16,24,28,32,36,40,44,48) up to the first fail, bisects integer rates
 between the last pass and that fail, then runs `-confirm` (default 2) more
 windows at the last pass. r = 0.5 x C0; if every ladder rate passes, it
 runs `-confirm` more windows at the top rate, and if they pass too the
-result is C0 >= the top rate (loadgen's maxRate is 19, so the default
-ladder ends there); a failed one leaves C0 unresolved. A step whose window was excluded, or whose pod, HPA or
+result is C0 >= the top rate (loadgen's maxRate is 50, above the default
+ladder's top); a failed one leaves C0 unresolved. A step whose window was excluded, or whose pod, HPA or
 restart checks failed, is not measured: it reruns once, and a second
 invalid step halts. A disqualification of gen 0 halts at once. The JSON
 result (`-out`, a new file) is rewritten after every step.

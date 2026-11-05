@@ -166,8 +166,8 @@ spec:
     port: 8080
     targetPort: http
 ---
-# Elastic capacity within the variant (DESIGN.md sec 11): 1-2 pods, 70% of
-# the 250m CPU request. metrics-server is cluster infra (deploy/up.sh).
+# Pinned at one pod (DESIGN.md sec 11): min = max = 1, so it never scales;
+# the object and its 70% target stay for a later unpin. metrics-server is cluster infra (deploy/up.sh).
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
@@ -179,7 +179,7 @@ spec:
     kind: Deployment
     name: hasher
   minReplicas: 1
-  maxReplicas: 2
+  maxReplicas: 1
   metrics:
   - type: Resource
     resource:

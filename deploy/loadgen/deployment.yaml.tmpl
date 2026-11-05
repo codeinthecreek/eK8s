@@ -68,16 +68,16 @@ spec:
         # the static CPU manager (deploy/kind/cluster.yaml), so the variants
         # and stress-ng cannot take loadgen's CPU. At CI size (no static
         # policy, a 2-CPU runner) only the CPU request is lowered, by
-        # deploy/loadgen-up.sh; the limit stays 1. Memory 384Mi: GOMEMLIMIT
-        # (90%) leaves room for the PR #45/#47 estimates at r = 31
-        # (docs/decisions.md, PR A r3a-static-cpu).
+        # deploy/loadgen-up.sh; the limit stays 1. Memory 768Mi: GOMEMLIMIT
+        # (90%, 724775732) holds the PR B memory sum at maxRate 50
+        # (docs/decisions.md, 2026-11-05).
         resources:
           requests:
             cpu: {{.CPURequest}}
-            memory: 384Mi
+            memory: 768Mi
           limits:
             cpu: 1
-            memory: 384Mi
+            memory: 768Mi
         # Ready once the control API accepts connections. There is no
         # liveness probe: a restart empties loadgen (targets, records, salt
         # sets); the orchestrator's control-call timeouts see a hung one.

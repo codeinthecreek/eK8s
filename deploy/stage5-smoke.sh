@@ -116,8 +116,8 @@ grep -Eq '^stall: records [0-9]+ oht [0-9]+ stall-runs 0 tail 0 longest 0 start-
 	die "no stall line with stall-runs 0, tail 0, longest 0"
 ok "the burst has no stall run, tail run or OHT run"
 
-# At least one, not exactly one: the burst can push the HPA (70% of the
-# CPU request) to scale up, and a second Ready replica is no failure.
+# At least one, not exactly one: the HPA is pinned at one pod now, but a
+# second Ready replica (an unpinned HPA scaling up) is no failure.
 ready=$(k -n "$ns" get deploy hasher -o jsonpath='{.status.readyReplicas}')
 [ "${ready:-0}" -ge 1 ] 2>/dev/null ||
 	die "Deployment hasher in $ns is not Ready after the pass (readyReplicas ${ready:-0})"

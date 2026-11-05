@@ -38,6 +38,14 @@ cluster costs roughly 1 core and 1.5-2 GB baseline. Budget the rest
 (~7 cores / ~13-14 GB) across: orchestrator process, load generator,
 stress-ng, metrics-server, and the live variant population.
 
+Node budget (requests on the workstation node, 7000m and 14133956Ki
+allocatable; control plane + kube-system measured on a fresh cluster,
+2026-11-05; docs/decisions.md, 2026-11-05 PR B memory-sum entry):
+- CPU: control plane + kube-system 1050m + loadgen 1000m + stress-ng
+  2750m + 4 variants x 1 pod x 250m = 5800m of 7000m, 1200m spare.
+- Memory: control plane + kube-system 440Mi + loadgen 768Mi + stress-ng
+  2Gi + 4 variants x 1 pod x 256Mi = 4280Mi of 13802Mi, 9522Mi spare.
+
 ## 3. Architecture summary
 
 - **Substrate:** Kubernetes, single-node kind cluster.
@@ -896,16 +904,19 @@ rate differ. Loadgen sends nothing outside a window or a Stage 5 burst
 
 **The rate `r`** is `0.5 x C0`. C0 is the highest rate at which generation 0 on a single pod (HPA `minReplicas` = `maxReplicas` = 1, no stress) has at most 1% of its scored requests (contract negatives excluded) end as `graceful_shed` or `failed`, with p95 latency of its successes at most `HangTimeout`/4, in a window that was scored (not excluded). Rates are stepped at 1 req/s; while loadgen's maxRate caps r, a pass at maxRate is recorded as C0 >= maxRate. It is measured once,
 and frozen for the run; a new `r` means a new run, and one run is one
-comparability epoch (section 9). Until C0 is measured, a provisional `r` comes from a
+comparability epoch (section 9). Run 3 uses `r` = C0 = 31 and b = 4r =
+124, so n = 3,720 (owner decision; docs/decisions.md, 2026-11-05 C0
+entry). Until C0 is measured, a provisional `r` comes from a
 workstation Argon2 benchmark; the CI smoke run uses `r` = 2.
 
 **The burst shape** is frozen per run like `r`: its rate b is set by the
-start-up flag `-burst-rate` (b = 2 x C0 = 4r, section 15), its duration D
+start-up flag `-burst-rate` (b = 4r: 2 x C0 under the default r = 0.5 x C0,
+4 x C0 in run 3; section 15), its duration D
 is the fixed 30 s, and its size is n = round(b x D). The ring's largest
-burst is n (below). Start-up refuses n > 3,000, because the memory sum
-(docs/decisions.md, PR #43 no-cap entry) covers no more. Start-up also
-refuses r > 19 (maxRate), from the memory sum (docs/decisions.md, PR #45
-W entry).
+burst is n (below). Start-up refuses n > 6,000 (maxBurstSends, 4 x
+maxRate x 30 s) and r > 50 (maxRate), because the memory sum at a 768Mi
+limit covers no more (docs/decisions.md, 2026-11-05 PR B memory-sum
+entry).
 
 **Schedule.** One scheduler goroutine per target. Send i is intended at
 start + i/`r`, computed from the index and never from a running sleep, so
@@ -981,7 +992,7 @@ halts the first run (docs/decisions.md, PR #58 host-confirmation entry).
 
 **Runs in the cluster**, as one long-lived Deployment in namespace
 `ek8s-system` serving every variant's stream and every Stage 5 burst.
-Guaranteed QoS, 1 CPU / 384Mi: on the workstation cluster the static
+Guaranteed QoS, 1 CPU / 768Mi: on the workstation cluster the static
 CPU manager (`cpuManagerPolicy: static`, deploy/kind/cluster.yaml) gives
 it an exclusive core. The CI-size cluster keeps the default policy (a
 2-CPU runner cannot fit a whole loadgen core) and lowers only loadgen's
@@ -1077,7 +1088,9 @@ namespace, `ek8s-v<id>`. There is no pooled front-facing Service: each
 live variant receives its own dedicated load stream (section 10).
 Readiness probes and HPA still act natively, but within a variant, across
 its own replicas -- they cull the obviously broken and provide elastic
-capacity, they do not rank viable variants against each other. Explicit
+capacity, they do not rank viable variants against each other. For now
+the HPA is pinned at `minReplicas` = `maxReplicas` = 1 (below), so a
+variant has one pod. Explicit
 fitness scoring (section 9) is what does the ranking.
 
 **Namespace lifecycle:**
@@ -1189,9 +1202,8 @@ A window is a baseline half, then a stress half, each a loadgen window
 run of length W with its own `/verify` batch (an upload replaces a
 pending one, so the stress half's batch is uploaded after the baseline
 run). The stress half follows once stress-ng is Running, so each
-variant starts it with whatever replicas its own HPA left after the
-baseline half (HPA scale-down stabilisation), under one rule for every
-variant; only the baseline half starts cold. Each
+variant starts it with its one pod as the baseline half left it, under
+one rule for every variant; only the baseline half starts cold. Each
 half has its own CNI first look, policy canary and kubelet CPU
 samples, taken around its run. Stress-ng goes off again as soon as the
 stress run ends, before its records are read, so the host's
@@ -1256,8 +1268,12 @@ its consequences.
 
 **Live population cap: 3.** A resource/deployment constraint given the
 8-core/16GB workstation, not a statement about genome-pool size (see
-below). HPA `maxReplicas` per variant: 2 (4 variants x 2 replicas during
-probation is the binding case for the section 2 budget).
+below). HPA `minReplicas` = `maxReplicas` = 1 per variant (4 variants x
+1 pod during probation is the binding case for the section 2 budget).
+The HPA object stays, pinned: a scale-down inside a scored half deleted
+a pod whose CPU counter was then lost, and the half was charged the CPU
+ceiling (docs/decisions.md, 2026-11-05 HPA-pin entry); one pod also
+matches C0's single-pod basis. Replica count was never in the genome.
 
 ### Generational process (steady-state, single active mutation at a time)
 
@@ -1309,7 +1325,7 @@ mutation is sequential. A newcomer that loses its own probation window is
 archived having had exactly one live window -- a real, logged outcome
 ("gate-passed but functionally weak"), not a discarded non-event.
 
-Newcomers enter probation at HPA `minReplicas` (cold start), consistent
+Newcomers enter probation on their one pod (cold start), consistent
 with how every other variant enters the pool -- artificially warming a
 newcomer would itself be a source of measurement inconsistency.
 
@@ -1580,18 +1596,18 @@ with the reason and the total usage of every mutation call.
 - Exact numeric starting points (fitness component weights, normalization
   bounds, stress-ng dosing, per-pod resource limits, FIFO archive cap,
   stagnation soft/hard thresholds, usage ceiling, per-variant stream rate
-  `r` and the 0.5 x C0 factor, the 50/48/2 request mix and the
+  `r` and the 0.5 x C0 factor (run 3: r = C0 = 31), the 50/48/2 request mix and the
   match:mismatch split, the Stage 5 negative share (5%), loadgen's
-  1 CPU / 384Mi sizing (exclusive core under the static CPU manager), the
+  1 CPU / 768Mi sizing (exclusive core under the static CPU manager), the
   lag thresholds (p99 10 ms, any 100 ms), 3 consecutive excluded
   windows, readiness-probe timings, K = 3 fully verified scored windows per
   variant, the `/hash` repeat share (1%), the `/hash` password floor (16
   characters), the `/hash` password length distribution (uniform, 16 to
   1024), the sampled verification share after K (10% of a variant's
-  hashes per window), the Stage 5 burst factor (2 x C0) and duration (D =
+  hashes per window), the Stage 5 burst factor (b = 4r: 2 x C0 by default; run 3: 4 x C0 = 124) and duration (D =
   30 s), the 200 ms run start lead, the 1e-9 bound on a stream running out
   of `/verify` pairs, the 10 s shutdown bound, loadgen's 15 s grace
-  period, the window length W (5 min), maxRate (19, from the memory sum,
+  period, the window length W (5 min), maxRate (50, from the memory sum,
   pending a workstation heap measurement), and the control API
   server's 2-minute read and write timeouts) are all explicitly
   starting guesses pending real telemetry, not derived values -- expect to

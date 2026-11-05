@@ -89,7 +89,7 @@ type config struct {
 
 func main() {
 	var c config
-	ladder := flag.String("ladder", "6,9,12,15,18,19", "rates to walk upward, comma-separated integers, strictly increasing")
+	ladder := flag.String("ladder", "8,16,24,28,32,36,40,44,48", "rates to walk upward, comma-separated integers, strictly increasing")
 	flag.StringVar(&c.image, "image", "", "generation 0's image, ek8s-wrapper:<12 hex>, already kind-loaded (not built here)")
 	flag.StringVar(&c.id, "id", "900001", "the variant id; its namespace is ek8s-v<id>")
 	flag.IntVar(&c.confirm, "confirm", 2, "extra windows at the last passing rate, all of which must pass")
@@ -377,8 +377,8 @@ func (r *runner) setup(ctx context.Context) error {
 	if _, err := r.kc.run(ctx, manifest, "create", "-f", "-"); err != nil {
 		return fmt.Errorf("creating the bundle: %w", err)
 	}
-	// A merge patch rather than a variant.Params field: only this tool
-	// wants a single-pod HPA, and the bundle stays one shape.
+	// The bundle already pins the HPA at 1/1 (DESIGN.md sec 11); the
+	// patch keeps C0's single-pod basis even if that pin is lifted.
 	if _, err := r.kc.run(ctx, nil, "patch", "hpa", "hasher", "-n", r.ns, "--type", "merge",
 		"-p", `{"spec":{"minReplicas":1,"maxReplicas":1}}`); err != nil {
 		return fmt.Errorf("patching the HPA: %w", err)
