@@ -1018,3 +1018,9 @@ max. Earlier entries are not backfilled.
 - Decision: run 3 (r = 31, b = 124, n = 3,720, -generations 2; run3-20261105T021240Z) is a GO. Exit 0, 13 turns, 3 windows, 6 halves, 0 excluded, 0 stalls or OHT, CPUUnmeasured none. Gen 0 stress success_rate 0.9954 / 0.9837 / 0.9552 (below 1, so it sheds or fails), p95 568-598 ms.
 - Rule: spread (max - min of variant scores in a window) 0.0331 (w2) and 0.0511 (w3) vs gen 0 drift 0.0198 (w1 to w2) and 0.0431 (w2 to w3): spread > drift each time. Caveat: drift and spread are confounded, live count grew 1/2/3 and gen 0 fell with it; shed and failed counts are not in the run dir (success_rate only).
 - Origin: owner
+
+## 2026-11-05 · Run 4 recorded: 8 generations
+- Decision: run 4 (r = 31, b = 124, -generations 8; run4-20261105T033013Z) ran to its generation limit: exit 0, 8 of 8 mutations passed the gate, 36 turns, 9 windows, 18 halves, 0 excluded, 0 stall runs or OHT, CPUUnmeasured none, no gate fault.
+- Result: best-ever fitness 0.9066 (gen 1, window 2), never beaten; gen 0 0.9033 / 0.8789 / 0.8430 / 0.8046 in windows 1-4, rank 1/1, 2/2, 3/3, 4/4, culled in window 4. Last window 0.8491-0.8684 (gen 7 best); live-count 1 to 4 and every variant fell as live count grew (confounded, as run 3).
+- Reason: owner prompt EK-RUN4-20261105; numbers only, nothing read into them here. Tables in the PR body.
+- Origin: owner

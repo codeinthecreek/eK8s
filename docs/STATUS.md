@@ -4,7 +4,7 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 *(inferred)* are guesses, not read from the repo; correct them.
 
 ## Now
-- Run 4 (run 3 procedure, -generations 8; r = 31, b = 124) in preparation on the workstation (prompt EK-RUN4-20261105).
+- Run 4 recorded (run4-20261105T033013Z; exit 0, 8 generations, 36 turns, 9 windows, 0 excluded; best-ever 0.9066 gen 1 window 2; docs/decisions.md, 2026-11-05, this PR).
 
 ## Next
 - Before run 2: (b) the orchestrator records and refuses unpinned clocks (reuse internal/hostclock) [done, #66]; fitness calibration with pinned clocks (CPU per success 0.0296-0.0311 s and p95 33 ms flat; crude floors 0.025 s and 25 ms set in #68, stress-based calibration open); stress windows at r = 15.5 [stress half built, #68; a window now takes about 10 min of load, so a generation about 13 min (inferred)]. Run 2 at r = 15.5 (b = 62, burst n = 1,860); C0 = 31 re-measured by c0 in PR B (#77, maxRate 50). Details: docs/AFTER-FIRST-RUN.md, items added 2026-10-29.
