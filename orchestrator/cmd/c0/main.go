@@ -377,8 +377,8 @@ func (r *runner) setup(ctx context.Context) error {
 	if _, err := r.kc.run(ctx, manifest, "create", "-f", "-"); err != nil {
 		return fmt.Errorf("creating the bundle: %w", err)
 	}
-	// A merge patch rather than a variant.Params field: only this tool
-	// wants a single-pod HPA, and the bundle stays one shape.
+	// The bundle already pins the HPA at 1/1 (DESIGN.md sec 11); the
+	// patch keeps C0's single-pod basis even if that pin is lifted.
 	if _, err := r.kc.run(ctx, nil, "patch", "hpa", "hasher", "-n", r.ns, "--type", "merge",
 		"-p", `{"spec":{"minReplicas":1,"maxReplicas":1}}`); err != nil {
 		return fmt.Errorf("patching the HPA: %w", err)

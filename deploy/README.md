@@ -248,7 +248,7 @@ applied by gate Stage 5 (not yet built):
 | NetworkPolicy | all pods: no egress; ingress TCP 8080 only from `ek8s-system` pods labelled `app=loadgen` |
 | Deployment `hasher` | the candidate image (`imagePullPolicy: Never`), no `replicas` field (the HPA owns it), env from the downward API, readiness `/readyz` (every 2s, timeout 2s, 3 failures), liveness `/healthz`, 30s grace, restricted securityContext, no service account token |
 | Service `hasher` | port 8080: `hasher.ek8s-v<id>.svc.cluster.local:8080` |
-| HPA `hasher` | 1-2 pods at 70% of the CPU request |
+| HPA `hasher` | pinned at 1 pod (min = max = 1; 70% CPU target kept for a later unpin) |
 
 The renderer takes only a decimal id, a label `ek8s-<16 hex>` (random per
 deployment, DESIGN.md sec 5) and an image `ek8s-wrapper:<12 hex>` (the
@@ -279,7 +279,7 @@ use a DNS server other than kube-dns (each first shown reachable from the
 its deny-all policy, reaches none of those targets, nor the variant or
 DNS, and that `ek8s-system` pod cannot reach it, though the node can (each
 refusal paired with a target shown reachable); with the variant at 2 pods
-(HPA `minReplicas` raised in the smoke only), a deleted pod's EndpointSlice entry is `ready=false`,
+(HPA `minReplicas` and `maxReplicas` raised to 2 in the smoke only), a deleted pod's EndpointSlice entry is `ready=false`,
 `terminating=true` within 2s while the other stays ready; and deleting the
 namespace removes everything. Last, it fails on any `Unblocking pod
 creation` line its run added to the node's CNI log. It needs `ek8s-system` from up.sh and

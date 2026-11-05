@@ -910,7 +910,8 @@ entry). Until C0 is measured, a provisional `r` comes from a
 workstation Argon2 benchmark; the CI smoke run uses `r` = 2.
 
 **The burst shape** is frozen per run like `r`: its rate b is set by the
-start-up flag `-burst-rate` (b = 2 x C0 = 4r, section 15), its duration D
+start-up flag `-burst-rate` (b = 4r: 2 x C0 under the default r = 0.5 x C0,
+4 x C0 in run 3; section 15), its duration D
 is the fixed 30 s, and its size is n = round(b x D). The ring's largest
 burst is n (below). Start-up refuses n > 6,000 (maxBurstSends, 4 x
 maxRate x 30 s) and r > 50 (maxRate), because the memory sum at a 768Mi
@@ -1603,7 +1604,7 @@ with the reason and the total usage of every mutation call.
   variant, the `/hash` repeat share (1%), the `/hash` password floor (16
   characters), the `/hash` password length distribution (uniform, 16 to
   1024), the sampled verification share after K (10% of a variant's
-  hashes per window), the Stage 5 burst factor (2 x C0; run 3: b = 4r = 124) and duration (D =
+  hashes per window), the Stage 5 burst factor (b = 4r: 2 x C0 by default; run 3: 4 x C0 = 124) and duration (D =
   30 s), the 200 ms run start lead, the 1e-9 bound on a stream running out
   of `/verify` pairs, the 10 s shutdown bound, loadgen's 15 s grace
   period, the window length W (5 min), maxRate (50, from the memory sum,
