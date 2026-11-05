@@ -1005,3 +1005,10 @@ max. Earlier entries are not backfilled.
 - Reason: in the D3b live check (run dir /home/jl/workspace/scratch/ek8s-runs/d3b-live-20261104T211756Z, window w-fb258046f9f62824) the HPA scaled gen 0 from 2 to 1 inside the stress half and deleted hasher-7476775b48-slsgx; fitness.CPUSeconds lost its counter and score() charged the CPU ceiling (stress 0.6982 vs baseline 0.9947, with success_rate 1 and p95 37 ms). Pinning also makes live windows match C0's single-pod basis. The HPA was never part of the genome.
 - Reverse: set maxReplicas back to 2 in the template and goldens, restore the smoke's minReplicas-only patch and the DESIGN.md sec 11 wording.
 - Origin: owner
+
+## 2026-11-05 · PR #77 (inferred) · C0 = 31 re-measured; run 3 uses r = C0 = 31, b = 4r = 124, n = 3,720 (DESIGN.md sec 10, 15)
+- Decision: run 3's r = C0 = 31 and b = 4r = 124 (n = round(124 x 30) = 3,720), set only where per-run values live: the loadgen-up.sh argument and the orchestrator's -rate (the renderer derives b = 4r). c0 still prints r by the default 0.5 x C0 rule (15.5); run 3 overrides it.
+- Measured: c0 on 68403f8 (repo_dirty: docs/STATUS.md only), image ek8s-wrapper:ecb783ac3370, pinned clocks, default ladder, confirm 2; run dir /home/jl/workspace/scratch/ek8s-runs/c0-20261105T000346Z (c0.json, stderr.txt). Every step scored. Steps (rate: shed+failed %, p95 ms, verdict): 8: 0.00, 37.5, pass; 16: 0.00, 35.6, pass; 24: 0.00, 34.8, pass; 28: 0.00, 33.5, pass; 32: 0.29, 552.2, fail (p95 over 500); 30: 0.00, 34.3, pass; 31: 0.04, 402.9, pass; 31: 0.00, 324.3, pass; 31: 0.00, 398.5, pass. Same C0 as PR #65's 31.
+- Rejected: r = 0.5 x C0 = 15.5 (the default rule, run 2's basis) and b decoupled from r: owner decision D3.
+- Reverse: run 3 with -rate 15.5 and loadgen-up.sh 15.5; revert the DESIGN.md sec 10 and sec 15 run-3 sentences.
+- Origin: owner (r = C0, b = 4r), Code (the measurement)

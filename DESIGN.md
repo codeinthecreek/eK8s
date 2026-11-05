@@ -904,7 +904,9 @@ rate differ. Loadgen sends nothing outside a window or a Stage 5 burst
 
 **The rate `r`** is `0.5 x C0`. C0 is the highest rate at which generation 0 on a single pod (HPA `minReplicas` = `maxReplicas` = 1, no stress) has at most 1% of its scored requests (contract negatives excluded) end as `graceful_shed` or `failed`, with p95 latency of its successes at most `HangTimeout`/4, in a window that was scored (not excluded). Rates are stepped at 1 req/s; while loadgen's maxRate caps r, a pass at maxRate is recorded as C0 >= maxRate. It is measured once,
 and frozen for the run; a new `r` means a new run, and one run is one
-comparability epoch (section 9). Until C0 is measured, a provisional `r` comes from a
+comparability epoch (section 9). Run 3 uses `r` = C0 = 31 and b = 4r =
+124, so n = 3,720 (owner decision; docs/decisions.md, 2026-11-05 C0
+entry). Until C0 is measured, a provisional `r` comes from a
 workstation Argon2 benchmark; the CI smoke run uses `r` = 2.
 
 **The burst shape** is frozen per run like `r`: its rate b is set by the
@@ -1593,7 +1595,7 @@ with the reason and the total usage of every mutation call.
 - Exact numeric starting points (fitness component weights, normalization
   bounds, stress-ng dosing, per-pod resource limits, FIFO archive cap,
   stagnation soft/hard thresholds, usage ceiling, per-variant stream rate
-  `r` and the 0.5 x C0 factor, the 50/48/2 request mix and the
+  `r` and the 0.5 x C0 factor (run 3: r = C0 = 31), the 50/48/2 request mix and the
   match:mismatch split, the Stage 5 negative share (5%), loadgen's
   1 CPU / 768Mi sizing (exclusive core under the static CPU manager), the
   lag thresholds (p99 10 ms, any 100 ms), 3 consecutive excluded
@@ -1601,7 +1603,7 @@ with the reason and the total usage of every mutation call.
   variant, the `/hash` repeat share (1%), the `/hash` password floor (16
   characters), the `/hash` password length distribution (uniform, 16 to
   1024), the sampled verification share after K (10% of a variant's
-  hashes per window), the Stage 5 burst factor (2 x C0) and duration (D =
+  hashes per window), the Stage 5 burst factor (2 x C0; run 3: b = 4r = 124) and duration (D =
   30 s), the 200 ms run start lead, the 1e-9 bound on a stream running out
   of `/verify` pairs, the 10 s shutdown bound, loadgen's 15 s grace
   period, the window length W (5 min), maxRate (50, from the memory sum,
