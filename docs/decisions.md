@@ -991,7 +991,7 @@ max. Earlier entries are not backfilled.
 - Reverse: restore the pull_request trigger, its paths and the job `if` from the PR #75 version (`git show 49b0e00:.github/workflows/deploy.yml`) and undo the deploy/README.md paragraph.
 - Origin: owner
 
-## 2026-11-05 · PR #77 (inferred) · PR B memory sum: loadgen 768Mi, maxRate 50, maxBurstSends 6000 (amends the PR #45 W and PR #47 header-cap entries' sums; DESIGN.md sec 2, 10, 15)
+## 2026-11-05 · PR #77 · PR B memory sum: loadgen 768Mi, maxRate 50, maxBurstSends 6000 (amends the PR #45 W and PR #47 header-cap entries' sums; DESIGN.md sec 2, 10, 15)
 - Decision: loadgen memory request = limit 768Mi (GOMEMLIMIT 724775732 = limit - limit/10), maxRate 50, maxBurstSends 6000 (4 x 50 x 30), c0 default ladder 8,16,24,28,32,36,40,44,48. At 512Mi (owner option B) the sum failed at r 50 (272.19 MiB vs GOMEMLIMIT/2 230.40) and passed only to r 38; the owner then chose 768Mi.
 - Sum (4 targets, W 300 s, n = 120r, today's mem_test.go figures): salts 4 x 750k x 25.36 B; ring slots 4 x (rW + n) x 193 B; record pairs 0.51 x (4rW + n) x 857 B; /verify batches 4 x P(rW) x 739.4 B (measured, 16-1024 char passwords, plus the Stream copy); burst 0.49n x 739.4 B + n x 700 B; evidence 5 x 8 x 5703 B; live = sum x 117/102.94 (PR #45 transients); stalled = 28r in flight (4 targets or one burst at 4r, never both: Stage 5 is in gaps, sec 11) x 80 KiB (PR #47). Gate: live <= GOMEMLIMIT/2 and live + stalled <= GOMEMLIMIT/2. Result at r 50, 768Mi: live 162.81 MiB <= 345.60 PASS; live + stalled 162.81 + 109.38 = 272.19 MiB <= 345.60 PASS. At r 19 the model gives 99.82 MiB benchmarked, PR #45 had 102.94. Node budget with the HPA pin, control plane + kube-system measured on the fresh cluster (1050m, 440Mi): CPU 5800m of 7000m, memory 4280Mi of 13802Mi requested (DESIGN.md sec 2).
 - Reason: c0 must climb past the old C0 of 31 and run 3 sets r = C0 with b = 4r, so loadgen must accept r up to 50 and n up to 6,000; 768Mi is what keeps both half-GOMEMLIMIT tests passing there.
@@ -999,14 +999,14 @@ max. Earlier entries are not backfilled.
 - Reverse: set maxRate, maxBurstSends, the 768Mi and the smoke's (2)/(6) values back; a higher maxRate needs this sum redone with a measured loadgen heap.
 - Origin: owner (768Mi, maxRate 50, the half-GOMEMLIMIT rule), Code (the sum)
 
-## 2026-11-05 · PR #77 (inferred) · Variant HPA pinned to minReplicas = maxReplicas = 1 (DESIGN.md sec 11)
+## 2026-11-05 · PR #77 · Variant HPA pinned to minReplicas = maxReplicas = 1 (DESIGN.md sec 11)
 - Decision: deploy/variant/60-hpa.yaml.tmpl keeps the HPA object with maxReplicas 1 (minReplicas was already 1); variant-smoke.sh check (h), which needs two pods, now patches min and max to 2 (the API refuses min 2 over max 1).
 - Rejected: deleting the HPA (a larger change, and an unpin later is one field); a Deployment replicas field (the HPA owns the count).
 - Reason: in the D3b live check (run dir /home/jl/workspace/scratch/ek8s-runs/d3b-live-20261104T211756Z, window w-fb258046f9f62824) the HPA scaled gen 0 from 2 to 1 inside the stress half and deleted hasher-7476775b48-slsgx; fitness.CPUSeconds lost its counter and score() charged the CPU ceiling (stress 0.6982 vs baseline 0.9947, with success_rate 1 and p95 37 ms). Pinning also makes live windows match C0's single-pod basis. The HPA was never part of the genome.
 - Reverse: set maxReplicas back to 2 in the template and goldens, restore the smoke's minReplicas-only patch and the DESIGN.md sec 11 wording.
 - Origin: owner
 
-## 2026-11-05 · PR #77 (inferred) · C0 = 31 re-measured; run 3 uses r = C0 = 31, b = 4r = 124, n = 3,720 (DESIGN.md sec 10, 15)
+## 2026-11-05 · PR #77 · C0 = 31 re-measured; run 3 uses r = C0 = 31, b = 4r = 124, n = 3,720 (DESIGN.md sec 10, 15)
 - Decision: run 3's r = C0 = 31 and b = 4r = 124 (n = round(124 x 30) = 3,720), set only where per-run values live: the loadgen-up.sh argument and the orchestrator's -rate (the renderer derives b = 4r). c0 still prints r by the default 0.5 x C0 rule (15.5); run 3 overrides it.
 - Measured: c0 on 68403f8 (repo_dirty: docs/STATUS.md only), image ek8s-wrapper:ecb783ac3370, pinned clocks, default ladder, confirm 2; run dir /home/jl/workspace/scratch/ek8s-runs/c0-20261105T000346Z (c0.json, stderr.txt). Every step scored. Steps (rate: shed+failed %, p95 ms, verdict): 8: 0.00, 37.5, pass; 16: 0.00, 35.6, pass; 24: 0.00, 34.8, pass; 28: 0.00, 33.5, pass; 32: 0.29, 552.2, fail (p95 over 500); 30: 0.00, 34.3, pass; 31: 0.04, 402.9, pass; 31: 0.00, 324.3, pass; 31: 0.00, 398.5, pass. Same C0 as PR #65's 31.
 - Reason: owner decision D3 (r = C0, b = 4r); C0 is re-measured on the tree that run 3 will use, with pinned clocks and the HPA pinned.
