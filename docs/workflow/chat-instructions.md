@@ -1,5 +1,7 @@
 # Chat instructions
 
+> Snapshot of the method as extracted at PR #32 (2026-10-14); it later changed. See the note at the top of [WORKFLOW.md](WORKFLOW.md).
+
 Paste the block below into the instructions of the claude.ai project that
 acts as the planning/review chat, and add the repo's files to project
 knowledge. It carries method rules

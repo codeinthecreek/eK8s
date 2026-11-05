@@ -5,7 +5,7 @@ public; they are listed under Now. Lines marked *(inferred)* were not
 checked against the tree.
 
 ## Now
-- #84 (inferred): docs/workflow/ stays the #32 snapshot; WORKFLOW.md gains the evolution table and a retrospective (in progress)
+- #84 (inferred): docs/workflow/ stays the #32 snapshot: WORKFLOW.md gains a snapshot note, section 12 (the process changes after #32, with reasons) and section 13 (a retrospective); chat-instructions.md gains a snapshot note; README.md gains "How this was built"; the two docs/AFTER-FIRST-RUN.md items on extraction and the freeze are resolved; docs/decisions.md records it. Docs-only.
 
 ## Next
 - No development scheduled. The open backlog is docs/AFTER-FIRST-RUN.md.

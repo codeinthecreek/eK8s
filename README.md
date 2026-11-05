@@ -52,6 +52,14 @@ works), then [deploy/README.md](deploy/README.md) and the commands below
 | [docs/AFTER-FIRST-RUN.md](docs/AFTER-FIRST-RUN.md) | The open backlog: deferred and unfinished items. |
 | [CLAUDE.md](CLAUDE.md) | Working agreement and non-negotiables for Claude Code sessions. |
 
+## How this was built
+
+The owner planned and reviewed the work in a planning chat, while Claude
+Code sessions implemented it in this repo. The method is in
+[docs/workflow/WORKFLOW.md](docs/workflow/WORKFLOW.md), which also lists how
+it changed and holds a retrospective. Each design and implementation choice,
+with who made it, is in [docs/decisions.md](docs/decisions.md).
+
 **Process terms.** The docs use some terms from how this repo was
 built. The *owner* is the repo's maintainer. The *planning chat* is the
 separate chat where the owner planned and reviewed work. A *Code session*

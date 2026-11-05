@@ -2,6 +2,15 @@
 
 Source: extracted from eK8s (github.com/codeinthecreek/eK8s) at e5d52c3, 2026-10-14.
 
+> **Snapshot note.** This file, [chat-instructions.md](chat-instructions.md)
+> and [templates/](templates/) describe the method as extracted at PR #32
+> (2026-10-14). The method kept changing until development ended at #81.
+> Its final form is the live [CLAUDE.md](../../CLAUDE.md),
+> [docs/handoff.md](../handoff.md) and
+> [.claude/agents/reviewer.md](../../.claude/agents/reviewer.md) in this
+> repo. Section 12 lists what changed and why; section 13 is a
+> retrospective.
+
 This is a method for one owner working with two Claude surfaces: a
 planning/review chat (claude.ai) and Claude Code cloud sessions that
 implement in a GitHub repo. Nothing here depends on the product being
@@ -287,3 +296,114 @@ Files: C = CLAUDE, D = decisions, H = handoff, R = reviewer.
   stays high, or its findings are mostly `declined:`, drop it; the
   method works without it (delete the self-review bullet and the
   `Self-review:` section).
+
+## 12 How the method changed after #32
+
+The sections above are the method as extracted at PR #32. Changes after
+that are in the live CLAUDE.md, docs/handoff.md and
+.claude/agents/reviewer.md; the templates were not updated. Process
+changes only; product decisions are not listed. Header lines are
+docs/decisions.md line numbers.
+
+| PR | Change | Reason (source) |
+|----|--------|-----------------|
+| #42 | The start-of-PR reconcile greps decisions.md instead of reading it; pre-#32 entries archived; STATUS Recent keeps 5; overview.md and README.md refresh only on request. | Usage windows are hit regularly; decisions.md (~103 KB) and overview.md (~32 KB) were the largest fixed reads per PR (decisions.md:286, reason at :289). |
+| #45 | The reviewer runs once per task on the final tree, not before each commit diff. | One subagent run per PR instead of one per step (decisions.md:453, reason at :456). |
+| #51 | Autonomous working mode: Code works along STATUS Next and asks the owner only on direction questions; packets and approvals only on request. | Owner time and quota (decisions.md:565, reason at :568). |
+| #52 | Third-party dependencies join the escalation list; Code stops when the next PR needs another model tier. | Supply-chain exposure in a run that executes model-written code; top-tier effort where the non-negotiables bite (decisions.md:579, :586). |
+| #53 | Every stop ends with a resume prompt. Removed in #67. | A fresh session resumes with no chat relay (decisions.md:593, reason at :596). Removal: commit 217c877, prompts for fresh sessions come from the planning chat and the rule clashed with the Reply rules. |
+| #67 | Code runs a PR end to end (commit, self-review, push, draft PR, review packet) with no per-commit approval; Reply rules added. | Per-commit round trips and incomplete packets cost most of a week's quota by Thursday, 2026-10-29 (decisions.md:733, reason at :736). |
+| #68 | Prompt guard: header line, END OF PROMPT, a prompt log on the host. | A wrong tier, a cut paste or a re-sent prompt costs a session's quota before anyone notices (decisions.md:740, reason at :743). |
+| #71 | The reviewer runs on every change that is not docs-only (Markdown only). | "Any change touching Go code" left shell, YAML and workflow changes undefined (decisions.md:903, rejected at :905, reason at :906: in the design review the owner asked that docs-only mean only Markdown files, so that shell, YAML and workflow changes are reviewed too). |
+| #73 | Diffs in a packet are pasted verbatim and labelled with their command. | No decisions.md entry. Commit b020684: in review the owner pointed out that a packet's diffs had retyped context lines, and asked for verbatim diffs labelled with their command. |
+| #75 | Draft PRs skip ci.yml and deploy.yml; one run per PR; no push-to-main run. | 342 CI minutes in the first 4 days of November, about 2,500 a month projected (decisions.md:980, reason at :983). |
+| #76 | The deploy smoke runs by hand only. | deploy.yml was 202 of those 342 minutes and ran on almost every code PR; the owner wants CI kept small (decisions.md:987, reason at :990). |
+
+## 13 Retrospective
+
+Evidence only. Each claim cites a file and line, a PR or a decisions.md
+entry. A sentence that goes past the evidence starts with "Inference:".
+
+**What held.**
+- The decision log was kept to the end: 148 entries, the last for PR #80
+  (docs/decisions.md:1028).
+- STATUS.md stayed the resume point: it opens "Development ended at #81"
+  (docs/STATUS.md:3) and each PR reconciled it first (commit 8ef20cb, the
+  reconcile in #83 that moved #82 to Recent).
+- The commit trailer rule (#35, #37) held: 304 of the 355 commits after
+  1204850 carry a `Claude-Session:` line (`git log 1204850..origin/main`).
+  Of the 51 without one, 49 are merge commits (`git log --merges
+  --oneline 1204850..origin/main`) and 2 are owner commits (172753e,
+  9b79e26).
+- The reviewer ran on non-docs PRs to the last code PR: #77's body lists
+  16 findings, 9 of them fixed.
+- The Model/Effort header lived on as the prompt guard (CLAUDE.md:49-56,
+  decisions.md:740).
+
+**What cost more than it gave.**
+- Reading the log: decisions.md (~103 KB) and overview.md (~32 KB) were the
+  largest fixed reads per PR (decisions.md:289, #42). decisions.md then
+  grew to 1058 lines plus a 623-line archive.
+- Per-commit approval: "per-commit round trips and incomplete packets cost
+  most of a week's quota by Thursday (2026-10-29)" (decisions.md:736, #67).
+- Wrong tier, cut paste, re-sent prompt: "costs a session's quota before
+  anyone notices" (decisions.md:743, #68).
+- CI: 342 minutes in 4 days, 202 of them deploy.yml in 17 runs
+  (decisions.md:983, :990; #75, #76).
+- The repo records no token, time or run counts for the reviewer.
+
+**The Feedback tags.** Section 6 (WORKFLOW.md:138-149) and section 11
+(WORKFLOW.md:294-298) say the reviewer's worth would be judged from the
+`[missed]`, `[repo-unseeable]` and `[dup]` counts. There are 0 tagged
+Feedback lines in the repo: the tags appear only in the #17 body, which
+introduces them. Packets went to the planning chat (docs/handoff.md:6-9)
+and were never stored. Inference: the reviewer's value was therefore never
+measured as planned.
+
+**The reviewer's record.** From PR bodies only; the packets are not
+available. 21 PRs state dispositions (#17, #53-#61, #66, #68-#77).
+- Must-fix findings: #53 (gate/), #58 and #59 (orchestrator/), #68
+  (orchestrator/, fitness/, lineage/) and #70 (round 1: 1 must-fix, 12
+  should-fix; deploy/diag shell script).
+- No must-fix: #17, #54, #60, #61, #66, #69.
+- Counts stated in the bodies: #70 about 27 fixed, 6 declined over two
+  rounds; #71 about 20 fixed, 2 declined; #77 9 fixed, 3 declined; #55 7
+  fixed, 2 declined.
+- Docs-only PRs skipped it; at least nine bodies say so (#19, #22, #51,
+  #52, #63, #67, #78, #80, #83).
+- Checklist growth: reviewer.md changed three times for named misses (commits
+  dfaf367, d7cba29, 8827c5d, all before #32). Commit dfaf367 names "three
+  checks PR #18's review caught and self-review missed". No later commit
+  cites a tag.
+
+**Three simplifications proposed in the planning chat's scope review
+(2026-11-04), never adopted because development ended first.** Each is a
+recommendation for a next project.
+1. *Run the reviewer only on the risky packages (gate/, orchestrator/,
+   driver/, internal/hashcore, internal/classifier).* For: the must-fix
+   findings on #53, #58, #59 and #68 fall in gate/ and orchestrator/. Against:
+   #70 (a deploy shell script) had a must-fix, and #55 (lineage/) and #56
+   (fitness/, a scoring flaw where shedding nearly everything kept full
+   latency and CPU marks) had substantial fixes, all outside that list; #71
+   widened the reviewer to shell, YAML and workflow files for a similar
+   reason (decisions.md:903-906). Inference: a path list would have missed
+   the shell, lineage and fitness findings.
+2. *Write decisions.md entries only for design or non-negotiable changes.*
+   Evidence: 148 entries, 1058 lines plus a 623-line archive; the log was
+   too big to read per PR (decisions.md:289). Against: 29 lines in it say
+   an entry amends or supersedes an earlier one (`grep -c -i
+   'amends\|supersede'`), e.g. decisions.md:31, :37. Inference: the log
+   paid for itself in cross-references, but the implementation-level
+   entries are probably the bulk of its size.
+3. *Drop the tags and the checklist loop they fed.* Evidence: 0 tagged
+   lines (above); the checklist did grow, but from named misses recorded
+   in commit messages rather than tags (dfaf367 and later). Inference:
+   without a stored packet the tag could not be counted; the checklist loop
+   needs only a place to record each miss.
+
+**Who made the choices.** `grep -c '^- Origin: <x>' docs/decisions.md`:
+owner 31, chat 58, Code 45, 134 in all. Origin starts at PR #34; the 14
+earlier entries (lines 8-85) have none. Four entries list two origins and
+are counted by the first. Origin records who first proposed a choice, not
+how much it mattered. Every entry was approved by the owner (owner's
+statement, not recorded per entry).
