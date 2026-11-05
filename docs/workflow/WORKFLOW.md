@@ -325,8 +325,9 @@ Evidence only. Each claim cites a file and line, a PR or a decisions.md
 entry. A sentence that goes past the evidence starts with "Inference:".
 
 **What held.**
-- The decision log was kept to the end: 148 entries, the last for PR #80
-  (docs/decisions.md:1028).
+- The decision log was kept to the end: 150 entries, the last for PR #85
+  (docs/decisions.md:1067); the count includes the documentation PRs'
+  entries.
 - STATUS.md stayed the resume point: it opens "Development ended at #81"
   (docs/STATUS.md:3) and each PR reconciled it first (commit 8ef20cb, the
   reconcile in #83 that moved #82 to Recent).
@@ -389,7 +390,7 @@ recommendation for a next project.
    reason (decisions.md:903-906). Inference: a path list would have missed
    the shell, lineage and fitness findings.
 2. *Write decisions.md entries only for design or non-negotiable changes.*
-   Evidence: 148 entries, 1058 lines plus a 623-line archive; the log was
+   Evidence: 150 entries (documentation PRs' included), 1072 lines plus a 623-line archive; the log was
    too big to read per PR (decisions.md:289). Against: 29 lines in it say
    an entry amends or supersedes an earlier one (`grep -c -i
    'amends\|supersede'`), e.g. decisions.md:31, :37. Inference: the log
@@ -402,7 +403,8 @@ recommendation for a next project.
    needs only a place to record each miss.
 
 **Who made the choices.** `grep -c '^- Origin: <x>' docs/decisions.md`:
-owner 31, chat 58, Code 45, 134 in all. Origin starts at PR #34; the 14
+owner 33, chat 58, Code 45, 136 in all, the documentation PRs'
+entries included. Origin starts at PR #34; the 14
 earlier entries (lines 8-85) have none. Four entries list two origins and
 are counted by the first. Origin records who first proposed a choice, not
 how much it mattered. Every entry was approved by the owner (owner's

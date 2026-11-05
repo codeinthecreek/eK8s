@@ -1,7 +1,7 @@
 # Status: where the work stopped
 
-Development ended at #81. Documentation PRs follow until the repo goes
-public; they are listed under Now. Lines marked *(inferred)* were not
+Development ended at #81. Documentation is complete at #85 (the licence
+PR); the repo is to be made public after it. Lines marked *(inferred)* were not
 checked against the tree.
 
 ## Now
