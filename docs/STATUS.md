@@ -4,7 +4,7 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 *(inferred)* are guesses, not read from the repo; correct them.
 
 ## Now
-- Run 3 recorded: GO (run3-20261105T021240Z; exit 0, 2 generations, 13 turns, 3 windows, 0 excluded; gen 0 stress success_rate 0.9954/0.9837/0.9552, spread 0.0331/0.0511 > drift 0.0198/0.0431; docs/decisions.md, 2026-11-05, this PR).
+- Run 4 (run 3 procedure, -generations 8; r = 31, b = 124) in preparation on the workstation (prompt EK-RUN4-20261105).
 
 ## Next
 - Before run 2: (b) the orchestrator records and refuses unpinned clocks (reuse internal/hostclock) [done, #66]; fitness calibration with pinned clocks (CPU per success 0.0296-0.0311 s and p95 33 ms flat; crude floors 0.025 s and 25 ms set in #68, stress-based calibration open); stress windows at r = 15.5 [stress half built, #68; a window now takes about 10 min of load, so a generation about 13 min (inferred)]. Run 2 at r = 15.5 (b = 62, burst n = 1,860); C0 = 31 re-measured by c0 in PR B (#77, maxRate 50). Details: docs/AFTER-FIRST-RUN.md, items added 2026-10-29.
@@ -21,8 +21,8 @@ Maintained by Code sessions; every PR updates it (CLAUDE.md). Lines marked
 - Driver, resolved 2026-10-28: TestLiveMutation passed (11 turns) on the workstation.
 
 ## Recent
+- #78 Run 3 recorded: GO (run3-20261105T021240Z; exit 0, 2 generations, 13 turns, 3 windows, 0 excluded; gen 0 stress success_rate 0.9954/0.9837/0.9552, spread 0.0331/0.0511 > drift 0.0198/0.0431; docs/decisions.md, 2026-11-05)
 - #77 PR B: loadgen 768Mi, maxRate 50, maxBurstSends 6000; variant HPA pinned to 1/1; C0 = 31 re-measured, so run 3 uses r = 31, b = 124, n = 3,720 (docs/decisions.md, 2026-11-05)
 - #76 deploy smoke (deploy.yml) runs by hand only, no PR or push trigger; ci.yml unchanged (docs/decisions.md, 2026-11-04)
 - #75 CI minutes cut: draft PRs skip ci.yml and deploy.yml, a run per PR cancels on a new push, ci.yml has no push-to-main run; CLAUDE.md: Code opens PRs as drafts and marks them ready only after the owner approves (docs/decisions.md, 2026-11-04)
 - #74 D3b: archive calico-node's log into the run dir, for every gate Stage 5 burst and once per window (after the window returns, also before the halt on a window fault); each file capped at 1 MiB with a cut marker; a failed read or write is a stderr line, never a fault, exclusion or halt; files cni/<run id>.log, cni/fault-<unix seconds>.log; deploy/orchestrator-smoke.sh checks one per burst and window (docs/decisions.md, 2026-11-04)
-- #73 D3a: option 4 detection and recording only, the counts: internal/stallrun (definitions D1-D7, docs/decisions.md 2026-11-04) used by the gate's Stage 5 path and the orchestrator, recorded per loadgen run and target in a new run-dir file stalls.jsonl (attempts.jsonl unchanged; counts only, no Detail); its retry and exclusion rules wait in docs/AFTER-FIRST-RUN.md
