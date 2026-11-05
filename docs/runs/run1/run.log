@@ -1,0 +1,114 @@
+run $HOME/workspace/scratch/ek8s-runs/run1: r 11, window 300 s, 10 generations, turn ceiling 300, token ceiling 0, seed 1165799176289203919, claude $HOME/.local/share/claude/versions/2.1.311
+2026-10-28T04:53:20Z generation 0: gate stages 1-4
+2026-10-28T04:53:37Z generation 0: gate stage 5
+2026-10-28T04:54:22Z generation 0: passed the gate; live ["0"]
+2026-10-28T04:54:32Z window: live ["0"]
+2026-10-28T04:59:43Z window w-a6da2ad8276e34b8: scored
+2026-10-28T04:59:43Z window w-a6da2ad8276e34b8: 0 scored 0.9975
+2026-10-28T04:59:43Z generation 1: mutating 0
+2026-10-28T05:00:02Z generation 1: gate stages 1-4
+2026-10-28T05:00:19Z generation 1: gate stage 5
+2026-10-28T05:01:08Z generation 1: passed the gate; live ["0" "1"]
+2026-10-28T05:01:08Z window: live ["0" "1"]
+2026-10-28T05:06:27Z window w-384bbfe22e2dabaa: scored
+2026-10-28T05:06:27Z window w-384bbfe22e2dabaa: 0 scored 0.9978
+2026-10-28T05:06:27Z window w-384bbfe22e2dabaa: 1 scored 0.9978
+2026-10-28T05:06:27Z generation 2: mutating 1
+2026-10-28T05:06:55Z generation 2: gate stages 1-4
+2026-10-28T05:07:12Z generation 2: gate stage 5
+2026-10-28T05:08:01Z generation 2: passed the gate; live ["0" "1" "2"]
+2026-10-28T05:08:01Z window: live ["0" "1" "2"]
+2026-10-28T05:13:29Z window w-4b7b372be7aee2c2: scored
+2026-10-28T05:13:29Z window w-4b7b372be7aee2c2: 0 scored 0.9978
+2026-10-28T05:13:29Z window w-4b7b372be7aee2c2: 1 scored 0.9978
+2026-10-28T05:13:29Z window w-4b7b372be7aee2c2: 2 scored 0.9978
+2026-10-28T05:13:29Z generation 3: mutating 1
+2026-10-28T05:14:06Z generation 3: gate stages 1-4
+2026-10-28T05:14:16Z generation 3: gate stage 5
+2026-10-28T05:15:01Z generation 3: passed the gate; live ["0" "1" "2" "3"]
+2026-10-28T05:15:01Z window: live ["0" "1" "2" "3"]
+2026-10-28T05:20:38Z window w-041807eef536ccd4: scored
+2026-10-28T05:20:38Z window w-041807eef536ccd4: 0 scored 0.9911
+2026-10-28T05:20:38Z window w-041807eef536ccd4: 1 scored 0.9915
+2026-10-28T05:20:38Z window w-041807eef536ccd4: 2 scored 0.9916
+2026-10-28T05:20:38Z window w-041807eef536ccd4: 3 scored 0.9911
+2026-10-28T05:20:38Z window w-041807eef536ccd4: 3 has the lowest score, culled
+2026-10-28T05:21:06Z generation 4: mutating 2
+2026-10-28T05:21:43Z generation 4: gate stages 1-4
+2026-10-28T05:22:01Z generation 4: gate stage 5
+2026-10-28T05:22:48Z generation 4: passed the gate; live ["0" "1" "2" "4"]
+2026-10-28T05:22:48Z window: live ["0" "1" "2" "4"]
+2026-10-28T05:28:24Z window w-785dd91b4492574d: scored
+2026-10-28T05:28:24Z window w-785dd91b4492574d: 0 scored 0.9763
+2026-10-28T05:28:24Z window w-785dd91b4492574d: 1 scored 0.9760
+2026-10-28T05:28:24Z window w-785dd91b4492574d: 2 scored 0.9908
+2026-10-28T05:28:24Z window w-785dd91b4492574d: 4 scored 0.9897
+2026-10-28T05:28:24Z window w-785dd91b4492574d: 1 has the lowest score, culled
+2026-10-28T05:28:52Z generation 5: mutating 3
+2026-10-28T05:29:30Z generation 5: gate stages 1-4
+2026-10-28T05:29:40Z generation 5: gate stage 5
+2026-10-28T05:30:26Z generation 5: passed the gate; live ["0" "2" "4" "5"]
+2026-10-28T05:30:26Z window: live ["0" "2" "4" "5"]
+2026-10-28T05:36:03Z window w-33306b219ffd9993: scored
+2026-10-28T05:36:03Z window w-33306b219ffd9993: 0 scored 0.9923
+2026-10-28T05:36:03Z window w-33306b219ffd9993: 2 scored 0.9923
+2026-10-28T05:36:03Z window w-33306b219ffd9993: 4 scored 0.9922
+2026-10-28T05:36:03Z window w-33306b219ffd9993: 5 scored 0.9923
+2026-10-28T05:36:03Z window w-33306b219ffd9993: 4 has the lowest score, culled
+2026-10-28T05:36:31Z generation 6: mutating 5
+2026-10-28T05:37:09Z generation 6: gate stages 1-4
+2026-10-28T05:37:25Z generation 6: gate stage 5
+2026-10-28T05:38:13Z generation 6: passed the gate; live ["0" "2" "5" "6"]
+2026-10-28T05:38:13Z window: live ["0" "2" "5" "6"]
+2026-10-28T05:43:51Z window w-619cbc892b74d703: scored
+2026-10-28T05:43:51Z window w-619cbc892b74d703: 0 scored 0.9885
+2026-10-28T05:43:51Z window w-619cbc892b74d703: 2 scored 0.9871
+2026-10-28T05:43:51Z window w-619cbc892b74d703: 5 scored 0.9873
+2026-10-28T05:43:51Z window w-619cbc892b74d703: 6 scored 0.9870
+2026-10-28T05:43:51Z window w-619cbc892b74d703: 6 has the lowest score, culled
+2026-10-28T05:44:18Z generation 7: mutating 0
+2026-10-28T05:44:56Z generation 7: gate stages 1-4
+2026-10-28T05:45:13Z generation 7: gate stage 5
+2026-10-28T05:46:00Z generation 7: passed the gate; live ["0" "2" "5" "7"]
+2026-10-28T05:46:00Z window: live ["0" "2" "5" "7"]
+2026-10-28T05:51:36Z window w-e8739a5a3b6d89c8: scored
+2026-10-28T05:51:36Z window w-e8739a5a3b6d89c8: 0 scored 0.9898
+2026-10-28T05:51:36Z window w-e8739a5a3b6d89c8: 2 scored 0.9900
+2026-10-28T05:51:36Z window w-e8739a5a3b6d89c8: 5 scored 0.9900
+2026-10-28T05:51:36Z window w-e8739a5a3b6d89c8: 7 scored 0.9883
+2026-10-28T05:51:36Z window w-e8739a5a3b6d89c8: 7 has the lowest score, culled
+2026-10-28T05:52:04Z generation 8: mutating 4
+2026-10-28T05:52:41Z generation 8: gate stages 1-4
+2026-10-28T05:52:52Z generation 8: gate stage 5
+2026-10-28T05:53:36Z generation 8: passed the gate; live ["0" "2" "5" "8"]
+2026-10-28T05:53:36Z window: live ["0" "2" "5" "8"]
+2026-10-28T05:59:13Z window w-876943a838508134: scored
+2026-10-28T05:59:13Z window w-876943a838508134: 0 scored 0.9875
+2026-10-28T05:59:13Z window w-876943a838508134: 2 scored 0.9731
+2026-10-28T05:59:13Z window w-876943a838508134: 5 scored 0.9732
+2026-10-28T05:59:13Z window w-876943a838508134: 8 scored 0.9721
+2026-10-28T05:59:13Z window w-876943a838508134: 8 has the lowest score, culled
+2026-10-28T05:59:41Z generation 9: mutating 4
+2026-10-28T06:00:18Z generation 9: gate stages 1-4
+2026-10-28T06:00:36Z generation 9: gate stage 5
+2026-10-28T06:01:22Z generation 9: passed the gate; live ["0" "2" "5" "9"]
+2026-10-28T06:01:22Z window: live ["0" "2" "5" "9"]
+2026-10-28T06:06:59Z window w-17e6824b292e5d73: scored
+2026-10-28T06:06:59Z window w-17e6824b292e5d73: 0 scored 0.9898
+2026-10-28T06:06:59Z window w-17e6824b292e5d73: 2 scored 0.9895
+2026-10-28T06:06:59Z window w-17e6824b292e5d73: 5 scored 0.9898
+2026-10-28T06:06:59Z window w-17e6824b292e5d73: 9 scored 0.9897
+2026-10-28T06:06:59Z window w-17e6824b292e5d73: 2 has the lowest score, culled
+2026-10-28T06:07:27Z generation 10: mutating 7
+2026-10-28T06:08:04Z generation 10: gate stages 1-4
+2026-10-28T06:08:14Z generation 10: gate stage 5
+2026-10-28T06:09:00Z generation 10: passed the gate; live ["0" "5" "9" "10"]
+2026-10-28T06:09:00Z window: live ["0" "5" "9" "10"]
+2026-10-28T06:14:37Z window w-2258b2a6f43b500f: scored
+2026-10-28T06:14:37Z window w-2258b2a6f43b500f: 0 scored 0.9922
+2026-10-28T06:14:37Z window w-2258b2a6f43b500f: 5 scored 0.9922
+2026-10-28T06:14:37Z window w-2258b2a6f43b500f: 9 scored 0.9921
+2026-10-28T06:14:37Z window w-2258b2a6f43b500f: 10 scored 0.9922
+2026-10-28T06:14:37Z window w-2258b2a6f43b500f: 9 has the lowest score, culled
+2026-10-28T06:15:05Z run stopped: generations (10 generations, 43 turns)
+run stopped: generations

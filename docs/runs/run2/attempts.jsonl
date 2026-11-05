@@ -1,0 +1,1 @@
+{"generation_id":"0","parent_id":"","time":"2026-10-31T09:44:52.08692135Z","gate":{"passed":false,"fail_stage":5,"fail_check":"responses"},"action":"discarded","selection_mode":"tournament","ever_live":false,"currently_live":false,"usage":{"num_turns":0,"input_tokens":0,"output_tokens":0,"cache_read_tokens":0,"cache_creation_tokens":0,"duration_ms":0,"cost_usd":0},"rationale":""}

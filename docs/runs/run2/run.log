@@ -1,0 +1,7 @@
+run $HOME/workspace/scratch/ek8s-runs/run2: r 15.5, window 300 s, 2 generations, turn ceiling 300, token ceiling 0, seed 9686403726531243041, claude $HOME/.local/share/claude/versions/2.1.314
+2026-10-31T09:43:22Z generation 0: gate stages 1-4
+2026-10-31T09:43:35Z generation 0: gate stage 5
+2026-10-31T09:44:24Z generation 0: failed the gate at stage 5, check responses: "burst: 220 of 1860 responses failed (over_hang_timeout 220); indices 1428, 1429, 1430, 1431, 1432, 1433, 1434, 1435, ..."
+2026-10-31T09:44:52Z run stopped: fault (0 generations, 0 turns)
+orchestrator: orchestrator: generation 0 failed the gate at stage 5, check responses
+exit status 2

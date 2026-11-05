@@ -1,0 +1,1 @@
+{"version":1,"host_clock":{"governors":{"cpu0":"performance","cpu1":"performance","cpu2":"performance","cpu3":"performance","cpu4":"performance","cpu5":"performance","cpu6":"performance","cpu7":"performance"},"scaling_driver":"intel_pstate","energy_performance_preference":"performance","intel_pstate_no_turbo":"1"},"allow_unpinned":false}

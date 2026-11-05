@@ -1,0 +1,26 @@
+run $HOME/workspace/scratch/ek8s-runs/run2b: r 15.5, window 300 s, 2 generations, turn ceiling 300, token ceiling 0, seed 10187637090565730214, claude $HOME/.local/share/claude/versions/2.1.314
+2026-10-31T11:17:24Z generation 0: gate stages 1-4
+2026-10-31T11:17:35Z generation 0: gate stage 5
+2026-10-31T11:18:27Z generation 0: passed the gate; live ["0"]
+2026-10-31T11:18:55Z window: live ["0"]
+2026-10-31T11:29:31Z window w-47488ce2a621eddb: scored
+2026-10-31T11:29:31Z window w-47488ce2a621eddb: 0 scored 0.9930 (baseline 0.9952, stress 0.9930)
+2026-10-31T11:29:31Z generation 1: mutating 0
+2026-10-31T11:30:28Z generation 1: gate stages 1-4
+2026-10-31T11:30:46Z generation 1: gate stage 5
+2026-10-31T11:31:41Z generation 1: passed the gate; live ["0" "1"]
+2026-10-31T11:31:41Z window: live ["0" "1"]
+2026-10-31T11:42:43Z window w-1b08a47097c37049: scored
+2026-10-31T11:42:43Z window w-1b08a47097c37049: 0 scored 0.9914 (baseline 0.9940, stress 0.9914)
+2026-10-31T11:42:43Z window w-1b08a47097c37049: 1 scored 0.9918 (baseline 0.9938, stress 0.9918)
+2026-10-31T11:42:43Z generation 2: mutating 1
+2026-10-31T11:44:07Z generation 2: gate stages 1-4
+2026-10-31T11:44:25Z generation 2: gate stage 5
+2026-10-31T11:45:20Z generation 2: passed the gate; live ["0" "1" "2"]
+2026-10-31T11:45:20Z window: live ["0" "1" "2"]
+2026-10-31T11:56:50Z window w-efc24247ab03bd02: scored
+2026-10-31T11:56:50Z window w-efc24247ab03bd02: 0 scored 0.9892 (baseline 0.9927, stress 0.9892)
+2026-10-31T11:56:50Z window w-efc24247ab03bd02: 1 scored 0.9892 (baseline 0.9932, stress 0.9892)
+2026-10-31T11:56:50Z window w-efc24247ab03bd02: 2 scored 0.9894 (baseline 0.9928, stress 0.9894)
+2026-10-31T11:56:50Z run stopped: generations (2 generations, 13 turns)
+run stopped: generations

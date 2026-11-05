@@ -1,0 +1,92 @@
+run $HOME/workspace/scratch/ek8s-runs/run4-20261105T033013Z: r 31, window 300 s, 8 generations, turn ceiling 300, token ceiling 0, seed 6507967329181405493, claude $HOME/.local/share/claude/versions/2.1.318
+2026-11-05T03:35:16Z generation 0: gate stages 1-4
+2026-11-05T03:35:28Z generation 0: gate stage 5
+2026-11-05T03:36:27Z generation 0: passed the gate; live ["0"]
+2026-11-05T03:37:22Z window: live ["0"]
+2026-11-05T03:48:24Z window w-fa200d94d0a22e6a: scored
+2026-11-05T03:48:24Z window w-fa200d94d0a22e6a: 0 scored 0.9033 (baseline 0.9942, stress 0.9033)
+2026-11-05T03:48:24Z generation 1: mutating 0
+2026-11-05T03:50:13Z generation 1: gate stages 1-4
+2026-11-05T03:50:24Z generation 1: gate stage 5
+2026-11-05T03:51:23Z generation 1: passed the gate; live ["0" "1"]
+2026-11-05T03:51:23Z window: live ["0" "1"]
+2026-11-05T04:03:17Z window w-f8c6f95cebe10204: scored
+2026-11-05T04:03:17Z window w-f8c6f95cebe10204: 0 scored 0.8789 (baseline 0.8996, stress 0.8789)
+2026-11-05T04:03:17Z window w-f8c6f95cebe10204: 1 scored 0.9066 (baseline 0.9267, stress 0.9066)
+2026-11-05T04:03:17Z generation 2: mutating 1
+2026-11-05T04:05:59Z generation 2: gate stages 1-4
+2026-11-05T04:06:10Z generation 2: gate stage 5
+2026-11-05T04:07:10Z generation 2: passed the gate; live ["0" "1" "2"]
+2026-11-05T04:07:10Z window: live ["0" "1" "2"]
+2026-11-05T04:19:49Z window w-ca8ce749fb05bf76: scored
+2026-11-05T04:19:49Z window w-ca8ce749fb05bf76: 0 scored 0.8430 (baseline 0.8508, stress 0.8430)
+2026-11-05T04:19:49Z window w-ca8ce749fb05bf76: 1 scored 0.8887 (baseline 0.8977, stress 0.8887)
+2026-11-05T04:19:49Z window w-ca8ce749fb05bf76: 2 scored 0.8808 (baseline 0.8923, stress 0.8808)
+2026-11-05T04:19:49Z generation 3: mutating 2
+2026-11-05T04:23:26Z generation 3: gate stages 1-4
+2026-11-05T04:23:36Z generation 3: gate stage 5
+2026-11-05T04:24:34Z generation 3: passed the gate; live ["0" "1" "2" "3"]
+2026-11-05T04:24:34Z window: live ["0" "1" "2" "3"]
+2026-11-05T04:37:54Z window w-5725c31df071ed18: scored
+2026-11-05T04:37:54Z window w-5725c31df071ed18: 0 scored 0.8046 (baseline 0.8136, stress 0.8046)
+2026-11-05T04:37:54Z window w-5725c31df071ed18: 1 scored 0.8491 (baseline 0.8705, stress 0.8491)
+2026-11-05T04:37:54Z window w-5725c31df071ed18: 2 scored 0.8505 (baseline 0.8570, stress 0.8505)
+2026-11-05T04:37:54Z window w-5725c31df071ed18: 3 scored 0.8459 (baseline 0.8543, stress 0.8459)
+2026-11-05T04:37:54Z window w-5725c31df071ed18: 0 has the lowest score, culled
+2026-11-05T04:38:20Z generation 4: mutating 2
+2026-11-05T04:42:01Z generation 4: gate stages 1-4
+2026-11-05T04:42:20Z generation 4: gate stage 5
+2026-11-05T04:43:21Z generation 4: passed the gate; live ["1" "2" "3" "4"]
+2026-11-05T04:43:21Z window: live ["1" "2" "3" "4"]
+2026-11-05T04:56:39Z window w-bfadfee4c1d5a167: scored
+2026-11-05T04:56:39Z window w-bfadfee4c1d5a167: 1 scored 0.8380 (baseline 0.8380, stress 0.8386)
+2026-11-05T04:56:39Z window w-bfadfee4c1d5a167: 2 scored 0.8481 (baseline 0.8788, stress 0.8481)
+2026-11-05T04:56:39Z window w-bfadfee4c1d5a167: 3 scored 0.8491 (baseline 0.8590, stress 0.8491)
+2026-11-05T04:56:39Z window w-bfadfee4c1d5a167: 4 scored 0.8370 (baseline 0.8370, stress 0.8411)
+2026-11-05T04:56:39Z window w-bfadfee4c1d5a167: 4 has the lowest score, culled
+2026-11-05T04:57:06Z generation 5: mutating 3
+2026-11-05T05:00:44Z generation 5: gate stages 1-4
+2026-11-05T05:01:02Z generation 5: gate stage 5
+2026-11-05T05:02:03Z generation 5: passed the gate; live ["1" "2" "3" "5"]
+2026-11-05T05:02:03Z window: live ["1" "2" "3" "5"]
+2026-11-05T05:15:25Z window w-4205e4cbf77f832b: scored
+2026-11-05T05:15:25Z window w-4205e4cbf77f832b: 1 scored 0.8450 (baseline 0.8500, stress 0.8450)
+2026-11-05T05:15:25Z window w-4205e4cbf77f832b: 2 scored 0.8542 (baseline 0.8824, stress 0.8542)
+2026-11-05T05:15:25Z window w-4205e4cbf77f832b: 3 scored 0.8546 (baseline 0.8617, stress 0.8546)
+2026-11-05T05:15:25Z window w-4205e4cbf77f832b: 5 scored 0.8360 (baseline 0.8385, stress 0.8360)
+2026-11-05T05:15:25Z window w-4205e4cbf77f832b: 5 has the lowest score, culled
+2026-11-05T05:15:52Z generation 6: mutating 3
+2026-11-05T05:19:29Z generation 6: gate stages 1-4
+2026-11-05T05:19:41Z generation 6: gate stage 5
+2026-11-05T05:20:40Z generation 6: passed the gate; live ["1" "2" "3" "6"]
+2026-11-05T05:20:40Z window: live ["1" "2" "3" "6"]
+2026-11-05T05:34:01Z window w-bd424b20fd4c216e: scored
+2026-11-05T05:34:01Z window w-bd424b20fd4c216e: 1 scored 0.8517 (baseline 0.8688, stress 0.8517)
+2026-11-05T05:34:01Z window w-bd424b20fd4c216e: 2 scored 0.8512 (baseline 0.8685, stress 0.8512)
+2026-11-05T05:34:01Z window w-bd424b20fd4c216e: 3 scored 0.8408 (baseline 0.8408, stress 0.8553)
+2026-11-05T05:34:01Z window w-bd424b20fd4c216e: 6 scored 0.8577 (baseline 0.8591, stress 0.8577)
+2026-11-05T05:34:01Z window w-bd424b20fd4c216e: 3 has the lowest score, culled
+2026-11-05T05:34:28Z generation 7: mutating 6
+2026-11-05T05:38:04Z generation 7: gate stages 1-4
+2026-11-05T05:38:23Z generation 7: gate stage 5
+2026-11-05T05:39:23Z generation 7: passed the gate; live ["1" "2" "6" "7"]
+2026-11-05T05:39:23Z window: live ["1" "2" "6" "7"]
+2026-11-05T05:52:45Z window w-abedad5b1e4abc58: scored
+2026-11-05T05:52:45Z window w-abedad5b1e4abc58: 1 scored 0.8533 (baseline 0.8742, stress 0.8533)
+2026-11-05T05:52:45Z window w-abedad5b1e4abc58: 2 scored 0.8474 (baseline 0.8715, stress 0.8474)
+2026-11-05T05:52:45Z window w-abedad5b1e4abc58: 6 scored 0.8626 (baseline 0.8728, stress 0.8626)
+2026-11-05T05:52:45Z window w-abedad5b1e4abc58: 7 scored 0.8717 (baseline 0.8991, stress 0.8717)
+2026-11-05T05:52:45Z window w-abedad5b1e4abc58: 2 has the lowest score, culled
+2026-11-05T05:53:11Z generation 8: mutating 5
+2026-11-05T05:56:48Z generation 8: gate stages 1-4
+2026-11-05T05:57:00Z generation 8: gate stage 5
+2026-11-05T05:57:56Z generation 8: passed the gate; live ["1" "6" "7" "8"]
+2026-11-05T05:57:56Z window: live ["1" "6" "7" "8"]
+2026-11-05T06:11:18Z window w-dd044a71aecd760d: scored
+2026-11-05T06:11:18Z window w-dd044a71aecd760d: 1 scored 0.8491 (baseline 0.8564, stress 0.8491)
+2026-11-05T06:11:18Z window w-dd044a71aecd760d: 6 scored 0.8561 (baseline 0.8816, stress 0.8561)
+2026-11-05T06:11:18Z window w-dd044a71aecd760d: 7 scored 0.8684 (baseline 0.9217, stress 0.8684)
+2026-11-05T06:11:18Z window w-dd044a71aecd760d: 8 scored 0.8647 (baseline 0.8915, stress 0.8647)
+2026-11-05T06:11:18Z window w-dd044a71aecd760d: 1 has the lowest score, culled
+2026-11-05T06:11:44Z run stopped: generations (8 generations, 36 turns)
+run stopped: generations
