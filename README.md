@@ -13,12 +13,15 @@ hashes.
 Everything runs on one Linux workstation. There is no cloud, GPU or
 container registry.
 
-**Status:** the walking skeleton is complete. The first evolutionary run
-(10 generations, on the author's workstation) finished on 2026-10-28.
-For where the project stands and what is next, see
-[docs/overview.md](docs/overview.md) (plain language),
-[docs/STATUS.md](docs/STATUS.md) (current work) and
-[docs/AFTER-FIRST-RUN.md](docs/AFTER-FIRST-RUN.md) (follow-ups).
+## Result so far
+
+Four evolutionary runs and two capacity measurements are done. One pod
+running the fixed Argon2id core serves about 32 successes/s whatever the
+wrapper around it does, so evolution found no extra throughput. It found
+a shorter wait for a hashing slot (500 ms down to 67 ms), which cut the
+stress-half p95 latency about 3 times at the same throughput. The
+evidence and the limits of these claims are in
+[docs/RESULTS.md](docs/RESULTS.md).
 
 ## The loop
 
@@ -30,17 +33,6 @@ For where the project stands and what is next, see
                                                  (fail: discard)
 ```
 
-## Where to read next
-
-| Document | What it is |
-|----------|------------|
-| [docs/overview.md](docs/overview.md) | Plain-language introduction, with diagrams. Start here. |
-| [DESIGN.md](DESIGN.md) | The settled architecture. Authoritative. |
-| [docs/decisions.md](docs/decisions.md) | Why each implementation choice was made. |
-| [docs/STATUS.md](docs/STATUS.md) | Where the work is right now. |
-| [docs/AFTER-FIRST-RUN.md](docs/AFTER-FIRST-RUN.md) | Items deferred until after the first run, and its findings. |
-| [CLAUDE.md](CLAUDE.md) | Working agreement and non-negotiables for Claude Code sessions. |
-
 ## Repo layout
 
 ```
@@ -49,6 +41,8 @@ internal/hashcore/    fixed Argon2id core; never visible to mutation
 internal/classifier/  shared success/shed/failed judge + time ceiling
   testvectors/        known password/hash pairs (gate only)
 internal/hostpairs/   host-side /verify pairs and full verification
+internal/hostclock/   host CPU clock state; c0 and the orchestrator
+                      refuse unpinned clocks
 internal/wrapper/     the evolvable layer: concurrency, backpressure
 gate/                 five-stage correctness gate
 fitness/              per-window scoring from loadgen's records
@@ -58,31 +52,63 @@ driver/               sandboxed claude -p mutation driver
 orchestrator/         population, selection, scoring loop
 lineage/              run directory: genome archive, JSONL attempt
                       records, raw transcripts (SQLite later)
-docs/                 overview, decisions, status, handoff formats,
-                      workflow/ (project-independent method)
+docs/                 overview, results, decisions, status, handoff
+                      formats, workflow/ (project-independent method)
 ```
 
 ## Build and test
 
-Requires Go 1.26 or later (see `go.mod`).
+Requires Go 1.26 or later (see `go.mod`). These are the commands CI
+(`.github/workflows/ci.yml`) runs; CI also runs `govulncheck`.
 
 ```
 go build ./...
-```
-
-```
 go vet ./...
-```
-
-```
 go test ./...
-```
-
-```
 go test -race ./...
 ```
 
-CI (`.github/workflows/ci.yml`) also runs `govulncheck`.
+Known toolchain issue: on Arch Linux's go1.27.3, the driver's
+`TestSandboxTree` fails, because the toolchain's vendored x/crypto
+(TLS ciphers, no argon2) is visible in the sandbox; a separate driver PR
+will fix it. CI uses Go 1.26.10.
+
+## Bring up the cluster
+
+Needs docker, kind and kubectl; versions and checks are in
+[deploy/README.md](deploy/README.md). The deploy smoke workflow
+(`.github/workflows/deploy.yml`) runs these from the repo root:
+
+```
+deploy/up.sh
+deploy/smoke.sh
+```
+
+`deploy/up.sh` creates the kind cluster (name `ek8s`) if it is absent and
+applies the manifests; `deploy/down.sh` deletes it. An evolutionary run
+also needs the load generator (`deploy/loadgen-up.sh <r>`) and a
+workstation with pinned CPU clocks. It is started with the command from
+`CLAUDE.md` (Build / test):
+
+```
+go run ./orchestrator/cmd/orchestrator -run DIR -rate R -claude PATH -claude-version V
+```
+
+Launch it from a terminal where `CLAUDE_CODE_OAUTH_TOKEN` is exported
+(workstation only; see the command's doc comment). See also
+`deploy/README.md`.
+
+## Where to read next
+
+| Document | What it is |
+|----------|------------|
+| [docs/overview.md](docs/overview.md) | Plain-language introduction, with diagrams. Start here. |
+| [DESIGN.md](DESIGN.md) | The settled architecture. Authoritative. |
+| [docs/RESULTS.md](docs/RESULTS.md) | What runs 1-4 and the capacity (c0) measurements showed. |
+| [docs/STATUS.md](docs/STATUS.md) | Where the work is right now. |
+| [docs/decisions.md](docs/decisions.md) | Why each implementation choice was made. |
+| [docs/AFTER-FIRST-RUN.md](docs/AFTER-FIRST-RUN.md) | Items deferred until after the first run, and its findings. |
+| [CLAUDE.md](CLAUDE.md) | Working agreement and non-negotiables for Claude Code sessions. |
 
 ## Non-negotiables
 

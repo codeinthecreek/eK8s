@@ -4,8 +4,9 @@ An introduction for readers who know Linux and Kubernetes basics but
 not this project or Go. Implementation detail is left out.
 
 [DESIGN.md](../DESIGN.md) is the authoritative design: if this page
-and DESIGN.md disagree, DESIGN.md wins. For where the work is right
-now, see [STATUS.md](STATUS.md).
+and DESIGN.md disagree, DESIGN.md wins. For what the runs showed, see
+[RESULTS.md](RESULTS.md). For where the work is right now, see
+[STATUS.md](STATUS.md).
 
 ## 1. What this is, in one paragraph
 
@@ -36,10 +37,10 @@ call:
 ```
 
 Hashing uses Argon2id, a deliberately slow, memory-hungry algorithm.
-Each hash takes tens of milliseconds to about 100 ms of CPU (43 ms
-measured on the owner's workstation) and 19 MiB of memory. That cost
-makes the service easy to overload, and *how it copes with overload*
-is what evolves.
+Each hash costs about 31 ms of CPU and 19 MiB of memory (measured in
+the pod with the clocks pinned; [RESULTS.md](RESULTS.md) section 4).
+That cost makes the service easy to overload, and *how it copes with
+overload* is what evolves.
 
 ## 3. What can evolve and what cannot
 
@@ -153,15 +154,15 @@ The right amount of concurrency is a balancing act:
                                               so too many -> OOMKill
 ```
 
-A worked example, with **illustrative numbers** (the pod limits are
-the real ones, 1 CPU and 256 MiB; 100 ms per hash is a round figure,
-since run 1 measured 43 ms):
+A worked example. The pod limits (1 CPU and 256 MiB) and the hash cost
+(about 31 ms of CPU) are the measured ones; the arrival rate is made up:
 
 - A pod is limited to 1 CPU and 256 MiB.
-- At about 100 ms of CPU per hash, it can finish at most about 10
-  requests per second.
-- If 15 per second arrive, 5 per second cannot be served.
-- If they are queued, the queue grows by 5 every second. Soon every
+- At about 31 ms of CPU per hash, it can finish at most about 32
+  requests per second (1 / 0.031). That matches the plateau c0 measured
+  ([RESULTS.md](RESULTS.md) section 4).
+- If 48 per second arrive, 16 per second cannot be served.
+- If they are queued, the queue grows by 16 every second. Soon every
   answer misses the time ceiling, which counts as "failed".
 - Shedding the excess early with a 503 counts as "graceful_shed",
   which earns partial credit.
@@ -170,9 +171,9 @@ since run 1 measured 43 ms):
 
 The sweet spot also *moves*. When the noisy-neighbour pod (stress-ng)
 steals CPU, a limit tuned for quiet conditions suddenly admits too
-much. A good wrapper adapts. That is what the contention half of the
-scoring is meant to reward (run 1 scored normal conditions only, see
-section 7).
+much. A good wrapper adapts. That is what the stress half of each
+window is meant to reward (section 7; run 1 scored normal conditions
+only).
 
 ### Generation 0: the starting genome
 
@@ -272,9 +273,10 @@ Likely room for evolution to improve on:
 ## 5. The evolution loop
 
 There is one mutation at a time. The live population is 3 variants,
-briefly 4 while a newcomer is on probation. In the first run, generation
-0 goes through the build, gate and observe steps alone first, and each
-observation window is the normal-load half only (section 7).
+briefly 4 while a newcomer is on probation. Generation 0 goes through
+the build, gate and observe steps alone first. Each observation window
+is a baseline half followed by a stress half (section 7; run 1's windows
+were the baseline half only).
 
 ```
         +-------------------------------------------+
@@ -300,8 +302,8 @@ observation window is the normal-load half only (section 7).
         |                                           |
         v                                           |
   [6] Observe                                       |
-      normal load (later: then load + noisy         |
-      neighbour)                                    |
+      one window: baseline half, then the           |
+      stress half with a noisy neighbour            |
         |                                           |
         v                                           |
   [7] Score all 4; cull the lowest ---------------->+
@@ -314,10 +316,12 @@ so the search does not just hill-climb from the current best. If no new best app
 the AI is asked for a *structurally* different approach instead of a
 small tweak.
 
-The run stops when progress stalls for good, or when an AI-usage
-ceiling is reached. The first run was simpler: it stopped after a set
-number of generations (10), or earlier on the usage ceiling, three
-excluded windows in a row, a load generator restart or a fault.
+The design stops a run when progress stalls for good, or when an
+AI-usage ceiling is reached. The runs so far follow the simpler "first
+run" rule (`DESIGN.md` sec 13): each stopped after a set number of
+generations (10 in run 1, fewer in runs 2 to 4), or would have stopped
+earlier on the usage ceiling, three excluded windows in a row, a load
+generator restart or a fault.
 
 ## 6. The gate: five checks, zero tolerance
 
@@ -362,10 +366,11 @@ A bare 503 does not count as graceful. Kubernetes itself returns one
 when a Service has no ready pods, and that must not be mistaken for
 deliberate shedding. Hence the Retry-After requirement.
 
-**Fitness.** Each variant is measured in two halves, a normal half and
-a contention half. The first run measured only the normal half, so a
-variant's score was its normal-half score; the rule below applies once
-the contention half returns. Three numbers are taken in each:
+**Fitness.** Each variant is measured in a window of two halves: a
+baseline half (no neighbour), then a stress half (the stress-ng
+neighbour is running). Each half is its own load run of 5 minutes. Run 1
+measured only the baseline half; from run 2 on both are measured. Three
+numbers are taken in each half:
 
 - success rate
 - p95 latency (the slow tail, not the average)
@@ -374,7 +379,10 @@ the contention half returns. Three numbers are taken in each:
 In every half, a graceful 503 earns partial credit, so shedding load
 well is better than falling over. The final score is
 the *worse* of the two halves. A variant that shines normally but
-collapses under pressure is scored by the collapse.
+collapses under pressure is scored by the collapse. A window is scored
+only when both halves are: if either half is excluded (for example
+because the load generator lagged), the whole window is, and a stress
+half is not run once the baseline half is excluded.
 
 Scores use fixed absolute scales, not "relative to the others".
 That way a score from generation 5 can be compared fairly with one
@@ -563,11 +571,11 @@ explicitly asks for structurally different ideas.
 
 **3. Cheating can be conditional.** A variant could take the shortcut
 *only when overloaded*. It would pass every quiet-conditions test,
-then win in exactly the contention half, which is where fitness is
+then win in exactly the stress half, which is where fitness is
 decided (the worse of the two halves). This is why Stage 5 fully
-checks every response under contention, and why the live contention
-half is to be judged as strictly as the normal half (the first run
-had no live contention half; Stage 5 was its contention check). A variant could also
+checks every response under contention, and why the live stress half
+is judged as strictly as the baseline half (run 1 had no stress half;
+Stage 5 was its only contention check). A variant could also
 cheat only when it can tell it is *not* being tested; invalid hashes
 in live traffic close that gap (see "Loopholes" below).
 
@@ -586,7 +594,7 @@ bypass.
 | Return a made-up hash string | no Argon2 | format and strength checks on every response; full verification on the host after each window (today every hash, every window; sampling after a variant's first K windows is planned, not built) and for every Stage 5 hash |
 | Re-send earlier hashes | no Argon2 | salt reuse is tracked while the load generator serves the variant; deliberately repeated passwords catch a password -> hash cache |
 | Bring its own, weaker Argon2 | faster | Stage 1 library allowlist; Stage 3 exact strength check |
-| Cheat only when overloaded | passes quiet tests | Stage 5 (under stress-ng) and, once it returns, the contention half use the same strict judge |
+| Cheat only when overloaded | passes quiet tests | Stage 5 (under stress-ng) and the stress half of every window (from run 2) use the same strict judge |
 | Pull all its pods out of rotation | avoids load | its own dedicated traffic fails, and that is scored |
 | Answer "busy" (503) to everything | never slow | only partial credit, and its success rate collapses |
 
@@ -674,16 +682,28 @@ is built; the parts still pending are named below and in
 - Each variant gets its own namespace and identical resource limits.
 - A variant's pods are meant to have no outbound connections (a network
   policy denies all egress) and to accept traffic only from the load
-  generator; a CI smoke test checks this.
+  generator; a CI smoke test checks this. kind's default network plugin
+  does not enforce egress rules, so the cluster uses Calico instead
+  (`DESIGN.md` sec 11). Calico lets traffic from the node itself reach
+  a pod on it, so the load generator's control port is reachable by
+  every process in the node's network namespace; the load generator
+  listens on no other port. Before each half the orchestrator also asks
+  the load generator to try one connection its own policy must refuse (a
+  "canary"), and excludes the half if it connects.
+- Each variant runs one pod (the autoscaler is pinned at one replica) with
+  a 250m CPU request and a 1000m limit, the limits the worked example in
+  section 4 uses.
 - One load generator, running for the whole run, serves every
   variant's stream; it sits outside the variants' namespaces and holds no
-  cluster credentials.
+  cluster credentials. It has 1 CPU and 768Mi of memory. On the
+  workstation cluster it gets an exclusive core (the kubelet's static
+  CPU manager); the CI cluster is too small for that and keeps none.
 - Each variant gets its own fixed-rate traffic stream. There is no
   shared load balancer splitting traffic, so variants never compete
   for requests, only for the node's resources.
-- stress-ng is switched on by the orchestrator, not left running. In the
-  first run that was for gate Stage 5 only, in a gap; windows ran
-  without it.
+- stress-ng is switched on by the orchestrator, not left running. It is
+  on for gate Stage 5 (in a gap) and for the stress half of each window,
+  and off for the baseline half. Run 1's windows ran without it.
 - Traffic flows only during observation windows; the gaps between
   windows carry no load, and builds, gate runs and Stage 5 happen in
   them. A variant starts every window from idle, so cold start is
@@ -691,6 +711,13 @@ is built; the parts still pending are named below and in
 - The load generator is *open loop*. It sends at a fixed rate whether
   or not the service keeps up, so overload shows up as real queueing
   and latency instead of being hidden.
+- The rate `r` is the same for every variant and fixed for a run. It is
+  set from C0, the highest rate at which generation 0 on one pod, with
+  no stress, has at most 1% of scored requests shed or failed and a p95
+  of at most 500 ms (a quarter of the 2 s time ceiling), in a scored
+  window. Rates are stepped at 1 request/s, and the load generator caps
+  `r` at 50. The default is r = 0.5 x C0; runs 3 and 4 use r = C0 = 31
+  (`DESIGN.md` sec 10). The Stage 5 burst is 4r for 30 s.
 - A newcomer's namespace is created by gate Stage 5. If the newcomer
   passes, it simply goes live in place with no redeploy (the pod is idle
   until its first window, which starts cold like every other). When a
@@ -738,27 +765,20 @@ to 9 exist.
 For the current state, always check [STATUS.md](STATUS.md). Every
 change updates it; this page is not updated that often.
 
-As of run 1 (2026-10-28):
+Four evolutionary runs and two capacity (c0) measurements are done.
+[RESULTS.md](RESULTS.md) reports them, with the evidence for each claim.
+In short:
 
-- **The walking skeleton is complete.** Every part of the loop is built
-  and tested in CI: the service and its locked core, the shared judge,
-  the five-stage gate (Stage 5 included), the load generator, fitness
-  scoring, the sandboxed AI driver, the orchestrator and the lineage
-  records. CI also runs the whole loop end to end on a small kind
-  cluster, with a fake AI in place of Claude.
-- **Run 1 ran end to end** on the owner's workstation: 10 generations,
-  exit 0. All 10 mutations passed the gate, 38 windows were scored, 8
-  variants were culled and none was excluded. It used 43 AI turns and
-  took 1 h 22 min.
-- **What it did not show.** Windows were normal-load only, and the rate
-  `r` = 11 was provisional, so every variant answered every request and
-  the scores came down to small latency differences. That is a result
-  about the setup, not about evolution.
-- **What comes next** is listed in
-  [AFTER-FIRST-RUN.md](AFTER-FIRST-RUN.md): measuring the capacity
-  figure C0 and running with the contention half, calibrating the
-  scoring bounds to the host, and the cull rule's margin. The owner
-  decides the order.
+- Runs 2 to 4 had stress windows (run 2 at r = 15.5, runs 3 and 4 at
+  r = 31); run 1 had none. Run 4 had 8 generations and 9 windows, none
+  excluded. The only constant that evolved was `acquireWait`, the wait
+  for a hashing slot, 500 ms down to 67 ms.
+- One pod serves about 32 successes/s whatever the wrapper does, which
+  matches one CPU at about 0.031 CPU-seconds per success (an inference;
+  RESULTS.md section 4 labels it). C0 is 31 for
+  generation 0 and 32 for the run 4 generation 7 wrapper.
+- The shorter wait cut the stress-half p95 about 3 times at the same
+  throughput.
 
 The reasons behind individual implementation choices are logged in
 [decisions.md](decisions.md).
@@ -771,3 +791,13 @@ result is improvement over a handful of generations followed by a
 plateau. That is enough to show the loop works end to end: AI-guided
 mutation, a strict safety gate, and selection driven by real cluster
 telemetry.
+
+**What happened.** The loop worked end to end in all four runs.
+Improvement came early and then plateaued, as expected, but not by
+raising throughput: a pod serves about 32 successes/s whatever the
+wrapper does, which is consistent with its one CPU setting that
+ceiling. Evolution found a load-shedding policy instead, a 67 ms wait
+for a slot in place of 500 ms, which cut the stress-half p95 tail about
+3 times. Most of the score gain came in the first step, and the
+later steps are within noise. The evidence and the limits of these
+claims are in [RESULTS.md](RESULTS.md).
